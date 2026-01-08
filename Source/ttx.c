@@ -579,7 +579,7 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
                                       WA_InnerWidth, 600,
                                       WA_InnerHeight, 400,
                                       WA_Title, titleText ? titleText : (session->fileName ? session->fileName : (STRPTR)"Untitled"),
-                                      WA_IDCMP, IDCMP_CLOSEWINDOW | IDCMP_VANILLAKEY | IDCMP_RAWKEY | IDCMP_REFRESHWINDOW | IDCMP_NEWSIZE,
+                                      WA_IDCMP, IDCMP_CLOSEWINDOW | IDCMP_VANILLAKEY | IDCMP_RAWKEY | IDCMP_REFRESHWINDOW | IDCMP_NEWSIZE | IDCMP_MOUSEBUTTONS,
                                       WA_DragBar, TRUE,
                                       WA_ScreenTitle, (STRPTR)"TTX",
                                       WA_DepthGadget, TRUE,
@@ -654,6 +654,13 @@ VOID TTX_DestroySession(struct TTXApplication *app, struct Session *session)
     
     /* Close window */
     if (session->window) {
+        /* Clean up any pending messages before closing window */
+        struct IntuiMessage *imsg = NULL;
+        if (session->window->UserPort) {
+            while ((imsg = (struct IntuiMessage *)GetMsg(session->window->UserPort)) != NULL) {
+                ReplyMsg((struct Message *)imsg);
+            }
+        }
         CloseWindow(session->window);
         session->window = NULL;
     }
@@ -806,6 +813,32 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
             result = TRUE;
                     break;
                     
+                case IDCMP_MOUSEBUTTONS:
+            /* Handle mouse clicks to position cursor */
+            if (imsg->Code == IECODE_LBUTTON && !(imsg->Code & 0x80)) {
+                /* Left mouse button press (not release) */
+                ULONG newCursorX = 0;
+                ULONG newCursorY = 0;
+                
+                MouseToCursor(session->buffer, session->window, imsg->MouseX, imsg->MouseY, &newCursorX, &newCursorY);
+                
+                /* Update cursor position */
+                if (newCursorY < session->buffer->lineCount) {
+                    session->buffer->cursorY = newCursorY;
+                    if (newCursorX <= session->buffer->lines[newCursorY].length) {
+                        session->buffer->cursorX = newCursorX;
+                    } else {
+                        session->buffer->cursorX = session->buffer->lines[newCursorY].length;
+                    }
+                }
+                
+                ScrollToCursor(session->buffer, session->window);
+                RenderText(session->window, session->buffer);
+                UpdateCursor(session->window, session->buffer);
+                result = TRUE;
+            }
+                    break;
+                    
                 case IDCMP_VANILLAKEY:
                 case IDCMP_RAWKEY:
             if (session->buffer && !session->readOnly) {
@@ -820,9 +853,12 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                 /* Handle VANILLAKEY first - these are already converted by Intuition */
                 /* Annotate handles VANILLAKEY directly for printable characters */
                 if (imsg->Class == IDCMP_VANILLAKEY) {
-                    /* VANILLAKEY already converted - handle printable characters directly */
-                    /* Annotate checks: (code >= 27 && code <= 126) || (code >= 128 && code <= 255) */
-                    if ((keyCode >= 27 && keyCode <= 126) || (keyCode >= 128 && keyCode <= 255)) {
+                    /* Filter out arrow keys that might come as VANILLAKEY */
+                    /* Arrow keys should be handled as RAWKEY, but some systems might send them as VANILLAKEY */
+                    if (keyCode == 0x1C || keyCode == 0x1D || keyCode == 0x1E || keyCode == 0x1F) {
+                        /* Arrow keys as VANILLAKEY - ignore, they should come as RAWKEY */
+                        processed = TRUE;
+                    } else if ((keyCode >= 27 && keyCode <= 126) || (keyCode >= 128 && keyCode <= 255)) {
                         /* Printable character - insert directly */
                         InsertChar(session->buffer, keyCode);
                         ScrollToCursor(session->buffer, session->window);
@@ -832,6 +868,13 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                     } else if (keyCode == 0x08) {
                         /* Backspace */
                         DeleteChar(session->buffer);
+                        ScrollToCursor(session->buffer, session->window);
+                        RenderText(session->window, session->buffer);
+                        UpdateCursor(session->window, session->buffer);
+                        processed = TRUE;
+                    } else if (keyCode == 0x7F) {
+                        /* Delete key (forward delete) */
+                        DeleteForward(session->buffer);
                         ScrollToCursor(session->buffer, session->window);
                         RenderText(session->window, session->buffer);
                         UpdateCursor(session->window, session->buffer);
@@ -882,7 +925,8 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                     }
                     
                     /* Handle special keys first (before keymap conversion) */
-                    if (keyCode == 0x1C) {
+                    /* Arrow keys: 0x4F=Left, 0x4E=Right, 0x4C=Up, 0x4D=Down (Amiga raw key codes) */
+                    if (keyCode == 0x4F) {
                         /* Left arrow */
                         if (session->buffer->cursorX > 0) {
                             session->buffer->cursorX--;
@@ -894,7 +938,7 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                         RenderText(session->window, session->buffer);
                         UpdateCursor(session->window, session->buffer);
                         processed = TRUE;
-                    } else if (keyCode == 0x1D) {
+                    } else if (keyCode == 0x4E) {
                         /* Right arrow */
                         if (session->buffer->cursorX < session->buffer->lines[session->buffer->cursorY].length) {
                             session->buffer->cursorX++;
@@ -906,7 +950,7 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                         RenderText(session->window, session->buffer);
                         UpdateCursor(session->window, session->buffer);
                         processed = TRUE;
-                    } else if (keyCode == 0x1E) {
+                    } else if (keyCode == 0x4C) {
                         /* Up arrow */
                         if (session->buffer->cursorY > 0) {
                             session->buffer->cursorY--;
@@ -918,7 +962,7 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                         RenderText(session->window, session->buffer);
                         UpdateCursor(session->window, session->buffer);
                         processed = TRUE;
-                    } else if (keyCode == 0x1F) {
+                    } else if (keyCode == 0x4D) {
                         /* Down arrow */
                         if (session->buffer->cursorY < session->buffer->lineCount - 1) {
                             session->buffer->cursorY++;
@@ -926,6 +970,13 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                                 session->buffer->cursorX = session->buffer->lines[session->buffer->cursorY].length;
                             }
                         }
+                        ScrollToCursor(session->buffer, session->window);
+                        RenderText(session->window, session->buffer);
+                        UpdateCursor(session->window, session->buffer);
+                        processed = TRUE;
+                    } else if (keyCode == 0x46) {
+                        /* Delete key (raw key code) */
+                        DeleteForward(session->buffer);
                         ScrollToCursor(session->buffer, session->window);
                         RenderText(session->window, session->buffer);
                         UpdateCursor(session->window, session->buffer);
@@ -1089,15 +1140,18 @@ VOID TTX_EventLoop(struct TTXApplication *app)
         /* Check session windows */
         if (app->sessions) {
             struct Session *session = app->sessions;
+            struct Session *nextSession = NULL;
             while (session) {
+                /* Save next pointer in case session is destroyed */
+                nextSession = session->next;
                 if (session->window && 
                     (signals & (1UL << session->window->UserPort->mp_SigBit))) {
                     while ((imsg = (struct IntuiMessage *)GetMsg(session->window->UserPort)) != NULL) {
                         TTX_HandleIntuitionMessage(app, imsg);
-            ReplyMsg((struct Message *)imsg);
+                        ReplyMsg((struct Message *)imsg);
                     }
                 }
-                session = session->next;
+                session = nextSession;
             }
         }
         

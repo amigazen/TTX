@@ -645,3 +645,175 @@ VOID UpdateCursor(struct Window *window, struct TextBuffer *buffer)
     SetDrMd(rp, JAM1);
 }
 
+/* Convert mouse pixel coordinates to cursor position */
+VOID MouseToCursor(struct TextBuffer *buffer, struct Window *window, LONG mouseX, LONG mouseY, ULONG *cursorX, ULONG *cursorY)
+{
+    struct RastPort *rp = NULL;
+    ULONG lineHeight = 0;
+    ULONG charWidth = 0;
+    ULONG visibleLines = 0;
+    ULONG textAreaX = 0;
+    ULONG textAreaY = 0;
+    ULONG textAreaWidth = 0;
+    ULONG textAreaHeight = 0;
+    ULONG lineIndex = 0;
+    ULONG charIndex = 0;
+    ULONG pixelX = 0;
+    ULONG pixelY = 0;
+    ULONG i = 0;
+    ULONG currentX = 0;
+    
+    if (!buffer || !window || !cursorX || !cursorY) {
+        return;
+    }
+    
+    rp = window->RPort;
+    if (!rp) {
+        return;
+    }
+    
+    lineHeight = GetLineHeight(rp);
+    charWidth = GetCharWidth(rp, 'M');
+    
+    /* Calculate text area bounds */
+    textAreaX = window->BorderLeft;
+    textAreaY = window->BorderTop;
+    textAreaWidth = window->Width - window->BorderLeft - window->BorderRight;
+    textAreaHeight = window->Height - window->BorderTop - window->BorderBottom;
+    visibleLines = textAreaHeight / lineHeight;
+    
+    /* Convert mouse coordinates relative to text area */
+    {
+        LONG relX = mouseX - (LONG)textAreaX;
+        LONG relY = mouseY - (LONG)textAreaY;
+        
+        if (relX < 0) {
+            pixelX = 0;
+        } else {
+            pixelX = (ULONG)relX;
+        }
+        
+        if (relY < 0) {
+            pixelY = 0;
+        } else {
+            pixelY = (ULONG)relY;
+        }
+    }
+    
+    /* Calculate line index */
+    {
+        LONG calcLine = (LONG)buffer->scrollY + ((LONG)pixelY / (LONG)lineHeight);
+        if (calcLine < 0) {
+            lineIndex = 0;
+        } else if ((ULONG)calcLine >= buffer->lineCount) {
+            lineIndex = buffer->lineCount > 0 ? buffer->lineCount - 1 : 0;
+        } else {
+            lineIndex = (ULONG)calcLine;
+        }
+    }
+    
+    *cursorY = lineIndex;
+    
+    /* Calculate character index within line */
+    if (lineIndex < buffer->lineCount) {
+        /* Account for horizontal scroll */
+        pixelX += buffer->scrollX * charWidth;
+        
+        /* Find character position by measuring text width */
+        currentX = 0;
+        charIndex = 0;
+        
+        if (buffer->lines[lineIndex].text && buffer->lines[lineIndex].length > 0) {
+            for (i = 0; i < buffer->lines[lineIndex].length; i++) {
+                ULONG charW = GetCharWidth(rp, (UBYTE)buffer->lines[lineIndex].text[i]);
+                if (currentX + charW / 2 > pixelX) {
+                    break;
+                }
+                currentX += charW;
+                charIndex++;
+            }
+        }
+        
+        *cursorX = charIndex;
+    } else {
+        *cursorX = 0;
+    }
+}
+
+/* Delete character after cursor (Delete key) */
+BOOL DeleteForward(struct TextBuffer *buffer)
+{
+    struct TextLine *line = NULL;
+    struct TextLine *nextLine = NULL;
+    
+    if (!buffer || buffer->cursorY >= buffer->lineCount) {
+        return FALSE;
+    }
+    
+    line = &buffer->lines[buffer->cursorY];
+    
+    /* Delete character after cursor */
+    if (buffer->cursorX < line->length) {
+        /* Shift characters left */
+        if (buffer->cursorX + 1 < line->length) {
+            CopyMem(&line->text[buffer->cursorX + 1], &line->text[buffer->cursorX], line->length - buffer->cursorX - 1);
+        }
+        line->length--;
+        line->text[line->length] = '\0';
+        buffer->modified = TRUE;
+        return TRUE;
+    } else if (buffer->cursorY < buffer->lineCount - 1) {
+        ULONG currLen = line->length;
+        ULONG nextLen = nextLine->length;
+        STRPTR newText = NULL;
+        ULONG newAlloc = 0;
+
+        /* Merge with next line */
+        nextLine = &buffer->lines[buffer->cursorY + 1];
+        
+        if (currLen + nextLen + 1 > line->allocated) {
+            newAlloc = currLen + nextLen + 256;
+            newText = (STRPTR)AllocVec(newAlloc, MEMF_CLEAR);
+            if (!newText) {
+                return FALSE;
+            }
+            if (line->text && currLen > 0) {
+                CopyMem(line->text, newText, currLen);
+            }
+            if (nextLine->text && nextLen > 0) {
+                CopyMem(nextLine->text, &newText[currLen], nextLen);
+            }
+            if (line->text) {
+                FreeVec(line->text);
+            }
+            line->text = newText;
+            line->allocated = newAlloc;
+        } else {
+            if (nextLine->text && nextLen > 0) {
+                CopyMem(nextLine->text, &line->text[currLen], nextLen);
+            }
+        }
+        line->length = currLen + nextLen;
+        line->text[line->length] = '\0';
+        
+        /* Remove next line */
+        if (nextLine->text) {
+            FreeVec(nextLine->text);
+        }
+        if (buffer->cursorY + 1 < buffer->lineCount - 1) {
+            /* Move lines up */
+            ULONG moveCount = 0;
+            ULONG i = 0;
+            moveCount = buffer->lineCount - buffer->cursorY - 2;
+            for (i = 0; i < moveCount; i++) {
+                buffer->lines[buffer->cursorY + 1 + i] = buffer->lines[buffer->cursorY + 2 + i];
+            }
+        }
+        buffer->lineCount--;
+        buffer->modified = TRUE;
+        return TRUE;
+    }
+    
+    return FALSE;
+}
+
