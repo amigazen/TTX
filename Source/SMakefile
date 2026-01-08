@@ -1,0 +1,51 @@
+# SMakefile for TTX
+# 
+# TTX - Text Editor for AmigaOS
+# A clean-room reimplementation of TurboText 2.0
+#
+
+# Program name
+PROGRAM = TTX
+
+# Source files
+SRCS = ttx.c ttx_text.c
+
+# Object files
+OBJS = ttx.o ttx_text.o
+
+# Compiler and linker
+CC = sc
+LINK = slink
+
+# Default target
+all: $(PROGRAM)
+
+# Create the TTX executable
+$(PROGRAM): $(OBJS)
+	$(LINK) FROM sc:lib/c.o $(OBJS) TO $(PROGRAM) STRIPDEBUG NODEBUG LIB lib:small.lib sc:lib/sc.lib BATCH
+
+# Compile the source files
+.c.o:
+	$(CC) $*.c OBJNAME=$*.o IDIR=include:
+
+# Compile TTX main file
+ttx.o: ttx.c ttx.h
+	$(CC) ttx.c OBJNAME=ttx.o IDIR=include:
+
+# Compile TTX text functions
+ttx_text.o: ttx_text.c ttx.h
+	$(CC) ttx_text.c OBJNAME=ttx_text.o IDIR=include:
+
+# Clean target
+clean:
+	Delete $(OBJS) $(PROGRAM) ttx.o ttx_text.o
+
+# Install target
+install:
+	@echo "Installing TTX..."
+	@copy $(PROGRAM) to C:$(PROGRAM) CLONE
+
+# Dependencies
+ttx.o: ttx.c ttx.h
+ttx_text.o: ttx_text.c ttx.h
+
