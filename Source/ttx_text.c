@@ -56,6 +56,8 @@ BOOL InitTextBuffer(struct TextBuffer *buffer, struct CleanupStack *stack)
     buffer->pageH = 0;       /* Will be calculated when window is available */
     buffer->maxScrollX = 0;  /* Will be calculated based on buffer content */
     buffer->maxScrollY = 0;  /* Will be calculated based on buffer content */
+    buffer->scrollXShift = 0;  /* No scaling initially */
+    buffer->scrollYShift = 0;  /* No scaling initially */
     buffer->modified = FALSE;
     
     /* Initialize graphics v39+ features */
@@ -525,8 +527,8 @@ VOID ScrollToCursor(struct TextBuffer *buffer, struct Window *window)
     ULONG visibleLines = 0;
     ULONG charWidth = 0;
     ULONG visibleChars = 0;
-    ULONG cursorScreenX = 0;
-    ULONG cursorScreenY = 0;
+    LONG cursorScreenX = 0;  /* Can be negative if cursor is to the left of visible area */
+    LONG cursorScreenY = 0;  /* Can be negative if cursor is above visible area */
     ULONG i = 0;
     
     if (!buffer || !window) {
@@ -539,7 +541,13 @@ VOID ScrollToCursor(struct TextBuffer *buffer, struct Window *window)
     }
     
     lineHeight = GetLineHeight(rp);
+    if (lineHeight == 0) {
+        return;  /* Can't calculate without valid line height */
+    }
     visibleLines = (window->Height - window->BorderTop - window->BorderBottom) / lineHeight;
+    if (visibleLines == 0) {
+        visibleLines = 1;  /* At least one line visible */
+    }
     charWidth = GetCharWidth(rp, 'M');
     
     /* Calculate text area boundaries (accounting for left margin) */
@@ -550,22 +558,52 @@ VOID ScrollToCursor(struct TextBuffer *buffer, struct Window *window)
         visibleChars = textWidth / charWidth;
     }
     
-    /* Calculate cursor screen position */
-    cursorScreenY = buffer->cursorY - buffer->scrollY;
+    /* Calculate cursor screen position (relative to visible area) */
+    /* cursorScreenY = cursor line - scroll position */
+    /* Negative means cursor is above visible area, >= visibleLines means below */
+    cursorScreenY = (LONG)buffer->cursorY - (LONG)buffer->scrollY;
     if (buffer->lines && buffer->cursorY < buffer->lineCount) {
         for (i = 0; i < buffer->cursorX && i < buffer->lines[buffer->cursorY].length; i++) {
             cursorScreenX += GetCharWidth(rp, (UBYTE)buffer->lines[buffer->cursorY].text[i]);
         }
     }
-    cursorScreenX = cursorScreenX / charWidth - buffer->scrollX;
+    if (charWidth > 0) {
+        cursorScreenX = cursorScreenX / charWidth - buffer->scrollX;
+    } else {
+        cursorScreenX = 0;
+    }
     
-    /* Adjust vertical scroll */
+    /* Adjust vertical scroll to keep cursor visible */
+    /* Check if cursor is above visible area (cursorScreenY < 0) */
     if (cursorScreenY < 0) {
+        /* Cursor is above visible area - scroll up to show cursor at top */
+        ULONG oldScrollY = buffer->scrollY;
         buffer->scrollY = buffer->cursorY;
-    } else if (cursorScreenY >= (LONG)visibleLines) {
+        if (buffer->scrollY < 0) {
+            buffer->scrollY = 0;
+        }
+        /* Clamp to max scroll */
+        if (buffer->maxScrollY > 0 && buffer->scrollY > buffer->maxScrollY) {
+            buffer->scrollY = buffer->maxScrollY;
+        }
+        /* Ensure scroll position actually changed */
+        if (buffer->scrollY != oldScrollY) {
+            /* Scroll position was updated - this will trigger a redraw */
+        }
+    } else if (visibleLines > 0 && cursorScreenY >= (LONG)visibleLines) {
+        /* Cursor is below visible area - scroll down to show cursor at bottom */
+        ULONG oldScrollY = buffer->scrollY;
         buffer->scrollY = buffer->cursorY - visibleLines + 1;
         if (buffer->scrollY < 0) {
             buffer->scrollY = 0;
+        }
+        /* Clamp to max scroll */
+        if (buffer->maxScrollY > 0 && buffer->scrollY > buffer->maxScrollY) {
+            buffer->scrollY = buffer->maxScrollY;
+        }
+        /* Ensure scroll position actually changed */
+        if (buffer->scrollY != oldScrollY) {
+            /* Scroll position was updated - this will trigger a redraw */
         }
     }
     
@@ -693,6 +731,8 @@ VOID RenderText(struct Window *window, struct TextBuffer *buffer)
     BOOL useScrollLayer = FALSE;
     LONG scrollDeltaX = 0;
     LONG scrollDeltaY = 0;
+    ULONG textAreaHeight = 0;  /* Text area height for calculating visible lines */
+    ULONG maxY = 0;  /* Maximum Y coordinate for text (stops before bottom border) */
     
     if (!window || !buffer) {
         return;
@@ -769,10 +809,19 @@ VOID RenderText(struct Window *window, struct TextBuffer *buffer)
         buffer->pageW = 0;
     }
     
-    visibleLines = (window->Height - window->BorderTop - window->BorderBottom) / lineHeight;
+    /* Calculate visible lines - ensure we don't render into bottom border */
+    /* Text area height = window height - top border - bottom border */
+    textAreaHeight = window->Height - window->BorderTop - window->BorderBottom;
+    visibleLines = textAreaHeight / lineHeight;
+    if (visibleLines == 0 && textAreaHeight > 0) {
+        visibleLines = 1;  /* At least show one line if there's any space */
+    }
 
     startY = buffer->scrollY;
-    endY = startY + visibleLines + 1;
+    endY = startY + visibleLines;
+    if (endY > buffer->lineCount) {
+        endY = buffer->lineCount;
+    }
     if (endY > buffer->lineCount) {
         endY = buffer->lineCount;
     }
@@ -789,17 +838,20 @@ VOID RenderText(struct Window *window, struct TextBuffer *buffer)
     SetBPen(rp, 2);  /* Background pen (grey) */
     SetAPen(rp, 2);  /* Also set A pen for compatibility */
     SetDrMd(rp, JAM2);  /* Fill mode - use background pen */
+    /* Clear text area - stop before bottom border to avoid painting over scroll bar */
     RectFill(rp, textStartX - 1, window->BorderTop,
              textEndX,
-             window->Height - 1 - window->BorderBottom);
+             window->Height - window->BorderBottom);
     SetDrMd(rp, JAM1);  /* Restore normal text mode */
     SetAPen(rp, 1);  /* Set text pen for rendering */
     
     /* Render visible lines with pen 1 (black text) */
     /* Annotate-style: track character position and clip to PageW */
+    /* Stop rendering before bottom border to avoid painting over scroll bar */
     SetAPen(rp, 1);
     y = window->BorderTop;
-    for (i = startY; i < endY; i++) {
+    maxY = window->Height - window->BorderBottom;  /* Maximum Y coordinate for text */
+    for (i = startY; i < endY && y < maxY; i++) {
         if (i < buffer->lineCount) {
             lineText = buffer->lines[i].text;
             lineLen = buffer->lines[i].length;

@@ -92,6 +92,8 @@ struct TextBuffer {
     ULONG pageH;       /* Maximum visible lines (calculated from window height) */
     ULONG maxScrollX;  /* Maximum horizontal scroll position (in characters) */
     ULONG maxScrollY;  /* Maximum vertical scroll position (in lines) */
+    SHORT scrollXShift;  /* Scaling shift factor for horizontal scroll (for values > 0xFFFF) */
+    SHORT scrollYShift;  /* Scaling shift factor for vertical scroll (for values > 0xFFFF) */
     BOOL modified;
     /* Graphics v39+ features for optimized rendering */
     struct BitMap *superBitMap;  /* Super bitmap for off-screen rendering (larger than window) */

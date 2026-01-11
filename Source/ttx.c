@@ -1419,8 +1419,8 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                     /* Recalculate max scroll values and update scroll bars */
                     if (session->buffer) {
                         CalculateMaxScroll(session->buffer, session->window);
-                        UpdateScrollBars(session);
-                        ScrollToCursor(session->buffer, session->window);
+                        ScrollToCursor(session->buffer, session->window);  /* ScrollToCursor may change scroll position */
+                        UpdateScrollBars(session);  /* Update scroll bars after scroll position may have changed */
                         RenderText(session->window, session->buffer);
                         UpdateCursor(session->window, session->buffer);
                     }
@@ -1433,19 +1433,27 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                         ULONG gadgetID = (ULONG)imsg->Code;
                         ULONG newScrollY = 0;
                         ULONG newScrollX = 0;
+                        ULONG scaledValue = 0;
                         struct Gadget *gadget = NULL;
                         
                         if (gadgetID == GID_VERT_PROP) {
                             /* Vertical scroll bar moved */
                             gadget = session->vertPropGadget;
-                            if (gadget) {
-                                GetAttr(PGA_Top, gadget, (ULONG *)&newScrollY);
+                            if (gadget && session->buffer) {
+                                GetAttr(PGA_Top, gadget, &scaledValue);
+                                /* Convert scaled value back to unscaled */
+                                newScrollY = scaledValue;
+                                if (session->buffer->scrollYShift > 0) {
+                                    newScrollY <<= session->buffer->scrollYShift;
+                                }
+                                /* Clamp to valid range */
+                                if (newScrollY > session->buffer->maxScrollY) {
+                                    newScrollY = session->buffer->maxScrollY;
+                                }
                                 if (newScrollY != session->buffer->scrollY) {
                                     session->buffer->scrollY = newScrollY;
-                                    if (session->buffer->scrollY > session->buffer->maxScrollY) {
-                                        session->buffer->scrollY = session->buffer->maxScrollY;
-                                    }
-                                    ScrollToCursor(session->buffer, session->window);
+                                    /* Recalculate max scroll in case it changed */
+                                    CalculateMaxScroll(session->buffer, session->window);
                                     RenderText(session->window, session->buffer);
                                     UpdateCursor(session->window, session->buffer);
                                 }
@@ -1454,14 +1462,21 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                         } else if (gadgetID == GID_HORIZ_PROP) {
                             /* Horizontal scroll bar moved */
                             gadget = session->horizPropGadget;
-                            if (gadget) {
-                                GetAttr(PGA_Top, gadget, (ULONG *)&newScrollX);
+                            if (gadget && session->buffer) {
+                                GetAttr(PGA_Top, gadget, &scaledValue);
+                                /* Convert scaled value back to unscaled */
+                                newScrollX = scaledValue;
+                                if (session->buffer->scrollXShift > 0) {
+                                    newScrollX <<= session->buffer->scrollXShift;
+                                }
+                                /* Clamp to valid range */
+                                if (newScrollX > session->buffer->maxScrollX) {
+                                    newScrollX = session->buffer->maxScrollX;
+                                }
                                 if (newScrollX != session->buffer->scrollX) {
                                     session->buffer->scrollX = newScrollX;
-                                    if (session->buffer->scrollX > session->buffer->maxScrollX) {
-                                        session->buffer->scrollX = session->buffer->maxScrollX;
-                                    }
-                                    ScrollToCursor(session->buffer, session->window);
+                                    /* Recalculate max scroll in case it changed */
+                                    CalculateMaxScroll(session->buffer, session->window);
                                     RenderText(session->window, session->buffer);
                                     UpdateCursor(session->window, session->buffer);
                                 }
@@ -1779,12 +1794,18 @@ VOID CalculateMaxScroll(struct TextBuffer *buffer, struct Window *window)
 }
 
 /* Update scroll bar prop gadgets to reflect current scroll position */
+/* Uses scroller pattern: total = total content size, visible = viewport size, top = scroll position */
 VOID UpdateScrollBars(struct Session *session)
 {
     struct Gadget *gadget = NULL;
     ULONG total = 0;
     ULONG visible = 0;
     ULONG top = 0;
+    ULONG maxValue = 0xFFFF;  /* Maximum value for propgclass (16-bit) */
+    ULONG scaledTotal = 0;
+    ULONG scaledVisible = 0;
+    ULONG scaledTop = 0;
+    SHORT shift = 0;
     
     if (!session || !session->buffer || !session->window) {
         return;
@@ -1793,40 +1814,114 @@ VOID UpdateScrollBars(struct Session *session)
     /* Update vertical scroll bar */
     gadget = session->vertPropGadget;
     if (gadget) {
-        /* Calculate total and visible for vertical scroll */
-        if (session->buffer->maxScrollY > 0 || session->buffer->lineCount > session->buffer->pageH) {
-            total = (session->buffer->maxScrollY > session->buffer->pageH) ? 
-                    session->buffer->maxScrollY : session->buffer->pageH;
-        } else {
-            total = session->buffer->pageH;
-        }
+        /* For scroller: total = total lines, visible = visible lines, top = scroll position */
+        total = session->buffer->lineCount;
         visible = session->buffer->pageH;
         top = session->buffer->scrollY;
         
+        /* Scale down if total exceeds propgclass limit (0xFFFF) */
+        scaledTotal = total;
+        scaledVisible = visible;
+        scaledTop = top;
+        shift = 0;
+        
+        while (scaledTotal > maxValue) {
+            scaledTotal >>= 1;
+            shift++;
+        }
+        
+        if (shift > 0) {
+            scaledVisible >>= shift;
+            scaledTop >>= shift;
+        }
+        
+        /* Store shift factor for converting back when reading scroll position */
+        session->buffer->scrollYShift = shift;
+        
+        /* Ensure visible doesn't exceed total */
+        if (scaledVisible > scaledTotal) {
+            scaledVisible = scaledTotal;
+        }
+        
+        /* Ensure top is within valid range */
+        /* For scroller: top can be at most (total - visible) */
+        if (scaledTotal > scaledVisible) {
+            ULONG maxTop = scaledTotal - scaledVisible;
+            if (scaledTop > maxTop) {
+                scaledTop = maxTop;
+            }
+        } else {
+            /* All content is visible, top should be 0 */
+            scaledTop = 0;
+        }
+        
         SetGadgetAttrs(gadget, session->window, NULL,
-            PGA_Total, total,
-            PGA_Visible, visible,
-            PGA_Top, top,
+            PGA_Total, scaledTotal,
+            PGA_Visible, scaledVisible,
+            PGA_Top, scaledTop,
             TAG_DONE);
     }
     
     /* Update horizontal scroll bar */
     gadget = session->horizPropGadget;
     if (gadget) {
-        /* Calculate total and visible for horizontal scroll */
-        if (session->buffer->maxScrollX > 0) {
-            total = (session->buffer->maxScrollX > session->buffer->pageW) ? 
-                    session->buffer->maxScrollX : session->buffer->pageW;
-        } else {
-            total = session->buffer->pageW;
+        /* Calculate maximum line length for horizontal scrolling */
+        ULONG maxLineLen = 0;
+        ULONG i = 0;
+        
+        if (session->buffer->lines && session->buffer->lineCount > 0) {
+            for (i = 0; i < session->buffer->lineCount; i++) {
+                if (session->buffer->lines[i].length > maxLineLen) {
+                    maxLineLen = session->buffer->lines[i].length;
+                }
+            }
         }
+        
+        /* For scroller: total = max line length, visible = visible characters, top = scroll position */
+        total = maxLineLen;
         visible = session->buffer->pageW;
         top = session->buffer->scrollX;
         
+        /* Scale down if total exceeds propgclass limit (0xFFFF) */
+        scaledTotal = total;
+        scaledVisible = visible;
+        scaledTop = top;
+        shift = 0;
+        
+        while (scaledTotal > maxValue) {
+            scaledTotal >>= 1;
+            shift++;
+        }
+        
+        if (shift > 0) {
+            scaledVisible >>= shift;
+            scaledTop >>= shift;
+        }
+        
+        /* Store shift factor for converting back when reading scroll position */
+        session->buffer->scrollXShift = shift;
+        
+        /* Ensure visible doesn't exceed total */
+        if (scaledVisible > scaledTotal) {
+            scaledVisible = scaledTotal;
+        }
+        
+        /* Ensure top is within valid range */
+        /* For scroller: top can be at most (total - visible) */
+        if (scaledTotal > scaledVisible) {
+            ULONG maxTop = scaledTotal - scaledVisible;
+            if (scaledTop > maxTop) {
+                scaledTop = maxTop;
+            }
+        } else {
+            /* All content is visible, top should be 0 */
+            scaledTop = 0;
+        }
+        
         SetGadgetAttrs(gadget, session->window, NULL,
-            PGA_Total, total,
-            PGA_Visible, visible,
-            PGA_Top, top,
+            PGA_Total, scaledTotal,
+            PGA_Visible, scaledVisible,
+            PGA_Top, scaledTop,
             TAG_DONE);
     }
 }
