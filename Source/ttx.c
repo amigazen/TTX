@@ -715,40 +715,32 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
     /* Open window using global cleanup stack */
     Printf("[INIT] TTX_CreateSession: opening window\n");
     {
-        struct TagItem windowTags[16];
-        windowTags[0].ti_Tag = WA_InnerWidth;
-        windowTags[0].ti_Data = 600;
-        windowTags[1].ti_Tag = WA_InnerHeight;
-        windowTags[1].ti_Data = 400;
-        windowTags[2].ti_Tag = WA_Title;
-        windowTags[2].ti_Data = (ULONG)(titleText ? titleText : (session->fileName ? session->fileName : (STRPTR)"Untitled"));
-        windowTags[3].ti_Tag = WA_IDCMP;
-        windowTags[3].ti_Data = IDCMP_CLOSEWINDOW | IDCMP_VANILLAKEY | IDCMP_RAWKEY | IDCMP_REFRESHWINDOW | IDCMP_NEWSIZE | IDCMP_MOUSEBUTTONS | IDCMP_MENUPICK | IDCMP_IDCMPUPDATE;
-        windowTags[4].ti_Tag = WA_DragBar;
-        windowTags[4].ti_Data = TRUE;
+        struct TagItem windowTags[17];
+        /* Set base flags first - includes drag bar, depth, size, close gadgets */
+        windowTags[0].ti_Tag = WA_Flags;
+        windowTags[0].ti_Data = WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_SIZEGADGET | WFLG_CLOSEGADGET | WFLG_ACTIVATE | WFLG_SMART_REFRESH | WFLG_NEWLOOKMENUS | WFLG_REPORTMOUSE;
+        windowTags[1].ti_Tag = WA_InnerWidth;
+        windowTags[1].ti_Data = 600;
+        windowTags[2].ti_Tag = WA_InnerHeight;
+        windowTags[2].ti_Data = 400;
+        windowTags[3].ti_Tag = WA_Title;
+        windowTags[3].ti_Data = (ULONG)(titleText ? titleText : (session->fileName ? session->fileName : (STRPTR)"Untitled"));
+        windowTags[4].ti_Tag = WA_IDCMP;
+        windowTags[4].ti_Data = IDCMP_CLOSEWINDOW | IDCMP_VANILLAKEY | IDCMP_RAWKEY | IDCMP_REFRESHWINDOW | IDCMP_NEWSIZE | IDCMP_MOUSEBUTTONS | IDCMP_MENUPICK | IDCMP_IDCMPUPDATE;
         windowTags[5].ti_Tag = WA_ScreenTitle;
         windowTags[5].ti_Data = (ULONG)"TTX";
-        windowTags[6].ti_Tag = WA_DepthGadget;
+        windowTags[6].ti_Tag = WA_AutoAdjust;
         windowTags[6].ti_Data = TRUE;
-        windowTags[7].ti_Tag = WA_CloseGadget;
-        windowTags[7].ti_Data = TRUE;
-        windowTags[8].ti_Tag = WA_SizeGadget;
+        windowTags[7].ti_Tag = WA_PubScreen;
+        windowTags[7].ti_Data = (ULONG)screen;
+        /* Size gadget positioning - must specify which border for sizing gadget */
+        windowTags[8].ti_Tag = WA_SizeBRight;
         windowTags[8].ti_Data = TRUE;
-        windowTags[9].ti_Tag = WA_AutoAdjust;
+        windowTags[9].ti_Tag = WA_SizeBBottom;
         windowTags[9].ti_Data = TRUE;
-        /* Use SmartRefresh for super bitmap support (Graphics v39+) */
-        /* SuperBitMap requires SmartRefresh, not SimpleRefresh */
-        windowTags[10].ti_Tag = WA_SmartRefresh;
-        windowTags[10].ti_Data = TRUE;
-        windowTags[11].ti_Tag = WA_Activate;
-        windowTags[11].ti_Data = TRUE;
-        windowTags[12].ti_Tag = WA_PubScreen;
-        windowTags[12].ti_Data = (ULONG)screen;
-        windowTags[13].ti_Tag = WA_NewLookMenus;
-        windowTags[13].ti_Data = TRUE;
         /* Super bitmap will be set after window creation if supported */
-        windowTags[14].ti_Tag = TAG_DONE;
-        windowTags[14].ti_Data = 0;
+        windowTags[10].ti_Tag = TAG_DONE;
+        windowTags[10].ti_Data = 0;
         
         session->window = openWindowTagList(app->cleanupStack, windowTags);
     }
@@ -761,11 +753,16 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
         return FALSE;
     }
     Printf("[INIT] TTX_CreateSession: window=%lx\n", (ULONG)session->window);
+    Printf("[INIT] TTX_CreateSession: window flags=%lx (WFLG_DRAGBAR=%s)\n", 
+           (ULONG)session->window->Flags, 
+           (session->window->Flags & WFLG_DRAGBAR) ? "YES" : "NO");
     
     /* Set window limits */
     WindowLimits(session->window, 200, 100, 32767, 32767);
     
     /* Create scroll bar prop gadgets */
+    /* Note: Must be created AFTER window is opened so we can use window border values */
+    /* When using WA_InnerWidth/WA_InnerHeight, border gadgets must use relative positioning */
     {
         struct Screen *winScreen = session->window->WScreen;
         struct DrawInfo *drawInfo = NULL;
@@ -775,12 +772,35 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
         /* Get screen draw info for gadget creation */
         drawInfo = GetScreenDrawInfo(winScreen);
         if (drawInfo) {
+            /* Calculate initial scroll values for prop gadgets */
+            /* These will be updated properly after buffer is loaded */
+            ULONG initialTotal = 100;
+            ULONG initialVisible = 50;
+            ULONG initialTop = 0;
+            
+            if (session->buffer) {
+                /* Use buffer dimensions if available */
+                initialVisible = session->buffer->pageH;
+                initialTotal = (session->buffer->maxScrollY > session->buffer->pageH) ? 
+                              session->buffer->maxScrollY : session->buffer->pageH;
+                if (initialTotal < initialVisible) {
+                    initialTotal = initialVisible;
+                }
+                initialTop = session->buffer->scrollY;
+            }
+            
             /* Create vertical scroll bar prop gadget (right border) */
+            /* Position in window using relative positioning, not as border gadget */
+            /* GA_RelRight with negative value positions from right edge of window */
+            /* GA_Width sets explicit width (border size minus padding) */
+            /* GA_Top sets absolute top position (border top plus padding) */
+            /* GA_RelHeight with negative value makes it span full height accounting for top/bottom */
+            /* Prop gadgets require PGA_Total, PGA_Visible, and PGA_Top to be set at creation */
             session->vertPropGadget = (struct Gadget *)NewObject(NULL, PROPGCLASS,
-                GA_RightBorder, TRUE,
-                GA_RelRight, -(winScreen->WBorRight + 3),
-                GA_RelHeight, -(winScreen->WBorTop + winScreen->Font->ta_YSize + 1 + 4 + winScreen->WBorBottom + winScreen->Font->ta_YSize + winScreen->WBorRight + winScreen->WBorRight),
-                GA_Top, winScreen->WBorTop + winScreen->Font->ta_YSize + 1 + 2,
+                GA_RelRight, -session->window->BorderRight + 5,  /* Position from right edge */
+                GA_Width, session->window->BorderRight - 8,        /* Width of slider */
+                GA_Top, session->window->BorderTop + 2,           /* Top position */
+                GA_RelHeight, -(session->window->BorderTop + session->window->BorderBottom + 4),  /* Height */
                 GA_Next, gadgetList,
                 ICA_TARGET, ICTARGET_IDCMP,
                 ICA_MAP, icamap,
@@ -788,20 +808,45 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
                 PGA_NewLook, TRUE,
                 PGA_Borderless, TRUE,
                 PGA_VertBody, MAXBODY,
+                PGA_Total, initialTotal,
+                PGA_Visible, initialVisible,
+                PGA_Top, initialTop,
                 GA_ID, GID_VERT_PROP,
                 TAG_DONE);
             
             if (session->vertPropGadget) {
+                /* Set relative positioning flags for vertical scrollbar */
+                session->vertPropGadget->Flags |= GFLG_RELRIGHT | GFLG_RELHEIGHT;
                 gadgetList = session->vertPropGadget;
                 Printf("[INIT] TTX_CreateSession: vertical prop gadget created\n");
             }
             
+            /* Calculate initial horizontal scroll values */
+            initialTotal = 100;
+            initialVisible = 50;
+            initialTop = 0;
+            if (session->buffer) {
+                initialVisible = session->buffer->pageW;
+                initialTotal = (session->buffer->maxScrollX > session->buffer->pageW) ? 
+                              session->buffer->maxScrollX : session->buffer->pageW;
+                if (initialTotal < initialVisible) {
+                    initialTotal = initialVisible;
+                }
+                initialTop = session->buffer->scrollX;
+            }
+            
             /* Create horizontal scroll bar prop gadget (bottom border) */
+            /* Position in window using relative positioning, not as border gadget */
+            /* GA_Left sets absolute left position (border left) */
+            /* GA_RelBottom with negative value positions from bottom edge */
+            /* GA_RelWidth with negative value makes it span full width accounting for left/right */
+            /* GA_Height sets explicit height (border size minus padding) */
+            /* Prop gadgets require PGA_Total, PGA_Visible, and PGA_Top to be set at creation */
             session->horizPropGadget = (struct Gadget *)NewObject(NULL, PROPGCLASS,
-                GA_BottomBorder, TRUE,
-                GA_RelBottom, -(winScreen->WBorBottom + 3),
-                GA_RelWidth, -(winScreen->WBorLeft + winScreen->WBorRight + 3),
-                GA_Left, winScreen->WBorLeft + 3,
+                GA_Left, session->window->BorderLeft,              /* Start at left border */
+                GA_RelBottom, -session->window->BorderBottom + 3,  /* Position from bottom */
+                GA_RelWidth, -(session->window->BorderLeft + session->window->BorderRight + 2),  /* Width */
+                GA_Height, session->window->BorderBottom - 4,      /* Height of slider */
                 GA_Next, gadgetList,
                 ICA_TARGET, ICTARGET_IDCMP,
                 ICA_MAP, icamap,
@@ -809,10 +854,15 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
                 PGA_NewLook, TRUE,
                 PGA_Borderless, TRUE,
                 PGA_HorizBody, MAXBODY,
+                PGA_Total, initialTotal,
+                PGA_Visible, initialVisible,
+                PGA_Top, initialTop,
                 GA_ID, GID_HORIZ_PROP,
                 TAG_DONE);
             
             if (session->horizPropGadget) {
+                /* Set relative positioning flags for horizontal scrollbar */
+                session->horizPropGadget->Flags |= GFLG_RELBOTTOM | GFLG_RELWIDTH;
                 gadgetList = session->horizPropGadget;
                 Printf("[INIT] TTX_CreateSession: horizontal prop gadget created\n");
             }
