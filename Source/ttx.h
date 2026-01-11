@@ -18,6 +18,7 @@
 #include <graphics/rastport.h>
 #include <graphics/gfx.h>
 #include <graphics/text.h>
+#include <graphics/regions.h>
 #include <workbench/startup.h>
 #include <libraries/commodities.h>
 #include <devices/inputevent.h>
@@ -34,6 +35,10 @@
 #include <proto/wb.h>
 #include <proto/commodities.h>
 #include <proto/keymap.h>
+#include <intuition/gadgetclass.h>
+#include <intuition/icclass.h>
+#include <intuition/classusr.h>
+#include "seiso.h"
 
 /* Library base pointers */
 extern struct ExecBase *SysBase;
@@ -49,7 +54,7 @@ static const char *verstag = "$VER: TTX 3.0 (7/1/2026)\n";
 static const char *stack_cookie = "$STACK: 4096\n";
 
 /* Message port name for single-instance communication */
-#define TTX_MESSAGE_PORT_NAME "TTX_MessagePort"
+#define TTX_MESSAGE_PORT_NAME "TTX.1"
 
 /* Message types for inter-instance communication */
 #define TTX_MSG_OPEN_FILE 1
@@ -82,7 +87,19 @@ struct TextBuffer {
     ULONG cursorY;
     ULONG scrollX;
     ULONG scrollY;
+    ULONG leftMargin;  /* Left margin for line numbers, fold markers, etc. (in pixels) */
+    ULONG pageW;       /* Maximum characters per line (calculated from window width) */
+    ULONG pageH;       /* Maximum visible lines (calculated from window height) */
+    ULONG maxScrollX;  /* Maximum horizontal scroll position (in characters) */
+    ULONG maxScrollY;  /* Maximum vertical scroll position (in lines) */
     BOOL modified;
+    /* Graphics v39+ features for optimized rendering */
+    struct BitMap *superBitMap;  /* Super bitmap for off-screen rendering (larger than window) */
+    ULONG superWidth;             /* Width of super bitmap in pixels */
+    ULONG superHeight;            /* Height of super bitmap in pixels */
+    ULONG lastScrollX;            /* Last scroll X position for delta scrolling */
+    ULONG lastScrollY;            /* Last scroll Y position for delta scrolling */
+    BOOL needsFullRedraw;         /* Flag to force full redraw (e.g., after resize) */
 };
 
 /* Forward declarations */
@@ -105,15 +122,24 @@ struct Session {
     struct Session *next;
     struct Session *prev;
     ULONG sessionID;
+    struct CleanupStack *cleanupStack;  /* Pointer to global cleanup stack (app->cleanupStack) */
     struct Window *window;
+    struct Menu *menuStrip;  /* Menu strip for this window */
+    struct Gadget *vertPropGadget;  /* Vertical scroll bar prop gadget */
+    struct Gadget *horizPropGadget;  /* Horizontal scroll bar prop gadget */
     STRPTR fileName;
     struct TextBuffer *buffer;
     BOOL modified;
     BOOL readOnly;
 };
 
+/* Prop gadget IDs */
+#define GID_VERT_PROP 1
+#define GID_HORIZ_PROP 2
+
 /* Application structure - single instance */
 struct TTXApplication {
+    struct CleanupStack *cleanupStack;  /* Resource tracking cleanup stack */
     struct MsgPort *appPort;
     struct MsgPort *brokerPort;  /* Message port for commodity broker */
     CxObj *broker;  /* Commodity broker object */
@@ -132,38 +158,59 @@ struct TTXApplication {
 /* Forward declarations */
 BOOL TTX_Init(struct TTXApplication *app);
 VOID TTX_Cleanup(struct TTXApplication *app);
-BOOL TTX_InitLibraries(VOID);
+BOOL TTX_InitLibraries(struct CleanupStack *stack);
 VOID TTX_CleanupLibraries(VOID);
 BOOL TTX_SetupMessagePort(struct TTXApplication *app);
+BOOL TTX_AddMessagePort(struct TTXApplication *app);
 VOID TTX_RemoveMessagePort(struct TTXApplication *app);
 BOOL TTX_SetupCommodity(struct TTXApplication *app);
 VOID TTX_RemoveCommodity(struct TTXApplication *app);
-BOOL TTX_ParseArguments(struct TTXArgs *args);
-BOOL TTX_ParseToolTypes(STRPTR *fileName, struct WBStartup *wbMsg);
+BOOL TTX_ParseArguments(struct TTXArgs *args, struct CleanupStack *stack);
+BOOL TTX_ParseToolTypes(STRPTR *fileName, struct WBStartup *wbMsg, struct CleanupStack *stack);
 BOOL TTX_CheckExistingInstance(STRPTR fileName);
-BOOL TTX_SendToExistingInstance(ULONG msgType, STRPTR fileName);
+BOOL TTX_SendToExistingInstance(struct CleanupStack *stack, ULONG msgType, STRPTR fileName);
 BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName);
 VOID TTX_DestroySession(struct TTXApplication *app, struct Session *session);
 VOID TTX_EventLoop(struct TTXApplication *app);
 BOOL TTX_HandleCommodityMessage(struct TTXApplication *app, struct Message *msg);
 BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage *imsg);
+BOOL TTX_CreateMenuStrip(struct Session *session);
+VOID TTX_FreeMenuStrip(struct Session *session);
+BOOL TTX_HandleCommand(struct TTXApplication *app, struct Session *session, STRPTR command, STRPTR *args, ULONG argCount);
+BOOL TTX_HandleMenuPick(struct TTXApplication *app, struct Session *session, ULONG menuNumber, ULONG itemNumber);
 VOID TTX_ShowUsage(VOID);
 
+/* Command handler functions - Project menu */
+BOOL TTX_Cmd_OpenFile(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
+BOOL TTX_Cmd_OpenDoc(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
+BOOL TTX_Cmd_InsertFile(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
+BOOL TTX_Cmd_SaveFile(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
+BOOL TTX_Cmd_SaveFileAs(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
+BOOL TTX_Cmd_ClearFile(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
+BOOL TTX_Cmd_PrintFile(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
+BOOL TTX_Cmd_CloseDoc(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
+BOOL TTX_Cmd_SetReadOnly(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
+BOOL TTX_Cmd_Quit(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
+
 /* Text buffer functions */
-BOOL InitTextBuffer(struct TextBuffer *buffer);
-VOID FreeTextBuffer(struct TextBuffer *buffer);
-BOOL LoadFile(STRPTR fileName, struct TextBuffer *buffer);
-BOOL SaveFile(STRPTR fileName, struct TextBuffer *buffer);
-BOOL InsertChar(struct TextBuffer *buffer, UBYTE ch);
-BOOL DeleteChar(struct TextBuffer *buffer);
-BOOL DeleteForward(struct TextBuffer *buffer);
-BOOL InsertNewline(struct TextBuffer *buffer);
+BOOL InitTextBuffer(struct TextBuffer *buffer, struct CleanupStack *stack);
+VOID FreeTextBuffer(struct TextBuffer *buffer, struct CleanupStack *stack);
+BOOL LoadFile(STRPTR fileName, struct TextBuffer *buffer, struct CleanupStack *stack);
+BOOL SaveFile(STRPTR fileName, struct TextBuffer *buffer, struct CleanupStack *stack);
+BOOL InsertChar(struct TextBuffer *buffer, UBYTE ch, struct CleanupStack *stack);
+BOOL DeleteChar(struct TextBuffer *buffer, struct CleanupStack *stack);
+BOOL DeleteForward(struct TextBuffer *buffer, struct CleanupStack *stack);
+BOOL InsertNewline(struct TextBuffer *buffer, struct CleanupStack *stack);
 VOID MouseToCursor(struct TextBuffer *buffer, struct Window *window, LONG mouseX, LONG mouseY, ULONG *cursorX, ULONG *cursorY);
+BOOL CreateSuperBitMap(struct TextBuffer *buffer, struct Window *window);
+VOID FreeSuperBitMap(struct TextBuffer *buffer);
 VOID RenderText(struct Window *window, struct TextBuffer *buffer);
 VOID UpdateCursor(struct Window *window, struct TextBuffer *buffer);
 VOID ScrollToCursor(struct TextBuffer *buffer, struct Window *window);
 ULONG GetCharWidth(struct RastPort *rp, UBYTE ch);
 ULONG GetLineHeight(struct RastPort *rp);
+VOID UpdateScrollBars(struct Session *session);
+VOID CalculateMaxScroll(struct TextBuffer *buffer, struct Window *window);
 
 #endif /* TTX_H */
 

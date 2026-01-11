@@ -8,10 +8,10 @@
 PROGRAM = TTX
 
 # Source files
-SRCS = ttx.c ttx_text.c
+SRCS = ttx.c ttx_text.c ttx_commands.c
 
 # Object files
-OBJS = ttx.o ttx_text.o
+OBJS = ttx.o ttx_text.o ttx_commands.o
 
 # Compiler and linker
 CC = sc
@@ -22,23 +22,27 @@ all: $(PROGRAM)
 
 # Create the TTX executable
 $(PROGRAM): $(OBJS)
-	$(LINK) FROM sc:lib/c.o $(OBJS) TO $(PROGRAM) STRIPDEBUG NODEBUG LIB lib:small.lib sc:lib/sc.lib BATCH
+	$(LINK) FROM sc:lib/c.o $(OBJS) TO $(PROGRAM) STRIPDEBUG NODEBUG LIB lib:small.lib sc:lib/sc.lib lib/seiso.lib lib:amiga.lib BATCH
 
 # Compile the source files
 .c.o:
-	$(CC) $*.c OBJNAME=$*.o IDIR=include:
+	$(CC) $*.c OBJNAME=$*.o IDIR=include: 
 
 # Compile TTX main file
 ttx.o: ttx.c ttx.h
-	$(CC) ttx.c OBJNAME=ttx.o IDIR=include:
+	$(CC) ttx.c OBJNAME=ttx.o IDIR=include: 
 
 # Compile TTX text functions
 ttx_text.o: ttx_text.c ttx.h
-	$(CC) ttx_text.c OBJNAME=ttx_text.o IDIR=include:
+	$(CC) ttx_text.c OBJNAME=ttx_text.o IDIR=include: 
+
+# Compile TTX command functions
+ttx_commands.o: ttx_commands.c ttx.h
+	$(CC) ttx_commands.c OBJNAME=ttx_commands.o IDIR=include: 
 
 # Clean target
 clean:
-	Delete $(OBJS) $(PROGRAM) ttx.o ttx_text.o
+	Delete $(OBJS) $(PROGRAM) ttx.o ttx_text.o ttx_commands.o
 
 # Install target
 install:

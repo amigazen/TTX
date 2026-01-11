@@ -7,6 +7,9 @@
 
 #include "ttx.h"
 
+/* Forward declaration for cleanup stack access */
+static struct CleanupStack *g_ttxStack = NULL;
+
 /* Library base pointers */
 extern struct ExecBase *SysBase;
 extern struct DosLibrary *DOSBase;
@@ -21,128 +24,88 @@ extern struct Library *CxBase;
 extern struct Library *KeymapBase;
 
 /* Initialize required libraries */
-BOOL TTX_InitLibraries(VOID)
+BOOL TTX_InitLibraries(struct CleanupStack *stack)
 {
-    IntuitionBase = (struct IntuitionBase *)OpenLibrary("intuition.library", 39L);
+    Printf("[INIT] TTX_InitLibraries: START\n");
+    if (!stack) {
+        Printf("[INIT] TTX_InitLibraries: FAIL (stack=NULL)\n");
+        return FALSE;
+    }
+    
+    IntuitionBase = (struct IntuitionBase *)openLibrary(stack, "intuition.library", 39L);
     if (!IntuitionBase) {
+        Printf("[INIT] TTX_InitLibraries: FAIL (intuition.library)\n");
         SetIoErr(ERROR_OBJECT_NOT_FOUND);
         return FALSE;
     }
+    Printf("[INIT] TTX_InitLibraries: intuition.library=%lx\n", (ULONG)IntuitionBase);
     
-    UtilityBase = OpenLibrary("utility.library", 39L);
+    UtilityBase = openLibrary(stack, "utility.library", 39L);
     if (!UtilityBase) {
+        Printf("[INIT] TTX_InitLibraries: FAIL (utility.library)\n");
         SetIoErr(ERROR_OBJECT_NOT_FOUND);
-        CloseLibrary((struct Library *)IntuitionBase);
-        IntuitionBase = NULL;
         return FALSE;
     }
+    Printf("[INIT] TTX_InitLibraries: utility.library=%lx\n", (ULONG)UtilityBase);
     
-    GfxBase = (struct GfxBase *)OpenLibrary("graphics.library", 39L);
+    GfxBase = (struct GfxBase *)openLibrary(stack, "graphics.library", 39L);
     if (!GfxBase) {
+        Printf("[INIT] TTX_InitLibraries: FAIL (graphics.library)\n");
         SetIoErr(ERROR_OBJECT_NOT_FOUND);
-        CloseLibrary(UtilityBase);
-        UtilityBase = NULL;
-        CloseLibrary((struct Library *)IntuitionBase);
-        IntuitionBase = NULL;
         return FALSE;
     }
+    Printf("[INIT] TTX_InitLibraries: graphics.library=%lx\n", (ULONG)GfxBase);
     
-    IconBase = OpenLibrary("icon.library", 39L);
+    IconBase = openLibrary(stack, "icon.library", 39L);
     if (!IconBase) {
+        Printf("[INIT] TTX_InitLibraries: FAIL (icon.library)\n");
         SetIoErr(ERROR_OBJECT_NOT_FOUND);
-        CloseLibrary((struct Library *)GfxBase);
-        GfxBase = NULL;
-        CloseLibrary(UtilityBase);
-        UtilityBase = NULL;
-        CloseLibrary((struct Library *)IntuitionBase);
-        IntuitionBase = NULL;
         return FALSE;
     }
+    Printf("[INIT] TTX_InitLibraries: icon.library=%lx\n", (ULONG)IconBase);
     
-    CxBase = OpenLibrary("commodities.library", 0L);
+    CxBase = openLibrary(stack, "commodities.library", 0L);
     if (!CxBase) {
         /* Commodities is optional for single-instance, but preferred */
+        Printf("[INIT] TTX_InitLibraries: WARN (commodities.library optional, not found)\n");
         SetIoErr(ERROR_OBJECT_NOT_FOUND);
+    } else {
+        Printf("[INIT] TTX_InitLibraries: commodities.library=%lx\n", (ULONG)CxBase);
     }
     
     /* Open keymap.library for MapRawKey */
-    KeymapBase = OpenLibrary("keymap.library", 0L);
+    KeymapBase = openLibrary(stack, "keymap.library", 0L);
     if (!KeymapBase) {
         /* Keymap.library is required for keyboard input conversion */
+        Printf("[INIT] TTX_InitLibraries: FAIL (keymap.library)\n");
         SetIoErr(ERROR_OBJECT_NOT_FOUND);
-        if (CxBase) {
-            CloseLibrary(CxBase);
-            CxBase = NULL;
-        }
-        CloseLibrary(IconBase);
-        IconBase = NULL;
-        CloseLibrary((struct Library *)GfxBase);
-        GfxBase = NULL;
-        CloseLibrary(UtilityBase);
-        UtilityBase = NULL;
-        CloseLibrary((struct Library *)IntuitionBase);
-        IntuitionBase = NULL;
         return FALSE;
     }
+    Printf("[INIT] TTX_InitLibraries: keymap.library=%lx\n", (ULONG)KeymapBase);
     
+    Printf("[INIT] TTX_InitLibraries: SUCCESS\n");
     return TRUE;
 }
 
-/* Cleanup libraries */
+/* Cleanup libraries - now handled automatically by Seiso cleanup stack */
 VOID TTX_CleanupLibraries(VOID)
 {
-    if (KeymapBase) {
-        CloseLibrary(KeymapBase);
-        KeymapBase = NULL;
-    }
-    
-    if (CxBase) {
-        CloseLibrary(CxBase);
-        CxBase = NULL;
-    }
-    
-    if (IconBase) {
-        CloseLibrary(IconBase);
-        IconBase = NULL;
-    }
-    
-    if (GfxBase) {
-        CloseLibrary((struct Library *)GfxBase);
-        GfxBase = NULL;
-    }
-    
-    if (UtilityBase) {
-        CloseLibrary(UtilityBase);
-        UtilityBase = NULL;
-    }
-    
-    if (IntuitionBase) {
-        CloseLibrary((struct Library *)IntuitionBase);
-        IntuitionBase = NULL;
-    }
+    /* Libraries are automatically closed by Seiso cleanup stack */
+    /* This function is kept for compatibility but does nothing */
+    Printf("[CLEANUP] TTX_CleanupLibraries: (handled by Seiso cleanup stack)\n");
 }
 
 /* TurboText-style command line template */
-static const char *ttxArgTemplate = 
-    "FILES/M,"
-    "STARTUP/K,"
-    "WINDOW/K,"
-    "PUBSCREEN/K,"
-    "SETTINGS/K,"
-    "DEFINITIONS/K,"
-    "NOWINDOW/S,"
-    "WAIT/S,"
-    "BACKGROUND/S,"
-    "UNLOAD/S";
+static const char *ttxArgTemplate = "FILES/M,STARTUP/K,WINDOW/K,PUBSCREEN/K,SETTINGS/K,DEFINITIONS/K,NOWINDOW/S,WAIT/S,BACKGROUND/S,UNLOAD/S";
 
 /* Parse command-line arguments - TurboText style */
-BOOL TTX_ParseArguments(struct TTXArgs *args)
+BOOL TTX_ParseArguments(struct TTXArgs *args, struct CleanupStack *stack)
 {
     LONG argArray[10];
     ULONG i = 0;
     BOOL result = FALSE;
     
-    if (!args) {
+    if (!args || !stack) {
         return FALSE;
     }
     
@@ -151,29 +114,198 @@ BOOL TTX_ParseArguments(struct TTXArgs *args)
         ((UBYTE *)args)[i] = 0;
     }
     
+    /* ReadArgs resources will be tracked on the provided cleanup stack */
+    
     /* Initialize arg array */
     for (i = 0; i < 10; i++) {
         argArray[i] = 0;
     }
     
-    args->rda = ReadArgs(ttxArgTemplate, argArray, NULL);
+    /* ReadArgs allocates memory that must be freed with FreeArgs */
+    /* Track it with cleanup stack */
+    /* Cast const char * to STRPTR for ReadArgs compatibility */
+    /* Clear IoErr() before ReadArgs to ensure clean state */
+    SetIoErr(0);
+    args->rda = readArgs(stack, (STRPTR)ttxArgTemplate, argArray, NULL);
     if (args->rda) {
-        args->files = (STRPTR *)argArray[0];
-        args->startup = (STRPTR)argArray[1];
-        args->window = (STRPTR)argArray[2];
-        args->pubscreen = (STRPTR)argArray[3];
-        args->settings = (STRPTR)argArray[4];
-        args->definitions = (STRPTR)argArray[5];
+        /* ReadArgs succeeded - extract arguments */
+        /* CRITICAL: Copy file names before freeing RDArgs - they point to memory owned by RDArgs */
+        /* ReadArgs allocates memory for /M (multiple) parameters that gets freed with FreeArgs() */
+        if (argArray[0]) {
+            STRPTR *readArgsFiles = (STRPTR *)argArray[0];
+            ULONG fileCount = 0;
+            ULONG i = 0;
+            STRPTR *copiedFiles = NULL;
+            
+            /* Count files */
+            while (readArgsFiles[fileCount]) {
+                fileCount++;
+            }
+            
+            /* Allocate array for copied file pointers */
+            if (fileCount > 0) {
+                copiedFiles = (STRPTR *)allocVec(stack, (fileCount + 1) * sizeof(STRPTR), MEMF_CLEAR);
+                if (copiedFiles) {
+                    /* Copy each file name string */
+                    for (i = 0; i < fileCount; i++) {
+                        ULONG len = 0;
+                        STRPTR copy = NULL;
+                        
+                        /* Calculate length */
+                        while (readArgsFiles[i][len] != '\0') {
+                            len++;
+                        }
+                        
+                        /* Allocate and copy string */
+                        if (len > 0) {
+                            copy = (STRPTR)allocVec(stack, len + 1, MEMF_CLEAR);
+                            if (copy) {
+                                CopyMem(readArgsFiles[i], copy, len);
+                                copy[len] = '\0';
+                                copiedFiles[i] = copy;
+                            } else {
+                                /* Allocation failed - free what we've allocated so far */
+                                for (i = 0; i < fileCount && copiedFiles[i]; i++) {
+                                    freeVec(stack, copiedFiles[i]);
+                                }
+                                freeVec(stack, copiedFiles);
+                                copiedFiles = NULL;
+                                break;
+                            }
+                        } else {
+                            copiedFiles[i] = NULL;
+                        }
+                    }
+                    if (copiedFiles) {
+                        copiedFiles[fileCount] = NULL;
+                        args->files = copiedFiles;
+                    }
+                }
+            }
+        } else {
+            args->files = NULL;
+        }
+        
+        /* Copy other string arguments (they also point to RDArgs memory) */
+        if (argArray[1]) {
+            ULONG len = 0;
+            STRPTR copy = NULL;
+            while (((STRPTR)argArray[1])[len] != '\0') {
+                len++;
+            }
+            if (len > 0) {
+                copy = (STRPTR)allocVec(stack, len + 1, MEMF_CLEAR);
+                if (copy) {
+                    CopyMem((STRPTR)argArray[1], copy, len);
+                    copy[len] = '\0';
+                    args->startup = copy;
+                }
+            }
+        } else {
+            args->startup = NULL;
+        }
+        
+        /* Copy remaining string arguments similarly */
+        if (argArray[2]) {
+            ULONG len = 0;
+            STRPTR copy = NULL;
+            while (((STRPTR)argArray[2])[len] != '\0') {
+                len++;
+            }
+            if (len > 0) {
+                copy = (STRPTR)allocVec(stack, len + 1, MEMF_CLEAR);
+                if (copy) {
+                    CopyMem((STRPTR)argArray[2], copy, len);
+                    copy[len] = '\0';
+                    args->window = copy;
+                }
+            }
+        } else {
+            args->window = NULL;
+        }
+        
+        if (argArray[3]) {
+            ULONG len = 0;
+            STRPTR copy = NULL;
+            while (((STRPTR)argArray[3])[len] != '\0') {
+                len++;
+            }
+            if (len > 0) {
+                copy = (STRPTR)allocVec(stack, len + 1, MEMF_CLEAR);
+                if (copy) {
+                    CopyMem((STRPTR)argArray[3], copy, len);
+                    copy[len] = '\0';
+                    args->pubscreen = copy;
+                }
+            }
+        } else {
+            args->pubscreen = NULL;
+        }
+        
+        if (argArray[4]) {
+            ULONG len = 0;
+            STRPTR copy = NULL;
+            while (((STRPTR)argArray[4])[len] != '\0') {
+                len++;
+            }
+            if (len > 0) {
+                copy = (STRPTR)allocVec(stack, len + 1, MEMF_CLEAR);
+                if (copy) {
+                    CopyMem((STRPTR)argArray[4], copy, len);
+                    copy[len] = '\0';
+                    args->settings = copy;
+                }
+            }
+        } else {
+            args->settings = NULL;
+        }
+        
+        if (argArray[5]) {
+            ULONG len = 0;
+            STRPTR copy = NULL;
+            while (((STRPTR)argArray[5])[len] != '\0') {
+                len++;
+            }
+            if (len > 0) {
+                copy = (STRPTR)allocVec(stack, len + 1, MEMF_CLEAR);
+                if (copy) {
+                    CopyMem((STRPTR)argArray[5], copy, len);
+                    copy[len] = '\0';
+                    args->definitions = copy;
+                }
+            }
+        } else {
+            args->definitions = NULL;
+        }
+        
+        /* Boolean arguments are just values, not pointers */
         args->noWindow = (BOOL)argArray[6];
         args->wait = (BOOL)argArray[7];
         args->background = (BOOL)argArray[8];
         args->unload = (BOOL)argArray[9];
+        
+        /* Now safe to free RDArgs - we've copied all the strings */
+        if (args->rda && stack) {
+            freeArgs(stack, args->rda);
+            args->rda = NULL;
+        }
+        
+        /* Clear IoErr() after successful ReadArgs to prevent interference */
+        /* ReadArgs may set error codes even on success in some cases */
+        SetIoErr(0);
         result = TRUE;
     } else {
+        /* ReadArgs failed - check error code */
         LONG errorCode = IoErr();
         if (errorCode != 0 && errorCode != ERROR_REQUIRED_ARG_MISSING) {
+            /* Only print error if it's not "required argument missing" */
+            /* ERROR_REQUIRED_ARG_MISSING is normal when no args provided */
             PrintFault(errorCode, "TTX");
         }
+        /* Clear error code after handling to prevent interference with subsequent operations */
+        SetIoErr(0);
+        /* Ensure all args fields remain NULL/0 (already cleared at start) */
+        args->rda = NULL;
         /* No arguments is OK - we'll open default window */
         result = TRUE;
     }
@@ -182,7 +314,7 @@ BOOL TTX_ParseArguments(struct TTXArgs *args)
 }
 
 /* Parse ToolTypes from icon - called when argc == 0 (Workbench launch) */
-BOOL TTX_ParseToolTypes(STRPTR *fileName, struct WBStartup *wbMsg)
+BOOL TTX_ParseToolTypes(STRPTR *fileName, struct WBStartup *wbMsg, struct CleanupStack *stack)
 {
     struct DiskObject *icon = NULL;
     STRPTR *toolTypes = NULL;
@@ -190,16 +322,27 @@ BOOL TTX_ParseToolTypes(STRPTR *fileName, struct WBStartup *wbMsg)
     ULONG i = 0;
     BOOL result = FALSE;
     
-    if (!fileName || !wbMsg) {
+    if (!fileName || !wbMsg || !stack) {
         return FALSE;
     }
     
     *fileName = NULL;
     
-    /* Get icon for this program */
-    icon = GetDiskObject(wbMsg->sm_ArgList[0].wa_Name);
+    /* Get icon for this program using cleanup stack */
+    /* Clear IoErr() before GetDiskObject to ensure clean state */
+    SetIoErr(0);
+    icon = getDiskObject(stack, wbMsg->sm_ArgList[0].wa_Name);
     if (!icon) {
+        /* GetDiskObject failed - check error code and clear it */
+        LONG errorCode = IoErr();
+        if (errorCode != 0) {
+            /* Clear error to prevent icon.library from being left in undefined state */
+            SetIoErr(0);
+        }
         return FALSE;
+    } else {
+        /* GetDiskObject succeeded - clear any error code that may have been set */
+        SetIoErr(0);
     }
     
     toolTypes = icon->do_ToolTypes;
@@ -228,9 +371,10 @@ BOOL TTX_ParseToolTypes(STRPTR *fileName, struct WBStartup *wbMsg)
             len++;
         }
         
-        /* Allocate and copy */
-        copy = (STRPTR)AllocVec(len + 1, MEMF_CLEAR);
+        /* Allocate and copy using cleanup stack */
+        copy = (STRPTR)allocVec(stack, len + 1, MEMF_CLEAR);
         if (copy) {
+            Printf("[INIT] TTX_ParseToolTypes: allocated copy=%lx\n", (ULONG)copy);
             CopyMem(fileArg, copy, len);
             copy[len] = '\0';
             *fileName = copy;
@@ -238,9 +382,8 @@ BOOL TTX_ParseToolTypes(STRPTR *fileName, struct WBStartup *wbMsg)
         }
     }
     
-    if (icon) {
-        FreeDiskObject(icon);
-    }
+    /* Remove DiskObject from tracking and free it explicitly */
+    freeDiskObject(stack, icon);
     
     return result;
 }
@@ -252,16 +395,22 @@ BOOL TTX_CheckExistingInstance(STRPTR fileName)
     BOOL result = FALSE;
     
     /* Try to find existing message port */
+    /* Note: FindPort() MUST be called with Forbid()/Permit() protection */
+    /* We must validate the port - FindPort might return a stale pointer
+     * if a previous instance's port wasn't fully cleaned up */
     Forbid();
     existingPort = FindPort(TTX_MESSAGE_PORT_NAME);
     Permit();
+    /* Verify the port is valid before using it */
+    /* All validation must happen inside Forbid() to prevent race conditions */
     
     if (existingPort) {
         /* Another instance is running, send message to it */
+        /* Use global cleanup stack for inter-instance messages */
         if (fileName) {
-            result = TTX_SendToExistingInstance(TTX_MSG_OPEN_FILE, fileName);
+            result = TTX_SendToExistingInstance(g_ttxStack, TTX_MSG_OPEN_FILE, fileName);
         } else {
-            result = TTX_SendToExistingInstance(TTX_MSG_OPEN_NEW, NULL);
+            result = TTX_SendToExistingInstance(g_ttxStack, TTX_MSG_OPEN_NEW, NULL);
         }
     }
     
@@ -269,13 +418,17 @@ BOOL TTX_CheckExistingInstance(STRPTR fileName)
 }
 
 /* Send message to existing instance */
-BOOL TTX_SendToExistingInstance(ULONG msgType, STRPTR fileName)
+BOOL TTX_SendToExistingInstance(struct CleanupStack *stack, ULONG msgType, STRPTR fileName)
 {
     struct MsgPort *existingPort = NULL;
     struct TTXMessage *msg = NULL;
     ULONG fileNameLen = 0;
     STRPTR fileNameCopy = NULL;
     BOOL result = FALSE;
+    
+    if (!stack) {
+        return FALSE;
+    }
     
     /* Find existing message port */
     Forbid();
@@ -293,11 +446,13 @@ BOOL TTX_SendToExistingInstance(ULONG msgType, STRPTR fileName)
         }
     }
     
-    /* Allocate message */
-    msg = (struct TTXMessage *)AllocVec(sizeof(struct TTXMessage), MEMF_CLEAR);
+    /* Allocate message using cleanup stack */
+    /* Note: Once sent, the receiving instance will free it, so we remove it from tracking */
+    msg = (struct TTXMessage *)allocVec(stack, sizeof(struct TTXMessage), MEMF_CLEAR);
     if (!msg) {
-                return FALSE;
-            }
+        return FALSE;
+    }
+    Printf("[INIT] TTX_SendToExistingInstance: allocated msg=%lx\n", (ULONG)msg);
     
     /* Fill in message */
     msg->msg.mn_Node.ln_Type = NT_MESSAGE;
@@ -309,19 +464,30 @@ BOOL TTX_SendToExistingInstance(ULONG msgType, STRPTR fileName)
     
     /* Allocate and copy filename if provided */
     if (fileName && fileNameLen > 0) {
-        fileNameCopy = (STRPTR)AllocVec(fileNameLen + 1, MEMF_CLEAR);
+        fileNameCopy = (STRPTR)allocVec(stack, fileNameLen + 1, MEMF_CLEAR);
         if (fileNameCopy) {
+            Printf("[INIT] TTX_SendToExistingInstance: allocated fileNameCopy=%lx\n", (ULONG)fileNameCopy);
             CopyMem(fileName, fileNameCopy, fileNameLen);
             fileNameCopy[fileNameLen] = '\0';
             msg->fileName = fileNameCopy;
         } else {
-            FreeVec(msg);
-                return FALSE;
+            Printf("[CLEANUP] TTX_SendToExistingInstance: freeing msg=%lx (error path)\n", (ULONG)msg);
+            freeVec(stack, msg);
+            return FALSE;
         }
     }
     
-    /* Send message */
+    /* Send message - for one-way messages (mn_ReplyPort=NULL), receiver must free after ReplyMsg() */
+    /* According to Exec docs: ALL messages must be replied to with ReplyMsg() */
+    /* If mn_ReplyPort is NULL, ReplyMsg() does nothing, but receiver still calls it */
+    /* Receiver will free the message after calling ReplyMsg() */
     PutMsg(existingPort, (struct Message *)msg);
+    /* Untrack from our stack - receiver takes ownership and will free it after ReplyMsg() */
+    /* Use UntrackResource to remove from tracking without calling cleanup function */
+    if (msg->fileName) {
+        UntrackResource(stack, msg->fileName);
+    }
+    UntrackResource(stack, msg);
     result = TRUE;
     
     return result;
@@ -330,107 +496,100 @@ BOOL TTX_SendToExistingInstance(ULONG msgType, STRPTR fileName)
 /* Setup message port for single-instance operation */
 BOOL TTX_SetupMessagePort(struct TTXApplication *app)
 {
-    if (!app) {
+    Printf("[INIT] TTX_SetupMessagePort: START\n");
+    if (!app || !app->cleanupStack) {
+        Printf("[INIT] TTX_SetupMessagePort: FAIL (app=%lx, stack=%lx)\n", (ULONG)app, app ? (ULONG)app->cleanupStack : 0);
         return FALSE;
     }
     
-    /* Create application message port */
-    app->appPort = CreateMsgPort();
+    /* Create application message port using Seiso */
+    app->appPort = createMsgPort(app->cleanupStack);
     if (!app->appPort) {
-            return FALSE;
+        Printf("[INIT] TTX_SetupMessagePort: FAIL (createMsgPort failed)\n");
+        return FALSE;
     }
     
-    /* Set port name for finding by other instances */
+    /* Set port name but DON'T add it yet - we'll add it after checking for existing instances */
+    /* This prevents us from finding our own port when checking */
     Forbid();
     app->appPort->mp_Node.ln_Name = TTX_MESSAGE_PORT_NAME;
     Permit();
     
+    Printf("[INIT] TTX_SetupMessagePort: SUCCESS (port=%lx, name=%s, not yet added)\n", (ULONG)app->appPort, TTX_MESSAGE_PORT_NAME);
     return TRUE;
 }
 
-/* Remove message port */
+/* Add message port to system (call this after checking for existing instances) */
+BOOL TTX_AddMessagePort(struct TTXApplication *app)
+{
+    if (!app || !app->appPort) {
+        return FALSE;
+    }
+    
+    /* Add port to system port list so FindPort() can find it */
+    /* This makes the port "public" so other instances can send messages */
+    Forbid();
+    AddPort(app->appPort);
+    Permit();
+    
+    Printf("[INIT] TTX_AddMessagePort: port added to system\n");
+    return TRUE;
+}
+
+/* Remove message port - now handled automatically by cleanup stack */
 VOID TTX_RemoveMessagePort(struct TTXApplication *app)
 {
-    struct Message *msg = NULL;
-    
-    if (!app) {
-        return;
-    }
-    
-    if (app->appPort) {
-        /* Clean up any pending messages before deleting port */
-        while ((msg = GetMsg(app->appPort)) != NULL) {
-            struct TTXMessage *ttxMsg = (struct TTXMessage *)msg;
-            /* Free message and filename */
-            if (ttxMsg->fileName) {
-                FreeVec(ttxMsg->fileName);
-            }
-            FreeVec(ttxMsg);
-        }
-        Forbid();
-        app->appPort->mp_Node.ln_Name = NULL;
-        Permit();
-        DeleteMsgPort(app->appPort);
-        app->appPort = NULL;
-    }
+    /* Resources are automatically cleaned up by Seiso cleanup stack */
+    /* This function is kept for compatibility but does nothing */
+    /* Messages are cleaned up in TTX_Cleanup before stack deletion */
+    Printf("[CLEANUP] TTX_RemoveMessagePort: (handled by Seiso cleanup stack)\n");
 }
 
 /* Setup commodity for single-instance (appears in Exchange) */
+/* Setup commodity for single-instance (appears in Exchange) */
 BOOL TTX_SetupCommodity(struct TTXApplication *app)
 {
-    struct NewBroker nb;
-    LONG brokerError = 0;
     BOOL result = FALSE;
     
+    Printf("[INIT] TTX_SetupCommodity: START\n");
     if (!app || !CxBase) {
+        Printf("[INIT] TTX_SetupCommodity: FAIL (app=%lx, CxBase=%lx)\n", (ULONG)app, (ULONG)CxBase);
         return FALSE;
     }
     
-    /* Create message port for commodity broker */
-    /* This port receives CXM_COMMAND messages from Exchange */
-    app->brokerPort = CreateMsgPort();
+    if (!app->cleanupStack) {
+        Printf("[INIT] TTX_SetupCommodity: FAIL (cleanupStack=NULL)\n");
+        return FALSE;
+    }
+    
+    /* Create message port for commodity broker using Seiso */
+    app->brokerPort = createMsgPort(app->cleanupStack);
     if (!app->brokerPort) {
+        Printf("[INIT] TTX_SetupCommodity: FAIL (createMsgPort failed)\n");
         return FALSE;
     }
+    Printf("[INIT] TTX_SetupCommodity: brokerPort=%lx\n", (ULONG)app->brokerPort);
     
-    /* Initialize NewBroker structure */
-    nb.nb_Version = NB_VERSION;
-    nb.nb_Name = (STRPTR)"TTX";
-    nb.nb_Title = (STRPTR)"TTX Text Editor";
-    nb.nb_Descr = (STRPTR)"ToolKit Text eXtension";
-    nb.nb_Unique = NBU_UNIQUE | NBU_NOTIFY;
-    nb.nb_Flags = COF_SHOW_HIDE;
-    nb.nb_Pri = 0;  /* Default priority */
-    nb.nb_Port = app->brokerPort;
-    nb.nb_ReservedChannel = 0;
-    
-    /* Create broker */
-    /* For single-instance operation, we only need the broker */
-    /* No filter/sender/translator chain needed - broker handles Exchange commands */
-    app->broker = CxBroker(&nb, &brokerError);
+    /* Create broker using Seiso */
+    /* Note: cxBroker handles NewBroker setup and activation internally */
+    app->broker = cxBroker(app->cleanupStack, app->brokerPort, "TTX");
     if (!app->broker) {
-        /* Check if broker already exists (duplicate instance) */
-        if (brokerError == CBERR_DUP) {
-            /* Another instance is running - this will be handled by TTX_CheckExistingInstance */
-            DeleteMsgPort(app->brokerPort);
-            app->brokerPort = NULL;
-            return FALSE;
-        }
-        DeleteMsgPort(app->brokerPort);
+        /* Broker creation failed - could be duplicate instance or other error */
+        /* Duplicate instance detection is handled by TTX_CheckExistingInstance */
+        deleteMsgPort(app->cleanupStack, app->brokerPort);
         app->brokerPort = NULL;
         return FALSE;
     }
     
-    /* Activate the broker */
-    /* Brokers are created inactive, must activate to receive messages */
-    ActivateCxObj(app->broker, TRUE);
-    
-    /* Verify broker is active */
-    if (ActivateCxObj(app->broker, -1L) == 0) {
+    /* Verify broker is active (cxBroker activates it, but verify) */
+    /* ActivateCxObj returns non-zero on success, 0 on failure */
+    /* Use TRUE (1) to activate, not -1L */
+    if (ActivateCxObj(app->broker, TRUE) == 0) {
         /* Broker failed to activate */
-        DeleteCxObjAll(app->broker);
+        Printf("[INIT] TTX_SetupCommodity: broker activation failed\n");
+        deleteCxObjAll(app->cleanupStack, app->broker);
         app->broker = NULL;
-        DeleteMsgPort(app->brokerPort);
+        deleteMsgPort(app->cleanupStack, app->brokerPort);
         app->brokerPort = NULL;
         return FALSE;
     }
@@ -442,39 +601,17 @@ BOOL TTX_SetupCommodity(struct TTXApplication *app)
     }
     
     result = TRUE;
+    Printf("[INIT] TTX_SetupCommodity: SUCCESS (broker=%lx)\n", (ULONG)app->broker);
     return result;
 }
 
-/* Remove commodity */
+/* Remove commodity - now handled automatically by cleanup stack */
 VOID TTX_RemoveCommodity(struct TTXApplication *app)
 {
-    struct Message *msg = NULL;
-    
-    if (!app || !CxBase) {
-        return;
-    }
-    
-    if (app->broker) {
-        /* Deactivate broker */
-        ActivateCxObj(app->broker, FALSE);
-        
-        /* Remove from input stream */
-        RemoveCxObj(app->broker);
-        
-        /* Delete all commodity objects */
-        DeleteCxObjAll(app->broker);
-        app->broker = NULL;
-    }
-    
-    if (app->brokerPort) {
-        /* Clean up any pending messages before deleting port */
-        while ((msg = GetMsg(app->brokerPort)) != NULL) {
-            /* Reply to commodity messages (required by commodities.library) */
-            ReplyMsg(msg);
-        }
-        DeleteMsgPort(app->brokerPort);
-        app->brokerPort = NULL;
-    }
+    /* Resources are automatically cleaned up by Seiso cleanup stack */
+    /* This function is kept for compatibility but does nothing */
+    /* Messages are cleaned up in TTX_Cleanup before stack deletion */
+    Printf("[CLEANUP] TTX_RemoveCommodity: (handled by Seiso cleanup stack)\n");
 }
 
 /* Create a new session (window) */
@@ -486,40 +623,46 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
     ULONG titleLen = 0;
     BOOL result = FALSE;
     
-    if (!app) {
+    Printf("[INIT] TTX_CreateSession: START (fileName=%s)\n", fileName ? fileName : (STRPTR)"(null)");
+    if (!app || !app->cleanupStack) {
+        Printf("[INIT] TTX_CreateSession: FAIL (app=%lx, stack=%lx)\n", (ULONG)app, app ? (ULONG)app->cleanupStack : 0);
         return FALSE;
     }
     
-    /* Allocate session structure */
-    session = (struct Session *)AllocVec(sizeof(struct Session), MEMF_CLEAR);
+    /* Allocate session structure on global cleanup stack */
+    session = (struct Session *)allocVec(app->cleanupStack, sizeof(struct Session), MEMF_CLEAR);
     if (!session) {
+        Printf("[INIT] TTX_CreateSession: FAIL (allocVec session failed)\n");
         return FALSE;
     }
+    Printf("[INIT] TTX_CreateSession: session=%lx\n", (ULONG)session);
     
     /* Initialize session */
     session->sessionID = app->nextSessionID++;
+    session->cleanupStack = app->cleanupStack;  /* Store pointer to global cleanup stack */
     session->modified = FALSE;
     session->readOnly = FALSE;
     session->window = NULL;
+    session->menuStrip = NULL;  /* Will be created after window is opened */
+    session->vertPropGadget = NULL;  /* Vertical scroll bar prop gadget */
+    session->horizPropGadget = NULL;  /* Horizontal scroll bar prop gadget */
     session->fileName = NULL;
     session->buffer = NULL;
+    session->next = NULL;  /* Initialize list pointers */
+    session->prev = NULL;
     
-    /* Allocate and initialize text buffer */
-    session->buffer = (struct TextBuffer *)AllocVec(sizeof(struct TextBuffer), MEMF_CLEAR);
+    /* Allocate and initialize text buffer using global cleanup stack */
+    session->buffer = (struct TextBuffer *)allocVec(app->cleanupStack, sizeof(struct TextBuffer), MEMF_CLEAR);
     if (!session->buffer) {
-        if (session->fileName) {
-            FreeVec(session->fileName);
-        }
-        FreeVec(session);
+        Printf("[INIT] TTX_CreateSession: FAIL (allocVec buffer failed)\n");
+        freeVec(app->cleanupStack, session);
         return FALSE;
     }
+    Printf("[INIT] TTX_CreateSession: buffer=%lx\n", (ULONG)session->buffer);
     
-    if (!InitTextBuffer(session->buffer)) {
-        FreeVec(session->buffer);
-        if (session->fileName) {
-            FreeVec(session->fileName);
-        }
-        FreeVec(session);
+    if (!InitTextBuffer(session->buffer, app->cleanupStack)) {
+        Printf("[INIT] TTX_CreateSession: FAIL (InitTextBuffer failed)\n");
+        freeVec(app->cleanupStack, session);
         return FALSE;
     }
     
@@ -530,8 +673,9 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
             titleLen++;
         }
         if (titleLen > 0) {
-            session->fileName = (STRPTR)AllocVec(titleLen + 1, MEMF_CLEAR);
+            session->fileName = (STRPTR)allocVec(app->cleanupStack, titleLen + 1, MEMF_CLEAR);
             if (session->fileName) {
+                Printf("[INIT] TTX_CreateSession: allocated fileName=%lx\n", (ULONG)session->fileName);
                 CopyMem(fileName, session->fileName, titleLen);
                 session->fileName[titleLen] = '\0';
             }
@@ -548,8 +692,9 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
         titleLen = 8; /* "Untitled" */
     }
     
-    titleText = (STRPTR)AllocVec(titleLen + 20, MEMF_CLEAR);
+    titleText = (STRPTR)allocVec(app->cleanupStack, titleLen + 20, MEMF_CLEAR);
     if (titleText) {
+        Printf("[INIT] TTX_CreateSession: allocated titleText=%lx\n", (ULONG)titleText);
         if (session->fileName) {
             CopyMem(session->fileName, titleText, titleLen);
             titleText[titleLen] = '\0';
@@ -559,60 +704,160 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
         }
     }
     
-    /* Lock public screen */
+    /* Lock public screen (temporary, doesn't need tracking) */
     screen = LockPubScreen((STRPTR)"Workbench");
     if (!screen) {
-        if (titleText) {
-            FreeVec(titleText);
-        }
-        if (session->fileName) {
-            FreeVec(session->fileName);
-        }
-        FreeVec(session);
+        Printf("[INIT] TTX_CreateSession: FAIL (LockPubScreen failed)\n");
+        freeVec(app->cleanupStack, session);
         return FALSE;
     }
     
-    /* Open window */
-    /* Use proper colors: On Workbench screen, pen 1 = black, pen 2 = grey */
-    /* We'll set the RastPort pens directly in RenderText for content area */
-    session->window = OpenWindowTags(NULL,
-                                      WA_InnerWidth, 600,
-                                      WA_InnerHeight, 400,
-                                      WA_Title, titleText ? titleText : (session->fileName ? session->fileName : (STRPTR)"Untitled"),
-                                      WA_IDCMP, IDCMP_CLOSEWINDOW | IDCMP_VANILLAKEY | IDCMP_RAWKEY | IDCMP_REFRESHWINDOW | IDCMP_NEWSIZE | IDCMP_MOUSEBUTTONS,
-                                      WA_DragBar, TRUE,
-                                      WA_ScreenTitle, (STRPTR)"TTX",
-                                      WA_DepthGadget, TRUE,
-                                      WA_CloseGadget, TRUE,
-                                      WA_SizeGadget, TRUE,
-                                      WA_AutoAdjust, TRUE,
-                                      WA_SimpleRefresh, TRUE,
-                                      WA_Activate, TRUE,
-                                      WA_PubScreen, screen,
-                                      TAG_DONE);
+    /* Open window using global cleanup stack */
+    Printf("[INIT] TTX_CreateSession: opening window\n");
+    {
+        struct TagItem windowTags[16];
+        windowTags[0].ti_Tag = WA_InnerWidth;
+        windowTags[0].ti_Data = 600;
+        windowTags[1].ti_Tag = WA_InnerHeight;
+        windowTags[1].ti_Data = 400;
+        windowTags[2].ti_Tag = WA_Title;
+        windowTags[2].ti_Data = (ULONG)(titleText ? titleText : (session->fileName ? session->fileName : (STRPTR)"Untitled"));
+        windowTags[3].ti_Tag = WA_IDCMP;
+        windowTags[3].ti_Data = IDCMP_CLOSEWINDOW | IDCMP_VANILLAKEY | IDCMP_RAWKEY | IDCMP_REFRESHWINDOW | IDCMP_NEWSIZE | IDCMP_MOUSEBUTTONS | IDCMP_MENUPICK | IDCMP_IDCMPUPDATE;
+        windowTags[4].ti_Tag = WA_DragBar;
+        windowTags[4].ti_Data = TRUE;
+        windowTags[5].ti_Tag = WA_ScreenTitle;
+        windowTags[5].ti_Data = (ULONG)"TTX";
+        windowTags[6].ti_Tag = WA_DepthGadget;
+        windowTags[6].ti_Data = TRUE;
+        windowTags[7].ti_Tag = WA_CloseGadget;
+        windowTags[7].ti_Data = TRUE;
+        windowTags[8].ti_Tag = WA_SizeGadget;
+        windowTags[8].ti_Data = TRUE;
+        windowTags[9].ti_Tag = WA_AutoAdjust;
+        windowTags[9].ti_Data = TRUE;
+        /* Use SmartRefresh for super bitmap support (Graphics v39+) */
+        /* SuperBitMap requires SmartRefresh, not SimpleRefresh */
+        windowTags[10].ti_Tag = WA_SmartRefresh;
+        windowTags[10].ti_Data = TRUE;
+        windowTags[11].ti_Tag = WA_Activate;
+        windowTags[11].ti_Data = TRUE;
+        windowTags[12].ti_Tag = WA_PubScreen;
+        windowTags[12].ti_Data = (ULONG)screen;
+        windowTags[13].ti_Tag = WA_NewLookMenus;
+        windowTags[13].ti_Data = TRUE;
+        /* Super bitmap will be set after window creation if supported */
+        windowTags[14].ti_Tag = TAG_DONE;
+        windowTags[14].ti_Data = 0;
+        
+        session->window = openWindowTagList(app->cleanupStack, windowTags);
+    }
     
     UnlockPubScreen((STRPTR)"Workbench", screen);
     
-    if (titleText) {
-        FreeVec(titleText);
-    }
-    
     if (!session->window) {
-        if (session->fileName) {
-            FreeVec(session->fileName);
-        }
-        FreeVec(session);
+        Printf("[INIT] TTX_CreateSession: FAIL (openWindow failed)\n");
+        freeVec(app->cleanupStack, session);
         return FALSE;
     }
+    Printf("[INIT] TTX_CreateSession: window=%lx\n", (ULONG)session->window);
     
     /* Set window limits */
     WindowLimits(session->window, 200, 100, 32767, 32767);
     
+    /* Create scroll bar prop gadgets */
+    {
+        struct Screen *winScreen = session->window->WScreen;
+        struct DrawInfo *drawInfo = NULL;
+        struct Gadget *gadgetList = NULL;
+        static LONG icamap[4] = {GA_ID, ICSPECIAL_CODE, 0, 0};
+        
+        /* Get screen draw info for gadget creation */
+        drawInfo = GetScreenDrawInfo(winScreen);
+        if (drawInfo) {
+            /* Create vertical scroll bar prop gadget (right border) */
+            session->vertPropGadget = (struct Gadget *)NewObject(NULL, PROPGCLASS,
+                GA_RightBorder, TRUE,
+                GA_RelRight, -(winScreen->WBorRight + 3),
+                GA_RelHeight, -(winScreen->WBorTop + winScreen->Font->ta_YSize + 1 + 4 + winScreen->WBorBottom + winScreen->Font->ta_YSize + winScreen->WBorRight + winScreen->WBorRight),
+                GA_Top, winScreen->WBorTop + winScreen->Font->ta_YSize + 1 + 2,
+                GA_Next, gadgetList,
+                ICA_TARGET, ICTARGET_IDCMP,
+                ICA_MAP, icamap,
+                PGA_Freedom, FREEVERT,
+                PGA_NewLook, TRUE,
+                PGA_Borderless, TRUE,
+                PGA_VertBody, MAXBODY,
+                GA_ID, GID_VERT_PROP,
+                TAG_DONE);
+            
+            if (session->vertPropGadget) {
+                gadgetList = session->vertPropGadget;
+                Printf("[INIT] TTX_CreateSession: vertical prop gadget created\n");
+            }
+            
+            /* Create horizontal scroll bar prop gadget (bottom border) */
+            session->horizPropGadget = (struct Gadget *)NewObject(NULL, PROPGCLASS,
+                GA_BottomBorder, TRUE,
+                GA_RelBottom, -(winScreen->WBorBottom + 3),
+                GA_RelWidth, -(winScreen->WBorLeft + winScreen->WBorRight + 3),
+                GA_Left, winScreen->WBorLeft + 3,
+                GA_Next, gadgetList,
+                ICA_TARGET, ICTARGET_IDCMP,
+                ICA_MAP, icamap,
+                PGA_Freedom, FREEHORIZ,
+                PGA_NewLook, TRUE,
+                PGA_Borderless, TRUE,
+                PGA_HorizBody, MAXBODY,
+                GA_ID, GID_HORIZ_PROP,
+                TAG_DONE);
+            
+            if (session->horizPropGadget) {
+                gadgetList = session->horizPropGadget;
+                Printf("[INIT] TTX_CreateSession: horizontal prop gadget created\n");
+            }
+            
+            /* Add gadgets to window */
+            if (gadgetList) {
+                AddGList(session->window, gadgetList, (UWORD)-1, (UWORD)-1, NULL);
+                RefreshGList(gadgetList, session->window, NULL, (UWORD)-1);
+            }
+            
+            FreeScreenDrawInfo(winScreen, drawInfo);
+        }
+    }
+    
+    /* Create menu strip for this window */
+    if (!TTX_CreateMenuStrip(session)) {
+        Printf("[INIT] TTX_CreateSession: WARN (menu creation failed, continuing without menu)\n");
+    }
+    
+    /* Create super bitmap for optimized scrolling (Graphics v39+) */
+    if (session->buffer && GfxBase && ((struct Library *)GfxBase)->lib_Version >= 39) {
+        if (CreateSuperBitMap(session->buffer, session->window)) {
+            /* Set super bitmap on window for ScrollLayer support */
+            /* Note: This requires the window to be created with WA_SmartRefresh */
+            /* The super bitmap is already allocated, but we need to tell the window about it */
+            /* However, WA_SuperBitMap must be set at window creation time */
+            /* So we'll use ScrollLayer without WA_SuperBitMap for now */
+            /* ScrollLayer works with regular windows too, just not as efficiently */
+            Printf("[INIT] TTX_CreateSession: super bitmap created\n");
+        } else {
+            Printf("[INIT] TTX_CreateSession: super bitmap creation failed (continuing without it)\n");
+        }
+    }
+    
     /* Load file if filename provided */
     if (session->fileName && session->buffer) {
-        if (!LoadFile(session->fileName, session->buffer)) {
+        if (!LoadFile(session->fileName, session->buffer, app->cleanupStack)) {
             /* File load failed, but keep empty buffer */
         }
+    }
+    
+    /* Calculate max scroll values and update scroll bars */
+    if (session->buffer) {
+        CalculateMaxScroll(session->buffer, session->window);
+        UpdateScrollBars(session);
     }
     
     /* Initial render */
@@ -622,22 +867,30 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
     }
     
     /* Add to session list */
+    session->prev = NULL;  /* New session is always first in list */
     if (app->sessions) {
         session->next = app->sessions;
         app->sessions->prev = session;
+    } else {
+        session->next = NULL;  /* Explicitly set if first session */
     }
     app->sessions = session;
     app->sessionCount++;
     app->activeSession = session;
     
     result = TRUE;
+    Printf("[INIT] TTX_CreateSession: SUCCESS (sessionID=%lu, window=%lx)\n", session->sessionID, (ULONG)session->window);
     return result;
 }
 
 /* Destroy a session */
 VOID TTX_DestroySession(struct TTXApplication *app, struct Session *session)
 {
+    struct IntuiMessage *imsg = NULL;
+    
+    Printf("[CLEANUP] TTX_DestroySession: START (session=%lx, sessionID=%lu)\n", (ULONG)session, session ? session->sessionID : 0);
     if (!app || !session) {
+        Printf("[CLEANUP] TTX_DestroySession: DONE (app=%lx, session=%lx)\n", (ULONG)app, (ULONG)session);
         return;
     }
     
@@ -652,40 +905,44 @@ VOID TTX_DestroySession(struct TTXApplication *app, struct Session *session)
         session->next->prev = session->prev;
     }
     
-    /* Close window */
-    if (session->window) {
-        /* Clean up any pending messages before closing window */
-        struct IntuiMessage *imsg = NULL;
-        if (session->window->UserPort) {
-            while ((imsg = (struct IntuiMessage *)GetMsg(session->window->UserPort)) != NULL) {
-                ReplyMsg((struct Message *)imsg);
-            }
+    /* Clean up any pending messages before closing window */
+    /* Note: We check for INVALID_RESOURCE to avoid accessing freed windows */
+    if (session->window && session->window != INVALID_RESOURCE && session->window->UserPort) {
+        while ((imsg = (struct IntuiMessage *)GetMsg(session->window->UserPort)) != NULL) {
+            ReplyMsg((struct Message *)imsg);
         }
-        CloseWindow(session->window);
-        session->window = NULL;
     }
     
-    /* Free text buffer */
-    if (session->buffer) {
-        FreeTextBuffer(session->buffer);
-        FreeVec(session->buffer);
-        session->buffer = NULL;
-    }
-    
-    /* Free filename */
-    if (session->fileName) {
-        FreeVec(session->fileName);
-        session->fileName = NULL;
-    }
-    
-    /* Free session structure */
-    FreeVec(session);
-    app->sessionCount--;
-    
-    /* Update active session */
+    /* Update active session BEFORE freeing session structure */
     if (app->activeSession == session) {
         app->activeSession = app->sessions;
     }
+    
+    /* Decrement session count BEFORE freeing */
+    app->sessionCount--;
+    
+    /* Free menu strip BEFORE window closes (window must still be valid for ClearMenuStrip) */
+    /* The menu is tracked on the global cleanup stack, but we need to free it manually */
+    if (session) {
+        TTX_FreeMenuStrip(session);
+    }
+    
+    /* Free text buffer - all resources are tracked on global cleanup stack */
+    if (session->buffer && app->cleanupStack) {
+        FreeTextBuffer(session->buffer, app->cleanupStack);
+    }
+    
+    /* Mark window as invalid after cleanup stack handles it */
+    if (session->window && session->window != INVALID_RESOURCE) {
+        session->window = INVALID_RESOURCE;
+    }
+    
+    /* Free session structure from global cleanup stack */
+    Printf("[CLEANUP] TTX_DestroySession: freeing session=%lx\n", (ULONG)session);
+    if (app && app->cleanupStack && session) {
+        freeVec(app->cleanupStack, session);
+    }
+    Printf("[CLEANUP] TTX_DestroySession: DONE (remaining sessions=%lu)\n", app->sessionCount);
 }
 
 /* Handle commodity message (from Exchange or other instances) */
@@ -695,6 +952,7 @@ BOOL TTX_HandleCommodityMessage(struct TTXApplication *app, struct Message *msg)
     ULONG cxMsgID = 0;
     ULONG cxMsgType = 0;
     BOOL result = FALSE;
+    struct TTXMessage *ttxMsg = NULL;
     
     if (!app || !msg) {
         return FALSE;
@@ -714,7 +972,7 @@ BOOL TTX_HandleCommodityMessage(struct TTXApplication *app, struct Message *msg)
             if (cxMsgID == 1L) {
                 /* This is an inter-instance message from CxSender */
                 /* The actual message data is in CxMsgData */
-                struct TTXMessage *ttxMsg = (struct TTXMessage *)CxMsgData((const CxMsg *)cxMsg);
+                ttxMsg = (struct TTXMessage *)CxMsgData((const CxMsg *)cxMsg);
                 if (ttxMsg) {
                     switch (ttxMsg->type) {
                         case TTX_MSG_OPEN_FILE:
@@ -735,7 +993,12 @@ BOOL TTX_HandleCommodityMessage(struct TTXApplication *app, struct Message *msg)
                             break;
                     }
                     
-                    /* Free message and filename */
+                    /* According to Exec message docs: ALL messages must be replied to with ReplyMsg() */
+                    /* For one-way messages (mn_ReplyPort=NULL), ReplyMsg() does nothing */
+                    /* But we still call it, then free the message since no reply will come back */
+                    ReplyMsg(msg);
+                    /* Messages from other instances were allocated by THEIR cleanup stack, not ours */
+                    /* So we must free them directly with FreeVec, not through our cleanup stack */
                     if (ttxMsg->fileName) {
                         FreeVec(ttxMsg->fileName);
                     }
@@ -808,6 +1071,14 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
     }
     
             switch (imsg->Class) {
+                case IDCMP_MENUPICK:
+                    /* Handle menu selection */
+                    if (imsg->Code != MENUNULL) {
+                        TTX_HandleMenuPick(app, session, (imsg->Code >> 16) & 0xFFFF, imsg->Code & 0xFFFF);
+                    }
+                    result = TRUE;
+                    break;
+                    
                 case IDCMP_CLOSEWINDOW:
             TTX_DestroySession(app, session);
             result = TRUE;
@@ -823,7 +1094,7 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                 MouseToCursor(session->buffer, session->window, imsg->MouseX, imsg->MouseY, &newCursorX, &newCursorY);
                 
                 /* Update cursor position */
-                if (newCursorY < session->buffer->lineCount) {
+                if (session->buffer && session->buffer->lines && newCursorY < session->buffer->lineCount) {
                     session->buffer->cursorY = newCursorY;
                     if (newCursorX <= session->buffer->lines[newCursorY].length) {
                         session->buffer->cursorX = newCursorX;
@@ -832,7 +1103,9 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                     }
                 }
                 
+                CalculateMaxScroll(session->buffer, session->window);
                 ScrollToCursor(session->buffer, session->window);
+                UpdateScrollBars(session);
                 RenderText(session->window, session->buffer);
                 UpdateCursor(session->window, session->buffer);
                 result = TRUE;
@@ -860,29 +1133,37 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                         processed = TRUE;
                     } else if ((keyCode >= 27 && keyCode <= 126) || (keyCode >= 128 && keyCode <= 255)) {
                         /* Printable character - insert directly */
-                        InsertChar(session->buffer, keyCode);
+                        InsertChar(session->buffer, keyCode, session->cleanupStack);
+                        CalculateMaxScroll(session->buffer, session->window);
                         ScrollToCursor(session->buffer, session->window);
+                        UpdateScrollBars(session);
                         RenderText(session->window, session->buffer);
                         UpdateCursor(session->window, session->buffer);
                         processed = TRUE;
                     } else if (keyCode == 0x08) {
                         /* Backspace */
-                        DeleteChar(session->buffer);
+                        DeleteChar(session->buffer, session->cleanupStack);
+                        CalculateMaxScroll(session->buffer, session->window);
                         ScrollToCursor(session->buffer, session->window);
+                        UpdateScrollBars(session);
                         RenderText(session->window, session->buffer);
                         UpdateCursor(session->window, session->buffer);
                         processed = TRUE;
                     } else if (keyCode == 0x7F) {
                         /* Delete key (forward delete) */
-                        DeleteForward(session->buffer);
+                        DeleteForward(session->buffer, session->cleanupStack);
+                        CalculateMaxScroll(session->buffer, session->window);
                         ScrollToCursor(session->buffer, session->window);
+                        UpdateScrollBars(session);
                         RenderText(session->window, session->buffer);
                         UpdateCursor(session->window, session->buffer);
                         processed = TRUE;
                     } else if (keyCode == 0x0A || keyCode == 0x0D) {
                         /* Enter/Return */
-                        InsertNewline(session->buffer);
+                        InsertNewline(session->buffer, session->cleanupStack);
+                        CalculateMaxScroll(session->buffer, session->window);
                         ScrollToCursor(session->buffer, session->window);
+                        UpdateScrollBars(session);
                         RenderText(session->window, session->buffer);
                         UpdateCursor(session->window, session->buffer);
                         processed = TRUE;
@@ -893,8 +1174,8 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                         break;
                     } else if (keyCode == 0x45 && (qualifiers & IEQUALIFIER_CONTROL)) {
                         /* Ctrl+E = Save */
-                        if (session->fileName && session->buffer) {
-                            if (SaveFile(session->fileName, session->buffer)) {
+                        if (session->fileName && session->buffer && app->cleanupStack) {
+                            if (SaveFile(session->fileName, session->buffer, app->cleanupStack)) {
                                 session->modified = FALSE;
                             }
                         }
@@ -928,56 +1209,65 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                     /* Arrow keys: 0x4F=Left, 0x4E=Right, 0x4C=Up, 0x4D=Down (Amiga raw key codes) */
                     if (keyCode == 0x4F) {
                         /* Left arrow */
-                        if (session->buffer->cursorX > 0) {
-                            session->buffer->cursorX--;
-                        } else if (session->buffer->cursorY > 0) {
-                            session->buffer->cursorY--;
-                            session->buffer->cursorX = session->buffer->lines[session->buffer->cursorY].length;
+                        if (session->buffer && session->buffer->lines) {
+                            if (session->buffer->cursorX > 0) {
+                                session->buffer->cursorX--;
+                            } else if (session->buffer->cursorY > 0 && session->buffer->cursorY - 1 < session->buffer->lineCount) {
+                                session->buffer->cursorY--;
+                                session->buffer->cursorX = session->buffer->lines[session->buffer->cursorY].length;
+                            }
                         }
                         ScrollToCursor(session->buffer, session->window);
+                        UpdateScrollBars(session);
                         RenderText(session->window, session->buffer);
                         UpdateCursor(session->window, session->buffer);
                         processed = TRUE;
                     } else if (keyCode == 0x4E) {
                         /* Right arrow */
-                        if (session->buffer->cursorX < session->buffer->lines[session->buffer->cursorY].length) {
-                            session->buffer->cursorX++;
-                        } else if (session->buffer->cursorY < session->buffer->lineCount - 1) {
-                            session->buffer->cursorY++;
-                            session->buffer->cursorX = 0;
+                        if (session->buffer && session->buffer->lines && session->buffer->cursorY < session->buffer->lineCount) {
+                            if (session->buffer->cursorX < session->buffer->lines[session->buffer->cursorY].length) {
+                                session->buffer->cursorX++;
+                            } else if (session->buffer->cursorY < session->buffer->lineCount - 1) {
+                                session->buffer->cursorY++;
+                                session->buffer->cursorX = 0;
+                            }
                         }
                         ScrollToCursor(session->buffer, session->window);
+                        UpdateScrollBars(session);
                         RenderText(session->window, session->buffer);
                         UpdateCursor(session->window, session->buffer);
                         processed = TRUE;
                     } else if (keyCode == 0x4C) {
                         /* Up arrow */
-                        if (session->buffer->cursorY > 0) {
+                        if (session->buffer && session->buffer->lines && session->buffer->cursorY > 0) {
                             session->buffer->cursorY--;
-                            if (session->buffer->cursorX > session->buffer->lines[session->buffer->cursorY].length) {
+                            if (session->buffer->cursorY < session->buffer->lineCount && session->buffer->cursorX > session->buffer->lines[session->buffer->cursorY].length) {
                                 session->buffer->cursorX = session->buffer->lines[session->buffer->cursorY].length;
                             }
                         }
                         ScrollToCursor(session->buffer, session->window);
+                        UpdateScrollBars(session);
                         RenderText(session->window, session->buffer);
                         UpdateCursor(session->window, session->buffer);
                         processed = TRUE;
                     } else if (keyCode == 0x4D) {
                         /* Down arrow */
-                        if (session->buffer->cursorY < session->buffer->lineCount - 1) {
+                        if (session->buffer && session->buffer->lines && session->buffer->cursorY < session->buffer->lineCount - 1) {
                             session->buffer->cursorY++;
-                            if (session->buffer->cursorX > session->buffer->lines[session->buffer->cursorY].length) {
+                            if (session->buffer->cursorY < session->buffer->lineCount && session->buffer->cursorX > session->buffer->lines[session->buffer->cursorY].length) {
                                 session->buffer->cursorX = session->buffer->lines[session->buffer->cursorY].length;
                             }
                         }
                         ScrollToCursor(session->buffer, session->window);
+                        UpdateScrollBars(session);
                         RenderText(session->window, session->buffer);
                         UpdateCursor(session->window, session->buffer);
                         processed = TRUE;
                     } else if (keyCode == 0x46) {
                         /* Delete key (raw key code) */
-                        DeleteForward(session->buffer);
+                        DeleteForward(session->buffer, session->cleanupStack);
                         ScrollToCursor(session->buffer, session->window);
+                        UpdateScrollBars(session);
                         RenderText(session->window, session->buffer);
                         UpdateCursor(session->window, session->buffer);
                         processed = TRUE;
@@ -1015,14 +1305,16 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                                     for (i = 0; i < (ULONG)chars; i++) {
                                         if (charBuffer[i] >= 0x20 && charBuffer[i] < 0x7F) {
                                             /* Printable ASCII character */
-                                            InsertChar(session->buffer, charBuffer[i]);
+                                            InsertChar(session->buffer, charBuffer[i], session->cleanupStack);
                                         } else if (charBuffer[i] == 0x0A || charBuffer[i] == 0x0D) {
                                             /* Newline */
-                                            InsertNewline(session->buffer);
+                                            InsertNewline(session->buffer, session->cleanupStack);
                                         }
                                     }
                                 }
+                                CalculateMaxScroll(session->buffer, session->window);
                                 ScrollToCursor(session->buffer, session->window);
+                                UpdateScrollBars(session);
                                 RenderText(session->window, session->buffer);
                                 UpdateCursor(session->window, session->buffer);
                                 processed = TRUE;
@@ -1051,11 +1343,82 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                     break;
                     
                 case IDCMP_NEWSIZE:
-            if (session->buffer) {
-                RenderText(session->window, session->buffer);
-                UpdateCursor(session->window, session->buffer);
-            }
-            result = TRUE;
+                case IDCMP_CHANGEWINDOW:
+                    /* Window was resized or moved - refresh super bitmap if using ScrollLayer */
+                    if (session->buffer && session->buffer->superBitMap && session->window->RPort->Layer) {
+                        /* Copy super bitmap to refresh display after window move/resize */
+                        /* This is required when using super bitmaps with ScrollLayer */
+                        if (GfxBase && ((struct Library *)GfxBase)->lib_Version >= 39) {
+                            LockLayerRom(session->window->RPort->Layer);
+                            CopySBitMap(session->window->RPort->Layer);
+                            UnlockLayerRom(session->window->RPort->Layer);
+                        }
+                        /* Force full redraw on next render */
+                        session->buffer->needsFullRedraw = TRUE;
+                    }
+                    /* Recreate super bitmap if window size changed significantly */
+                    if (session->buffer && session->window) {
+                        ULONG newSuperWidth = session->window->Width * 2;
+                        ULONG newSuperHeight = session->window->Height * 2;
+                        if (newSuperWidth != session->buffer->superWidth || 
+                            newSuperHeight != session->buffer->superHeight) {
+                            FreeSuperBitMap(session->buffer);
+                            CreateSuperBitMap(session->buffer, session->window);
+                        }
+                    }
+                    /* Recalculate max scroll values and update scroll bars */
+                    if (session->buffer) {
+                        CalculateMaxScroll(session->buffer, session->window);
+                        UpdateScrollBars(session);
+                        ScrollToCursor(session->buffer, session->window);
+                        RenderText(session->window, session->buffer);
+                        UpdateCursor(session->window, session->buffer);
+                    }
+                    result = TRUE;
+                    break;
+                    
+                case IDCMP_IDCMPUPDATE:
+                    /* Handle prop gadget updates (scroll bar movement) */
+                    {
+                        ULONG gadgetID = (ULONG)imsg->Code;
+                        ULONG newScrollY = 0;
+                        ULONG newScrollX = 0;
+                        struct Gadget *gadget = NULL;
+                        
+                        if (gadgetID == GID_VERT_PROP) {
+                            /* Vertical scroll bar moved */
+                            gadget = session->vertPropGadget;
+                            if (gadget) {
+                                GetAttr(PGA_Top, gadget, (ULONG *)&newScrollY);
+                                if (newScrollY != session->buffer->scrollY) {
+                                    session->buffer->scrollY = newScrollY;
+                                    if (session->buffer->scrollY > session->buffer->maxScrollY) {
+                                        session->buffer->scrollY = session->buffer->maxScrollY;
+                                    }
+                                    ScrollToCursor(session->buffer, session->window);
+                                    RenderText(session->window, session->buffer);
+                                    UpdateCursor(session->window, session->buffer);
+                                }
+                            }
+                            result = TRUE;
+                        } else if (gadgetID == GID_HORIZ_PROP) {
+                            /* Horizontal scroll bar moved */
+                            gadget = session->horizPropGadget;
+                            if (gadget) {
+                                GetAttr(PGA_Top, gadget, (ULONG *)&newScrollX);
+                                if (newScrollX != session->buffer->scrollX) {
+                                    session->buffer->scrollX = newScrollX;
+                                    if (session->buffer->scrollX > session->buffer->maxScrollX) {
+                                        session->buffer->scrollX = session->buffer->maxScrollX;
+                                    }
+                                    ScrollToCursor(session->buffer, session->window);
+                                    RenderText(session->window, session->buffer);
+                                    UpdateCursor(session->window, session->buffer);
+                                }
+                            }
+                            result = TRUE;
+                        }
+                    }
                     break;
                     
                 default:
@@ -1071,6 +1434,9 @@ VOID TTX_EventLoop(struct TTXApplication *app)
     struct Message *msg = NULL;
     struct IntuiMessage *imsg = NULL;
     ULONG signals = 0;
+    struct Session *session = NULL;
+    struct Session *nextSession = NULL;
+    struct TTXMessage *ttxMsg = NULL;
     
     if (!app) {
         return;
@@ -1082,7 +1448,7 @@ VOID TTX_EventLoop(struct TTXApplication *app)
         app->sigmask |= (1UL << app->brokerPort->mp_SigBit);
     }
     if (app->sessions) {
-        struct Session *session = app->sessions;
+        session = app->sessions;
         while (session) {
             if (session->window) {
                 app->sigmask |= (1UL << session->window->UserPort->mp_SigBit);
@@ -1113,7 +1479,7 @@ VOID TTX_EventLoop(struct TTXApplication *app)
         /* Check application port (inter-instance messages) */
         if (signals & (1UL << app->appPort->mp_SigBit)) {
             while ((msg = GetMsg(app->appPort)) != NULL) {
-                struct TTXMessage *ttxMsg = (struct TTXMessage *)msg;
+                ttxMsg = (struct TTXMessage *)msg;
                 switch (ttxMsg->type) {
                     case TTX_MSG_OPEN_FILE:
                         if (ttxMsg->fileName) {
@@ -1129,7 +1495,12 @@ VOID TTX_EventLoop(struct TTXApplication *app)
                     default:
                         break;
                 }
-                /* Free message and filename */
+                /* According to Exec message docs: ALL messages must be replied to with ReplyMsg() */
+                /* For one-way messages (mn_ReplyPort=NULL), ReplyMsg() does nothing */
+                /* But we still call it, then free the message since no reply will come back */
+                ReplyMsg(msg);
+                /* Messages from other instances were allocated by THEIR cleanup stack, not ours */
+                /* So we must free them directly with FreeVec, not through our cleanup stack */
                 if (ttxMsg->fileName) {
                     FreeVec(ttxMsg->fileName);
                 }
@@ -1139,8 +1510,7 @@ VOID TTX_EventLoop(struct TTXApplication *app)
         
         /* Check session windows */
         if (app->sessions) {
-            struct Session *session = app->sessions;
-            struct Session *nextSession = NULL;
+            session = app->sessions;
             while (session) {
                 /* Save next pointer in case session is destroyed */
                 nextSession = session->next;
@@ -1167,7 +1537,9 @@ BOOL TTX_Init(struct TTXApplication *app)
 {
     ULONG i = 0;
     
+    Printf("[INIT] TTX_Init: START\n");
     if (!app) {
+        Printf("[INIT] TTX_Init: FAIL (app=NULL)\n");
         return FALSE;
     }
     
@@ -1176,14 +1548,28 @@ BOOL TTX_Init(struct TTXApplication *app)
         ((UBYTE *)app)[i] = 0;
     }
     
+    /* Use default cleanup stack created by Seiso auto-init */
+    app->cleanupStack = GetDefaultStack();
+    if (!app->cleanupStack) {
+        Printf("[INIT] TTX_Init: FAIL (GetDefaultStack failed)\n");
+        return FALSE;
+    }
+    g_ttxStack = app->cleanupStack;
+    Printf("[INIT] TTX_Init: using default cleanup stack\n");
+    
     /* Initialize libraries */
-    if (!TTX_InitLibraries()) {
+    if (!TTX_InitLibraries(app->cleanupStack)) {
+        /* Don't delete default stack - it will be cleaned up by _STD_SeisoCleanup() */
+        app->cleanupStack = NULL;
+        g_ttxStack = NULL;
         return FALSE;
     }
     
     /* Setup message port */
     if (!TTX_SetupMessagePort(app)) {
-        TTX_CleanupLibraries();
+        /* Don't delete default stack - it will be cleaned up by _STD_SeisoCleanup() */
+        app->cleanupStack = NULL;
+        g_ttxStack = NULL;
         return FALSE;
     }
     
@@ -1195,29 +1581,204 @@ BOOL TTX_Init(struct TTXApplication *app)
         }
     }
     
+    Printf("[INIT] TTX_Init: SUCCESS\n");
     return TRUE;
 }
 
 /* Cleanup application */
 VOID TTX_Cleanup(struct TTXApplication *app)
 {
+    struct Message *msg = NULL;
+    
+    Printf("[CLEANUP] TTX_Cleanup: START\n");
     if (!app) {
+        Printf("[CLEANUP] TTX_Cleanup: DONE (app=NULL)\n");
         return;
     }
     
     /* Destroy all sessions */
+    Printf("[CLEANUP] TTX_Cleanup: destroying %lu sessions\n", app->sessionCount);
     while (app->sessions) {
         TTX_DestroySession(app, app->sessions);
     }
     
-    /* Remove commodity */
-    TTX_RemoveCommodity(app);
+    /* Clean up any pending messages from app port before stack cleanup */
+    /* Note: The port itself is tracked on cleanup stack and will be cleaned up automatically */
+    /* According to Exec message docs: ALL messages received via GetMsg() must be replied to with ReplyMsg() */
+    /* The sender is responsible for freeing the message after receiving the reply */
+    if (app->appPort) {
+        Printf("[CLEANUP] TTX_Cleanup: cleaning pending messages from appPort\n");
+        while ((msg = GetMsg(app->appPort)) != NULL) {
+            /* Reply to all messages - sender will free them after receiving reply */
+            ReplyMsg(msg);
+        }
+        Printf("[CLEANUP] TTX_Cleanup: appPort messages cleaned\n");
+        /* Port cleanup (RemPort + DeleteMsgPort) is handled by cleanup stack via cleanupPort() */
+        /* We just clear the pointer so we don't try to use it after cleanup */
+        app->appPort = NULL;
+    }
     
-    /* Remove message port */
-    TTX_RemoveMessagePort(app);
+    /* Clean up any pending messages from broker port before stack cleanup */
+    /* This must be done BEFORE the broker is cleaned up by the stack */
+    /* According to commodities.library docs, messages sent to a commodity program
+     * from a sender object must be sent back using ReplyMsg() */
+    if (app->brokerPort) {
+        Printf("[CLEANUP] TTX_Cleanup: cleaning pending messages from brokerPort\n");
+        /* Get and reply to all pending messages */
+        while ((msg = GetMsg(app->brokerPort)) != NULL) {
+            /* Reply to commodity messages (required by commodities.library) */
+            ReplyMsg(msg);
+        }
+        Printf("[CLEANUP] TTX_Cleanup: brokerPort messages cleaned\n");
+    }
     
-    /* Cleanup libraries */
-    TTX_CleanupLibraries();
+    /* Free ReadArgs BEFORE cleanup stack deletion */
+    /* ReadArgs must be freed after we're done using the parsed arguments */
+    /* This should have been done earlier, but ensure it's done here as a safety net */
+    /* Note: ReadArgs is tracked by the cleanup stack, so it will be freed automatically,
+     * but we should free it explicitly before cleanup to avoid issues */
+    
+    /* DO NOT clear broker/brokerPort pointers yet - cleanup stack needs them */
+    /* The cleanup stack will properly clean up the broker and port */
+    /* We'll clear the pointers AFTER the stack cleanup is complete */
+    
+    /* DO NOT flush or delete the default cleanup stack here */
+    /* The default stack is owned by Seiso and will be properly cleaned up
+     * by _STD_SeisoCleanup() after main() returns. This ensures proper
+     * cleanup order and prevents memory corruption. */
+    /* Libraries, ports, brokers, etc. are all cleaned up automatically in LIFO order
+     * when _STD_SeisoCleanup() calls DeleteCleanupStack() on the default stack */
+    /* Note: ReadArgs will be freed by the cleanup stack if still tracked */
+    /* According to commodities.library docs, DeleteCxObjAll() will:
+     * - Remove the broker from the list if it's linked
+     * - Recursively delete all objects attached to it
+     * This is the proper way to clean up when an application exits */
+    /* Just clear our reference - don't flush or delete */
+    app->cleanupStack = NULL;
+    g_ttxStack = NULL;
+    
+    /* Clear application pointers - resources will be cleaned up by _STD_SeisoCleanup() */
+    /* DeleteCxObjAll() is synchronous - broker is immediately removed from system */
+    app->appPort = NULL;
+    app->brokerPort = NULL;
+    app->broker = NULL;
+    
+    /* DO NOT clear global library base pointers here */
+    /* The cleanup stack will close the libraries when _STD_SeisoCleanup() runs */
+    /* Clearing them now would cause crashes when cleanup functions try to use them */
+    /* The libraries must remain valid until the cleanup stack closes them */
+    /* After _STD_SeisoCleanup() completes, the libraries will be closed and
+     * the pointers will naturally be invalid, but we don't need to explicitly
+     * set them to NULL here */
+    
+    Printf("[CLEANUP] TTX_Cleanup: DONE\n");
+}
+
+/* Calculate maximum scroll values based on buffer content and window size */
+VOID CalculateMaxScroll(struct TextBuffer *buffer, struct Window *window)
+{
+    ULONG i = 0;
+    ULONG maxLineLen = 0;
+    ULONG lineHeight = 0;
+    ULONG visibleLines = 0;
+    
+    if (!buffer || !window || !window->RPort) {
+        return;
+    }
+    
+    /* Calculate visible lines (pageH) */
+    lineHeight = GetLineHeight(window->RPort);
+    if (lineHeight > 0) {
+        visibleLines = (window->Height - window->BorderTop - window->BorderBottom) / lineHeight;
+        buffer->pageH = visibleLines;
+    } else {
+        buffer->pageH = 0;
+    }
+    
+    /* Calculate maximum vertical scroll (maxScrollY) */
+    if (buffer->lineCount > buffer->pageH) {
+        buffer->maxScrollY = buffer->lineCount - buffer->pageH;
+    } else {
+        buffer->maxScrollY = 0;
+    }
+    
+    /* Calculate maximum line length for horizontal scrolling */
+    maxLineLen = 0;
+    if (buffer->lines && buffer->lineCount > 0) {
+        for (i = 0; i < buffer->lineCount; i++) {
+            if (buffer->lines[i].length > maxLineLen) {
+                maxLineLen = buffer->lines[i].length;
+            }
+        }
+    }
+    
+    /* Calculate maximum horizontal scroll (maxScrollX) */
+    if (maxLineLen > buffer->pageW) {
+        buffer->maxScrollX = maxLineLen - buffer->pageW;
+    } else {
+        buffer->maxScrollX = 0;
+    }
+    
+    /* Clamp current scroll positions to valid ranges */
+    if (buffer->scrollY > buffer->maxScrollY) {
+        buffer->scrollY = buffer->maxScrollY;
+    }
+    if (buffer->scrollX > buffer->maxScrollX) {
+        buffer->scrollX = buffer->maxScrollX;
+    }
+}
+
+/* Update scroll bar prop gadgets to reflect current scroll position */
+VOID UpdateScrollBars(struct Session *session)
+{
+    struct Gadget *gadget = NULL;
+    ULONG total = 0;
+    ULONG visible = 0;
+    ULONG top = 0;
+    
+    if (!session || !session->buffer || !session->window) {
+        return;
+    }
+    
+    /* Update vertical scroll bar */
+    gadget = session->vertPropGadget;
+    if (gadget) {
+        /* Calculate total and visible for vertical scroll */
+        if (session->buffer->maxScrollY > 0 || session->buffer->lineCount > session->buffer->pageH) {
+            total = (session->buffer->maxScrollY > session->buffer->pageH) ? 
+                    session->buffer->maxScrollY : session->buffer->pageH;
+        } else {
+            total = session->buffer->pageH;
+        }
+        visible = session->buffer->pageH;
+        top = session->buffer->scrollY;
+        
+        SetGadgetAttrs(gadget, session->window, NULL,
+            PGA_Total, total,
+            PGA_Visible, visible,
+            PGA_Top, top,
+            TAG_DONE);
+    }
+    
+    /* Update horizontal scroll bar */
+    gadget = session->horizPropGadget;
+    if (gadget) {
+        /* Calculate total and visible for horizontal scroll */
+        if (session->buffer->maxScrollX > 0) {
+            total = (session->buffer->maxScrollX > session->buffer->pageW) ? 
+                    session->buffer->maxScrollX : session->buffer->pageW;
+        } else {
+            total = session->buffer->pageW;
+        }
+        visible = session->buffer->pageW;
+        top = session->buffer->scrollX;
+        
+        SetGadgetAttrs(gadget, session->window, NULL,
+            PGA_Total, total,
+            PGA_Visible, visible,
+            PGA_Top, top,
+            TAG_DONE);
+    }
 }
 
 /* Show usage information */
@@ -1253,26 +1814,32 @@ int main(int argc, char *argv[])
     struct TTXArgs ttxArgs;
     struct RDArgs *rda = NULL;
     STRPTR *files = NULL;
-    ULONG i = 0;
     BOOL parseResult = FALSE;
     LONG result = RETURN_OK;
     
     /* Initialize application */
     if (!TTX_Init(&app)) {
         LONG errorCode = IoErr();
-        PrintFault(errorCode ? errorCode : ERROR_OBJECT_NOT_FOUND, "TTX");
+        if (errorCode != 0) {
+            PrintFault(errorCode, "TTX");
+        } else {
+            PrintFault(ERROR_OBJECT_NOT_FOUND, "TTX");
+        }
         return RETURN_FAIL;
     }
     
-    /* Clear args structure */
-    for (i = 0; i < sizeof(struct TTXArgs); i++) {
-        ((UBYTE *)&ttxArgs)[i] = 0;
+    /* Initialize args structure to zero */
+    {
+        ULONG j;
+        for (j = 0; j < sizeof(struct TTXArgs); j++) {
+            ((UBYTE *)&ttxArgs)[j] = 0;
+        }
     }
     
     /* Parse arguments (command line or tooltypes) */
     if (argc > 0) {
         /* CLI launch - TurboText style */
-        parseResult = TTX_ParseArguments(&ttxArgs);
+        parseResult = TTX_ParseArguments(&ttxArgs, app.cleanupStack);
         rda = ttxArgs.rda;
     } else {
         /* Workbench launch - argv points to WBStartup structure */
@@ -1286,19 +1853,43 @@ int main(int argc, char *argv[])
             char fullPath[512];
             
             /* Build full path */
+            /* Clear IoErr() before dos.library path operations to ensure clean state */
+            SetIoErr(0);
             fullPath[0] = '\0';
             if (wbarg->wa_Lock) {
-                NameFromLock(wbarg->wa_Lock, fullPath, sizeof(fullPath));
+                /* NameFromLock can fail - check result and clear error on failure */
+                if (!NameFromLock(wbarg->wa_Lock, fullPath, sizeof(fullPath))) {
+                    /* NameFromLock failed - clear error and use empty path */
+                    /* This prevents dos.library from being left in undefined state */
+                    SetIoErr(0);
+                    fullPath[0] = '\0';
+                } else {
+                    /* NameFromLock succeeded - clear any error code that may have been set */
+                    SetIoErr(0);
+                }
             }
-            AddPart(fullPath, wbarg->wa_Name, sizeof(fullPath));
+            /* AddPart can fail - check result and clear error on failure */
+            if (fullPath[0] != '\0' || wbarg->wa_Lock == NULL) {
+                /* Clear IoErr() before AddPart to ensure clean state */
+                SetIoErr(0);
+                if (!AddPart(fullPath, wbarg->wa_Name, sizeof(fullPath))) {
+                    /* AddPart failed - clear error to prevent dos.library corruption */
+                    SetIoErr(0);
+                    fullPath[0] = '\0';
+                } else {
+                    /* AddPart succeeded - clear any error code that may have been set */
+                    SetIoErr(0);
+                }
+            }
             
             len = 0;
             while (fullPath[len] != '\0' && len < sizeof(fullPath) - 1) {
                 len++;
             }
-            if (len > 0) {
-                fileName = (STRPTR)AllocVec(len + 1, MEMF_CLEAR);
+            if (len > 0 && app.cleanupStack) {
+                fileName = (STRPTR)allocVec(app.cleanupStack, len + 1, MEMF_CLEAR);
                 if (fileName) {
+                    Printf("[INIT] main: allocated fileName=%lx\n", (ULONG)fileName);
                     CopyMem(fullPath, fileName, len);
                     fileName[len] = '\0';
                     ttxArgs.files = &fileName;
@@ -1309,7 +1900,7 @@ int main(int argc, char *argv[])
         } else {
             /* No files, check tooltypes */
             STRPTR fileName = NULL;
-            parseResult = TTX_ParseToolTypes(&fileName, wbMsg);
+            parseResult = TTX_ParseToolTypes(&fileName, wbMsg, app.cleanupStack);
             if (parseResult && fileName) {
                 ttxArgs.files = &fileName;
                 ttxArgs.files[1] = NULL;
@@ -1323,8 +1914,9 @@ int main(int argc, char *argv[])
     /* Handle UNLOAD first */
     if (parseResult && ttxArgs.unload) {
         /* TODO: Implement unload from background */
-        if (rda) {
-            FreeArgs(rda);
+        if (rda && app.cleanupStack) {
+            freeArgs(app.cleanupStack, rda);
+            rda = NULL; /* Prevent double-free */
         }
         TTX_Cleanup(&app);
         return RETURN_OK;
@@ -1335,8 +1927,9 @@ int main(int argc, char *argv[])
         /* Background mode - don't open sessions, just stay loaded */
         app.backgroundMode = TRUE;
         /* Free parsed arguments */
-        if (rda) {
-            FreeArgs(rda);
+        if (rda && app.cleanupStack) {
+            freeArgs(app.cleanupStack, rda);
+            rda = NULL; /* Prevent double-free */
         }
         /* Run event loop even with no sessions (background mode) */
         TTX_EventLoop(&app);
@@ -1348,13 +1941,15 @@ int main(int argc, char *argv[])
     app.backgroundMode = FALSE;
     
     /* Check if another instance is running - but only if we have files or NOWINDOW not set */
+    /* NOTE: This check happens BEFORE we add our port to the system, so we won't find ourselves */
     if (parseResult) {
         if (ttxArgs.files && ttxArgs.files[0]) {
             /* We have files - check for existing instance */
             if (TTX_CheckExistingInstance(ttxArgs.files[0])) {
                 /* Message sent to existing instance, exit */
-                if (rda) {
-                    FreeArgs(rda);
+                if (rda && app.cleanupStack) {
+                    freeArgs(app.cleanupStack, rda);
+                    rda = NULL; /* Prevent double-free */
                 }
                 TTX_Cleanup(&app);
                 return RETURN_OK;
@@ -1362,8 +1957,9 @@ int main(int argc, char *argv[])
         } else if (!ttxArgs.noWindow) {
             /* No files but NOWINDOW not set - check for existing instance */
             if (TTX_CheckExistingInstance(NULL)) {
-                if (rda) {
-                    FreeArgs(rda);
+                if (rda && app.cleanupStack) {
+                    freeArgs(app.cleanupStack, rda);
+                    rda = NULL; /* Prevent double-free */
                 }
                 TTX_Cleanup(&app);
                 return RETURN_OK;
@@ -1377,6 +1973,11 @@ int main(int argc, char *argv[])
         }
     }
     
+    /* No existing instance found - add our port to the system so others can find us */
+    if (!TTX_AddMessagePort(&app)) {
+        Printf("[INIT] main: WARN (TTX_AddMessagePort failed, continuing anyway)\n");
+    }
+    
     /* Create sessions for files (only if BACKGROUND not set) */
     if (parseResult && ttxArgs.files) {
         files = ttxArgs.files;
@@ -1385,6 +1986,8 @@ int main(int argc, char *argv[])
                 LONG errorCode = IoErr();
                 if (errorCode != 0) {
                     PrintFault(errorCode, "TTX");
+                    /* Clear error code after displaying */
+                    SetIoErr(0);
                 }
                 result = RETURN_FAIL;
             }
@@ -1398,14 +2001,17 @@ int main(int argc, char *argv[])
             LONG errorCode = IoErr();
             if (errorCode != 0) {
                 PrintFault(errorCode, "TTX");
+                /* Clear error code after displaying */
+                SetIoErr(0);
             }
             result = RETURN_FAIL;
         }
     }
     
     /* Free parsed arguments */
-    if (rda) {
-        FreeArgs(rda);
+    if (rda && app.cleanupStack) {
+        freeArgs(app.cleanupStack, rda);
+        rda = NULL; /* Prevent double-free */
     }
     
     /* Run event loop if we have sessions */

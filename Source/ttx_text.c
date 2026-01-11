@@ -6,32 +6,43 @@
  */
 
 #include "ttx.h"
+#include <proto/graphics.h>
+#include <graphics/layers.h>
+#include <proto/layers.h>
 
 /* Initial buffer size constant */
 #define INITIAL_BUFFER_SIZE 65536
 
 /* Initialize text buffer */
-BOOL InitTextBuffer(struct TextBuffer *buffer)
+BOOL InitTextBuffer(struct TextBuffer *buffer, struct CleanupStack *stack)
 {
-    if (!buffer) {
+    Printf("[INIT] InitTextBuffer: START (buffer=%lx)\n", (ULONG)buffer);
+    if (!buffer || !stack) {
+        Printf("[INIT] InitTextBuffer: FAIL (buffer=%lx, stack=%lx)\n", (ULONG)buffer, (ULONG)stack);
         return FALSE;
     }
     
-    /* Allocate initial line array */
+    /* All buffer functions use the provided cleanup stack parameter */
+    
+    /* Allocate initial line array using cleanup stack */
     buffer->maxLines = 1000;
-    buffer->lines = (struct TextLine *)AllocVec(buffer->maxLines * sizeof(struct TextLine), MEMF_CLEAR);
+    buffer->lines = (struct TextLine *)allocVec(stack, buffer->maxLines * sizeof(struct TextLine), MEMF_CLEAR);
     if (!buffer->lines) {
+        Printf("[INIT] InitTextBuffer: FAIL (allocVec lines failed)\n");
         return FALSE;
     }
+    Printf("[INIT] InitTextBuffer: lines=%lx (maxLines=%lu)\n", (ULONG)buffer->lines, buffer->maxLines);
     
     /* Initialize first line */
     buffer->lines[0].allocated = 256;
-    buffer->lines[0].text = (STRPTR)AllocVec(buffer->lines[0].allocated, MEMF_CLEAR);
+    buffer->lines[0].text = (STRPTR)allocVec(stack, buffer->lines[0].allocated, MEMF_CLEAR);
     if (!buffer->lines[0].text) {
-        FreeVec(buffer->lines);
+        Printf("[INIT] InitTextBuffer: FAIL (allocVec line[0].text failed)\n");
+        freeVec(stack, buffer->lines);
         buffer->lines = NULL;
         return FALSE;
     }
+    Printf("[INIT] InitTextBuffer: line[0].text=%lx\n", (ULONG)buffer->lines[0].text);
     buffer->lines[0].text[0] = '\0';
     buffer->lines[0].length = 0;
     
@@ -40,37 +51,61 @@ BOOL InitTextBuffer(struct TextBuffer *buffer)
     buffer->cursorY = 0;
     buffer->scrollX = 0;
     buffer->scrollY = 0;
+    buffer->leftMargin = 0;  /* No left margin initially - can be set for line numbers, etc. */
+    buffer->pageW = 0;       /* Will be calculated when window is available */
+    buffer->pageH = 0;       /* Will be calculated when window is available */
+    buffer->maxScrollX = 0;  /* Will be calculated based on buffer content */
+    buffer->maxScrollY = 0;  /* Will be calculated based on buffer content */
     buffer->modified = FALSE;
     
+    /* Initialize graphics v39+ features */
+    buffer->superBitMap = NULL;
+    buffer->superWidth = 0;
+    buffer->superHeight = 0;
+    buffer->lastScrollX = 0;
+    buffer->lastScrollY = 0;
+    buffer->needsFullRedraw = TRUE;
+    
+    Printf("[INIT] InitTextBuffer: SUCCESS\n");
     return TRUE;
 }
 
 /* Free text buffer */
-VOID FreeTextBuffer(struct TextBuffer *buffer)
+VOID FreeTextBuffer(struct TextBuffer *buffer, struct CleanupStack *stack)
 {
     ULONG i = 0;
+    struct CleanupStack *cleanupStack = NULL;
     
+    Printf("[CLEANUP] FreeTextBuffer: START (buffer=%lx)\n", (ULONG)buffer);
     if (!buffer) {
+        Printf("[CLEANUP] FreeTextBuffer: DONE (buffer=NULL)\n");
         return;
     }
     
-    if (buffer->lines) {
+    /* Use provided cleanup stack */
+    cleanupStack = stack;
+    
+    if (buffer->lines && cleanupStack) {
+        Printf("[CLEANUP] FreeTextBuffer: freeing %lu lines\n", buffer->lineCount);
         for (i = 0; i < buffer->lineCount; i++) {
             if (buffer->lines[i].text) {
-                FreeVec(buffer->lines[i].text);
+                Printf("[CLEANUP] FreeTextBuffer: freeing line[%lu].text=%lx\n", i, (ULONG)buffer->lines[i].text);
+                freeVec(cleanupStack, buffer->lines[i].text);
                 buffer->lines[i].text = NULL;
             }
         }
-        FreeVec(buffer->lines);
+        Printf("[CLEANUP] FreeTextBuffer: freeing lines array=%lx\n", (ULONG)buffer->lines);
+        freeVec(cleanupStack, buffer->lines);
         buffer->lines = NULL;
     }
     
     buffer->lineCount = 0;
     buffer->maxLines = 0;
+    Printf("[CLEANUP] FreeTextBuffer: DONE\n");
 }
 
 /* Load file into text buffer */
-BOOL LoadFile(STRPTR fileName, struct TextBuffer *buffer)
+BOOL LoadFile(STRPTR fileName, struct TextBuffer *buffer, struct CleanupStack *stack)
 {
     BPTR fileHandle = NULL;
     UBYTE lineBuffer[MAX_LINE_LENGTH];
@@ -78,31 +113,44 @@ BOOL LoadFile(STRPTR fileName, struct TextBuffer *buffer)
     ULONG i = 0;
     BOOL result = FALSE;
     
-    if (!fileName || !buffer) {
+    if (!fileName || !buffer || !stack) {
         SetIoErr(ERROR_REQUIRED_ARG_MISSING);
         return FALSE;
     }
     
-    /* Open file for reading - if file doesn't exist, create empty buffer */
-    fileHandle = Open(fileName, MODE_OLDFILE);
+    /* Open file for reading using cleanup stack - if file doesn't exist, create empty buffer */
+    /* Clear IoErr() before file operations to ensure clean state */
+    SetIoErr(0);
+    fileHandle = openFile(stack, fileName, MODE_OLDFILE);
     if (!fileHandle) {
-        /* File doesn't exist - create empty buffer */
-        FreeTextBuffer(buffer);
-        if (!InitTextBuffer(buffer)) {
+        /* File doesn't exist or open failed - check error and clear it */
+        LONG errorCode = IoErr();
+        if (errorCode != 0) {
+            /* Clear error to prevent dos.library from being left in undefined state */
+            SetIoErr(0);
+        }
+        /* Create empty buffer - this is OK if file doesn't exist */
+        FreeTextBuffer(buffer, stack);
+        if (!InitTextBuffer(buffer, stack)) {
             return FALSE;
         }
         return TRUE;
+    } else {
+        /* File opened successfully - clear any error code that may have been set */
+        SetIoErr(0);
     }
     
     /* Clear existing buffer */
-    FreeTextBuffer(buffer);
-    if (!InitTextBuffer(buffer)) {
-        Close(fileHandle);
+    FreeTextBuffer(buffer, stack);
+    if (!InitTextBuffer(buffer, stack)) {
+        closeFile(stack, fileHandle);
         return FALSE;
     }
     
     /* Read file line by line */
-    while (FGets(fileHandle, lineBuffer, sizeof(lineBuffer) - 1)) {
+    /* Clear IoErr() before reading to ensure clean state */
+    SetIoErr(0);
+    while (FGets(fileHandle, lineBuffer, sizeof(lineBuffer) - 1) != NULL) {
         lineLen = 0;
         while (lineBuffer[lineLen] != '\0' && lineBuffer[lineLen] != '\n' && lineLen < sizeof(lineBuffer) - 1) {
             lineLen++;
@@ -120,26 +168,26 @@ BOOL LoadFile(STRPTR fileName, struct TextBuffer *buffer)
             struct TextLine *newLines = NULL;
             
             newMax = buffer->maxLines * 2;
-            newLines = (struct TextLine *)AllocVec(newMax * sizeof(struct TextLine), MEMF_CLEAR);
+            newLines = (struct TextLine *)allocVec(stack, newMax * sizeof(struct TextLine), MEMF_CLEAR);
             if (!newLines) {
-                FreeTextBuffer(buffer);
-                Close(fileHandle);
+                FreeTextBuffer(buffer, stack);
+                closeFile(stack, fileHandle);
                 return FALSE;
             }
             for (copyIdx = 0; copyIdx < buffer->lineCount; copyIdx++) {
                 newLines[copyIdx] = buffer->lines[copyIdx];
             }
-            FreeVec(buffer->lines);
+            freeVec(stack, buffer->lines);
             buffer->lines = newLines;
             buffer->maxLines = newMax;
         }
         
         /* Allocate line text buffer */
         buffer->lines[i].allocated = lineLen + 256;
-        buffer->lines[i].text = (STRPTR)AllocVec(buffer->lines[i].allocated, MEMF_CLEAR);
+        buffer->lines[i].text = (STRPTR)allocVec(stack, buffer->lines[i].allocated, MEMF_CLEAR);
         if (!buffer->lines[i].text) {
-            FreeTextBuffer(buffer);
-            Close(fileHandle);
+            FreeTextBuffer(buffer, stack);
+            closeFile(stack, fileHandle);
             return FALSE;
         }
         
@@ -158,7 +206,7 @@ BOOL LoadFile(STRPTR fileName, struct TextBuffer *buffer)
         }
         
         buffer->lines[i].allocated = 256;
-        buffer->lines[i].text = (STRPTR)AllocVec(buffer->lines[i].allocated, MEMF_CLEAR);
+        buffer->lines[i].text = (STRPTR)allocVec(stack, buffer->lines[i].allocated, MEMF_CLEAR);
         if (!buffer->lines[i].text) {
             buffer->lineCount = i;
             break;
@@ -166,6 +214,10 @@ BOOL LoadFile(STRPTR fileName, struct TextBuffer *buffer)
         buffer->lines[i].text[0] = '\0';
         buffer->lines[i].length = 0;
     }
+    
+    /* FGets loop ended - clear any error codes to prevent dos.library corruption */
+    /* FGets returns NULL on both EOF and error, so we clear IoErr() regardless */
+    SetIoErr(0);
     
     buffer->lineCount = i;
     if (buffer->lineCount == 0) {
@@ -176,25 +228,30 @@ BOOL LoadFile(STRPTR fileName, struct TextBuffer *buffer)
     buffer->cursorY = 0;
     buffer->modified = FALSE;
     
-    Close(fileHandle);
+    /* Close file using cleanup stack */
+    /* Clear IoErr() before closing to ensure clean state */
+    SetIoErr(0);
+    closeFile(stack, fileHandle);
+    /* Clear IoErr() after closing to prevent dos.library from being left in undefined state */
+    SetIoErr(0);
     result = TRUE;
     return result;
 }
 
 /* Save text buffer to file */
-BOOL SaveFile(STRPTR fileName, struct TextBuffer *buffer)
+BOOL SaveFile(STRPTR fileName, struct TextBuffer *buffer, struct CleanupStack *stack)
 {
     BPTR fileHandle = NULL;
     ULONG i = 0;
     BOOL result = FALSE;
     
-    if (!fileName || !buffer) {
+    if (!fileName || !buffer || !stack) {
         SetIoErr(ERROR_REQUIRED_ARG_MISSING);
         return FALSE;
     }
     
-    /* Open file for writing */
-    fileHandle = Open(fileName, MODE_NEWFILE);
+    /* Open file for writing using cleanup stack */
+    fileHandle = openFile(stack, fileName, MODE_NEWFILE);
     if (!fileHandle) {
         return FALSE;
     }
@@ -203,33 +260,34 @@ BOOL SaveFile(STRPTR fileName, struct TextBuffer *buffer)
     for (i = 0; i < buffer->lineCount; i++) {
         if (buffer->lines[i].text && buffer->lines[i].length > 0) {
             if (Write(fileHandle, buffer->lines[i].text, buffer->lines[i].length) != buffer->lines[i].length) {
-                Close(fileHandle);
+                closeFile(stack, fileHandle);
                 return FALSE;
             }
         }
         /* Write newline (except for last line if empty) */
         if (i < buffer->lineCount - 1 || (buffer->lines[i].text && buffer->lines[i].length > 0)) {
             if (Write(fileHandle, "\n", 1) != 1) {
-                Close(fileHandle);
+                closeFile(stack, fileHandle);
                 return FALSE;
             }
         }
     }
     
-    Close(fileHandle);
+    /* Close file using cleanup stack */
+    closeFile(stack, fileHandle);
     buffer->modified = FALSE;
     result = TRUE;
     return result;
 }
 
 /* Insert character at cursor position */
-BOOL InsertChar(struct TextBuffer *buffer, UBYTE ch)
+BOOL InsertChar(struct TextBuffer *buffer, UBYTE ch, struct CleanupStack *stack)
 {
     struct TextLine *line = NULL;
     STRPTR newText = NULL;
     ULONG newAlloc = 0;
     
-    if (!buffer || buffer->cursorY >= buffer->lineCount) {
+    if (!buffer || !buffer->lines || buffer->cursorY >= buffer->lineCount || !stack) {
         return FALSE;
     }
     
@@ -241,7 +299,7 @@ BOOL InsertChar(struct TextBuffer *buffer, UBYTE ch)
         if (newAlloc < 256) {
             newAlloc = 256;
         }
-        newText = (STRPTR)AllocVec(newAlloc, MEMF_CLEAR);
+        newText = (STRPTR)allocVec(stack, newAlloc, MEMF_CLEAR);
         if (!newText) {
             return FALSE;
         }
@@ -249,7 +307,7 @@ BOOL InsertChar(struct TextBuffer *buffer, UBYTE ch)
             CopyMem(line->text, newText, line->length);
         }
         if (line->text) {
-            FreeVec(line->text);
+            freeVec(stack, line->text);
         }
         line->text = newText;
         line->allocated = newAlloc;
@@ -275,11 +333,11 @@ BOOL InsertChar(struct TextBuffer *buffer, UBYTE ch)
 }
 
 /* Delete character at cursor position */
-BOOL DeleteChar(struct TextBuffer *buffer)
+BOOL DeleteChar(struct TextBuffer *buffer, struct CleanupStack *stack)
 {
     struct TextLine *line = NULL;
     
-    if (!buffer || buffer->cursorY >= buffer->lineCount) {
+    if (!buffer || !buffer->lines || buffer->cursorY >= buffer->lineCount || !stack) {
         return FALSE;
     }
     
@@ -306,7 +364,7 @@ BOOL DeleteChar(struct TextBuffer *buffer)
         
         if (prevLen + currLen + 1 > prevLine->allocated) {
             newAlloc = prevLen + currLen + 256;
-            newText = (STRPTR)AllocVec(newAlloc, MEMF_CLEAR);
+            newText = (STRPTR)allocVec(stack, newAlloc, MEMF_CLEAR);
             if (!newText) {
                 return FALSE;
             }
@@ -317,7 +375,7 @@ BOOL DeleteChar(struct TextBuffer *buffer)
                 CopyMem(line->text, &newText[prevLen], currLen);
             }
             if (prevLine->text) {
-                FreeVec(prevLine->text);
+                freeVec(stack, prevLine->text);
             }
             prevLine->text = newText;
             prevLine->allocated = newAlloc;
@@ -331,7 +389,7 @@ BOOL DeleteChar(struct TextBuffer *buffer)
         
         /* Remove current line */
         if (line->text) {
-            FreeVec(line->text);
+            freeVec(stack, line->text);
         }
         if (buffer->cursorY < buffer->lineCount - 1) {
             /* Move lines down - copy backwards for overlapping memory */
@@ -353,7 +411,7 @@ BOOL DeleteChar(struct TextBuffer *buffer)
 }
 
 /* Insert newline at cursor position */
-BOOL InsertNewline(struct TextBuffer *buffer)
+BOOL InsertNewline(struct TextBuffer *buffer, struct CleanupStack *stack)
 {
     struct TextLine *line = NULL;
     struct TextLine *newLine = NULL;
@@ -361,7 +419,7 @@ BOOL InsertNewline(struct TextBuffer *buffer)
     ULONG remainingLen = 0;
     ULONG i = 0;
     
-    if (!buffer || buffer->cursorY >= buffer->lineCount) {
+    if (!buffer || !buffer->lines || buffer->cursorY >= buffer->lineCount || !stack) {
         return FALSE;
     }
     
@@ -371,12 +429,12 @@ BOOL InsertNewline(struct TextBuffer *buffer)
         struct TextLine *newLines = NULL;
         
         newMax = buffer->maxLines * 2;
-        newLines = (struct TextLine *)AllocVec(newMax * sizeof(struct TextLine), MEMF_CLEAR);
+        newLines = (struct TextLine *)allocVec(stack, newMax * sizeof(struct TextLine), MEMF_CLEAR);
         if (newLines) {
             for (i = 0; i < buffer->lineCount; i++) {
                 newLines[i] = buffer->lines[i];
             }
-            FreeVec(buffer->lines);
+            freeVec(stack, buffer->lines);
             buffer->lines = newLines;
             buffer->maxLines = newMax;
         } else {
@@ -396,7 +454,7 @@ BOOL InsertNewline(struct TextBuffer *buffer)
     /* Create new line */
     newLine = &buffer->lines[buffer->cursorY + 1];
     newLine->allocated = remainingLen + 256;
-    newLine->text = (STRPTR)AllocVec(newLine->allocated, MEMF_CLEAR);
+    newLine->text = (STRPTR)allocVec(stack, newLine->allocated, MEMF_CLEAR);
     if (!newLine->text) {
         /* Restore line array */
         for (i = buffer->cursorY + 1; i < buffer->lineCount; i++) {
@@ -483,11 +541,18 @@ VOID ScrollToCursor(struct TextBuffer *buffer, struct Window *window)
     lineHeight = GetLineHeight(rp);
     visibleLines = (window->Height - window->BorderTop - window->BorderBottom) / lineHeight;
     charWidth = GetCharWidth(rp, 'M');
-    visibleChars = (window->Width - window->BorderLeft - window->BorderRight) / charWidth;
+    
+    /* Calculate text area boundaries (accounting for left margin) */
+    {
+        ULONG textStartX = window->BorderLeft + buffer->leftMargin + 1;
+        ULONG textEndX = window->Width - (window->BorderRight + 1);
+        ULONG textWidth = textEndX - textStartX + 1;
+        visibleChars = textWidth / charWidth;
+    }
     
     /* Calculate cursor screen position */
     cursorScreenY = buffer->cursorY - buffer->scrollY;
-    if (buffer->cursorY < buffer->lineCount) {
+    if (buffer->lines && buffer->cursorY < buffer->lineCount) {
         for (i = 0; i < buffer->cursorX && i < buffer->lines[buffer->cursorY].length; i++) {
             cursorScreenX += GetCharWidth(rp, (UBYTE)buffer->lines[buffer->cursorY].text[i]);
         }
@@ -521,7 +586,85 @@ VOID ScrollToCursor(struct TextBuffer *buffer, struct Window *window)
     }
 }
 
-/* Render text to window */
+/* Create super bitmap for off-screen rendering (Graphics v39+ feature) */
+BOOL CreateSuperBitMap(struct TextBuffer *buffer, struct Window *window)
+{
+    struct BitMap *displayBitMap = NULL;
+    ULONG depth = 0;
+    ULONG flags = 0;
+    
+    if (!buffer || !window) {
+        return FALSE;
+    }
+    
+    /* Check if graphics.library v39+ is available */
+    /* GfxBase is a struct GfxBase * which starts with struct Library */
+    if (!GfxBase || ((struct Library *)GfxBase)->lib_Version < 39) {
+        Printf("[GFX] CreateSuperBitMap: graphics.library v39+ required\n");
+        return FALSE;
+    }
+    
+    /* Free existing super bitmap if any */
+    if (buffer->superBitMap) {
+        FreeBitMap(buffer->superBitMap);
+        buffer->superBitMap = NULL;
+    }
+    
+    displayBitMap = window->RPort->BitMap;
+    if (!displayBitMap) {
+        return FALSE;
+    }
+    
+    /* Get bitmap depth */
+    depth = GetBitMapAttr(displayBitMap, BMA_DEPTH);
+    if (depth == 0) {
+        depth = 4; /* Default to 16 colors if we can't determine */
+    }
+    
+    /* Calculate super bitmap size - make it larger than window for scrolling */
+    /* Super bitmap should be at least 2x window size for smooth scrolling */
+    buffer->superWidth = window->Width * 2;
+    buffer->superHeight = window->Height * 2;
+    
+    /* Ensure minimum size */
+    if (buffer->superWidth < 640) {
+        buffer->superWidth = 640;
+    }
+    if (buffer->superHeight < 512) {
+        buffer->superHeight = 512;
+    }
+    
+    /* Allocate super bitmap as friend of display bitmap with BMF_DISPLAYABLE for graphics board support */
+    flags = BMF_DISPLAYABLE; /* Use graphics board memory if available */
+    buffer->superBitMap = AllocBitMap(buffer->superWidth, buffer->superHeight, depth, flags, displayBitMap);
+    
+    if (!buffer->superBitMap) {
+        Printf("[GFX] CreateSuperBitMap: AllocBitMap failed (w=%lu, h=%lu, d=%lu)\n", 
+               buffer->superWidth, buffer->superHeight, depth);
+        buffer->superWidth = 0;
+        buffer->superHeight = 0;
+        return FALSE;
+    }
+    
+    Printf("[GFX] CreateSuperBitMap: SUCCESS (w=%lu, h=%lu, d=%lu, bitmap=%lx)\n",
+           buffer->superWidth, buffer->superHeight, depth, (ULONG)buffer->superBitMap);
+    
+    buffer->needsFullRedraw = TRUE;
+    return TRUE;
+}
+
+/* Free super bitmap */
+VOID FreeSuperBitMap(struct TextBuffer *buffer)
+{
+    if (buffer && buffer->superBitMap) {
+        FreeBitMap(buffer->superBitMap);
+        buffer->superBitMap = NULL;
+        buffer->superWidth = 0;
+        buffer->superHeight = 0;
+    }
+}
+
+/* Render text to window using ScrollLayer for optimized scrolling (Graphics v39+) */
 VOID RenderText(struct Window *window, struct TextBuffer *buffer)
 {
     struct RastPort *rp = NULL;
@@ -536,6 +679,20 @@ VOID RenderText(struct Window *window, struct TextBuffer *buffer)
     ULONG lineLen = 0;
     ULONG j = 0;
     ULONG textX = 0;
+    ULONG textStartX = 0;
+    ULONG textEndX = 0;
+    ULONG maxChars = 0;
+    ULONG charsToRender = 0;
+    ULONG renderStart = 0;
+    ULONG textEndPixel = 0;
+    ULONG charIdx = 0;
+    ULONG maxVisibleChar = 0;
+    ULONG actualChars = 0;
+    ULONG testX = 0;
+    ULONG linesRendered = 0;
+    BOOL useScrollLayer = FALSE;
+    LONG scrollDeltaX = 0;
+    LONG scrollDeltaY = 0;
     
     if (!window || !buffer) {
         return;
@@ -546,19 +703,72 @@ VOID RenderText(struct Window *window, struct TextBuffer *buffer)
         return;
     }
     
-    /* Clear window background with pen 2 (grey background) */
-    /* On Workbench screen: pen 1 = black, pen 2 = grey */
-    /* Use SetBPen and JAM2 mode to fill with background color */
-    SetBPen(rp, 2);  /* Background pen (grey) */
-    SetAPen(rp, 2);  /* Also set A pen for compatibility */
-    SetDrMd(rp, JAM2);  /* Fill mode - use background pen */
-    RectFill(rp, window->BorderLeft, window->BorderTop,
-             window->Width - 1 - window->BorderRight,
-             window->Height - 1 - window->BorderBottom);
-    SetDrMd(rp, JAM1);  /* Restore normal text mode */
-
+    /* Check if we can use ScrollLayer (Graphics v39+ with super bitmap) */
+    /* GfxBase is a struct GfxBase * which starts with struct Library */
+    if (GfxBase && ((struct Library *)GfxBase)->lib_Version >= 39 && buffer->superBitMap && rp->Layer) {
+        /* Calculate scroll deltas */
+        scrollDeltaX = (LONG)buffer->scrollX - (LONG)buffer->lastScrollX;
+        scrollDeltaY = (LONG)buffer->scrollY - (LONG)buffer->lastScrollY;
+        
+        /* Use ScrollLayer if we have a super bitmap and scroll delta is small */
+        /* For large scrolls or full redraws, we'll do a full render instead */
+        if (!buffer->needsFullRedraw && 
+            scrollDeltaX >= -100 && scrollDeltaX <= 100 &&
+            scrollDeltaY >= -50 && scrollDeltaY <= 50) {
+            useScrollLayer = TRUE;
+        }
+    }
+    
     lineHeight = GetLineHeight(rp);
     charWidth = GetCharWidth(rp, 'M');
+    
+    /* If using ScrollLayer, scroll first then render only newly exposed areas */
+    if (useScrollLayer && (scrollDeltaX != 0 || scrollDeltaY != 0)) {
+        /* Scroll the layer using hardware acceleration */
+        /* Note: ScrollLayer scrolls in pixels, so we need to convert character/line scroll to pixels */
+        LONG pixelDeltaX = scrollDeltaX * charWidth;
+        LONG pixelDeltaY = scrollDeltaY * lineHeight;
+        
+        if (pixelDeltaX != 0 || pixelDeltaY != 0) {
+            /* ScrollLayer is in layers.library - call via function pointer or direct call */
+            /* Signature: ScrollLayer(dummy, layer, dx, dy) where dummy can be 0 */
+            /* Note: This requires linking against layers.library or amiga.lib */
+            ScrollLayer(0L, rp->Layer, pixelDeltaX, pixelDeltaY);
+        }
+        
+        /* Update last scroll position */
+        buffer->lastScrollX = buffer->scrollX;
+        buffer->lastScrollY = buffer->scrollY;
+        
+        /* TODO: Render only newly exposed areas after scrolling */
+        /* For now, we'll still do a full render but ScrollLayer handles the scrolling */
+        /* This is still faster than full redraw because ScrollLayer uses hardware blitter */
+    }
+    
+    /* Calculate text area boundaries (Annotate-style) */
+    textStartX = window->BorderLeft + buffer->leftMargin + 1;
+    textEndX = window->Width - (window->BorderRight + 1);
+    
+    /* Calculate maximum characters per line (PageW) - Annotate style */
+    /* PageW = (Width - BorderRight - (BorderLeft + leftMargin + 1)) / FontX - 1 */
+    if (charWidth > 0) {
+        ULONG textWidth = 0;
+        /* Calculate available text width in pixels */
+        if (textEndX >= textStartX) {
+            textWidth = textEndX - textStartX + 1;
+        } else {
+            textWidth = 0;
+        }
+        /* Convert to characters, subtract 1 for safety (Annotate does -1) */
+        maxChars = textWidth / charWidth;
+        if (maxChars > 0) {
+            maxChars--;  /* -1 for safety margin (like Annotate) */
+        }
+        buffer->pageW = maxChars;
+    } else {
+        buffer->pageW = 0;
+    }
+    
     visibleLines = (window->Height - window->BorderTop - window->BorderBottom) / lineHeight;
 
     startY = buffer->scrollY;
@@ -567,7 +777,26 @@ VOID RenderText(struct Window *window, struct TextBuffer *buffer)
         endY = buffer->lineCount;
     }
 
+    /* Set clipping rectangle to prevent rendering outside text area */
+    /* This ensures text never renders into window borders */
+    /* Note: We'll rely on careful character counting instead of clipping regions */
+    /* Clipping regions require SetClipRegion which may not be available in all AmigaOS versions */
+    /* We'll measure each character and stop before exceeding textEndX */
+    
+    /* Clear window background with pen 2 (grey background) */
+    /* On Workbench screen: pen 1 = black, pen 2 = grey */
+    /* Clear entire text area first (Annotate clears after, but we clear before for simplicity) */
+    SetBPen(rp, 2);  /* Background pen (grey) */
+    SetAPen(rp, 2);  /* Also set A pen for compatibility */
+    SetDrMd(rp, JAM2);  /* Fill mode - use background pen */
+    RectFill(rp, textStartX - 1, window->BorderTop,
+             textEndX,
+             window->Height - 1 - window->BorderBottom);
+    SetDrMd(rp, JAM1);  /* Restore normal text mode */
+    SetAPen(rp, 1);  /* Set text pen for rendering */
+    
     /* Render visible lines with pen 1 (black text) */
+    /* Annotate-style: track character position and clip to PageW */
     SetAPen(rp, 1);
     y = window->BorderTop;
     for (i = startY; i < endY; i++) {
@@ -575,23 +804,116 @@ VOID RenderText(struct Window *window, struct TextBuffer *buffer)
             lineText = buffer->lines[i].text;
             lineLen = buffer->lines[i].length;
             
-            /* Calculate starting X position accounting for scroll */
-            textX = window->BorderLeft;
-            if (buffer->scrollX > 0 && lineLen > buffer->scrollX) {
-                /* Skip scrolled characters */
-                for (j = 0; j < buffer->scrollX && j < lineLen; j++) {
-                    textX += GetCharWidth(rp, (UBYTE)lineText[j]);
+            /* Annotate-style: Calculate maximum visible character index */
+            /* ScollX_PageW = ScrollX + PageW + 1 (maximum character index that should be visible) */
+            maxVisibleChar = 0;
+            if (buffer->pageW > 0 && buffer->scrollX + buffer->pageW + 1 < lineLen) {
+                maxVisibleChar = buffer->scrollX + buffer->pageW + 1;
+            } else {
+                maxVisibleChar = lineLen;
+            }
+            
+            /* Calculate starting X position (text starts at BorderLeft + leftMargin + 1) */
+            textX = textStartX;
+            
+            /* Calculate how many characters to render */
+            renderStart = buffer->scrollX;
+            if (renderStart > lineLen) {
+                renderStart = lineLen;
+            }
+            
+            /* Clip to maximum visible character (Annotate checks: if(BCxSL >= ScollX_PageW) stop) */
+            if (renderStart >= maxVisibleChar) {
+                /* All text is to the right of visible area - clear entire line */
+                charsToRender = 0;
+                textEndPixel = textStartX;
+            } else {
+                /* Calculate how many characters fit */
+                charsToRender = lineLen - renderStart;
+                if (renderStart + charsToRender > maxVisibleChar) {
+                    charsToRender = maxVisibleChar - renderStart;
+                }
+                
+                /* Calculate pixel position of start by measuring scrolled characters */
+                if (renderStart > 0 && renderStart <= lineLen) {
+                    for (j = 0; j < renderStart && j < lineLen; j++) {
+                        textX += GetCharWidth(rp, (UBYTE)lineText[j]);
+                    }
+                }
+                
+                /* Render line text, clipping to boundary */
+                /* Annotate-style: render text up to PageW, then clear remaining area */
+                if (lineText && charsToRender > 0 && renderStart < lineLen) {
+                    /* Calculate actual characters to render by measuring pixel width */
+                    /* We need to ensure text never exceeds textEndX */
+                    actualChars = 0;
+                    testX = textX;
+                    
+                    /* Measure how many characters actually fit */
+                    for (charIdx = 0; charIdx < charsToRender && (renderStart + charIdx) < lineLen; charIdx++) {
+                        ULONG charW = GetCharWidth(rp, (UBYTE)lineText[renderStart + charIdx]);
+                        /* Check if adding this character would exceed boundary */
+                        if (testX + charW > textEndX) {
+                            /* Stop - this character would exceed boundary */
+                            break;
+                        }
+                        testX += charW;
+                        actualChars++;
+                    }
+                    
+                    /* Render only the characters that fit */
+                    if (actualChars > 0) {
+                        Move(rp, textX, y + rp->Font->tf_Baseline);
+                        Text(rp, &lineText[renderStart], actualChars);
+                        textEndPixel = testX;  /* Use measured width */
+                    } else {
+                        textEndPixel = textStartX;
+                    }
+                } else {
+                    /* No text to render - start position is textStartX */
+                    textEndPixel = textStartX;
                 }
             }
             
-            /* Render line text */
-            if (lineText && lineLen > 0) {
-                Move(rp, textX, y + rp->Font->tf_Baseline);
-                Text(rp, &lineText[buffer->scrollX > lineLen ? lineLen : buffer->scrollX], 
-                     lineLen - (buffer->scrollX > lineLen ? lineLen : buffer->scrollX));
+            /* Clear remaining area after text to exact boundary (Annotate-style) */
+            /* Only clear if we haven't reached the right boundary */
+            if (textEndPixel <= textEndX) {
+                SetBPen(rp, 2);  /* Background pen (grey) */
+                SetAPen(rp, 2);
+                SetDrMd(rp, JAM2);
+                RectFill(rp, textEndPixel, y,
+                         textEndX, y + lineHeight - 1);
+                SetDrMd(rp, JAM1);
+                SetAPen(rp, 1);  /* Restore text pen */
             }
         }
         y += lineHeight;
+    }
+    
+    /* Clear remaining area below all rendered lines (Annotate-style) */
+    /* Annotate clears from count2*FontY to bottom after all lines are rendered */
+    {
+        linesRendered = endY - startY;
+        if (linesRendered > 0 && y < (window->Height - window->BorderBottom)) {
+            SetBPen(rp, 2);
+            SetAPen(rp, 2);
+            SetDrMd(rp, JAM2);
+            RectFill(rp, textStartX - 1, y,
+                     textEndX,
+                     window->Height - 1 - window->BorderBottom);
+            SetDrMd(rp, JAM1);
+            SetAPen(rp, 1);
+        }
+    }
+    
+    /* Clipping region cleanup - not needed since we're not using it */
+    /* We rely on careful character counting to prevent rendering outside boundaries */
+    
+    /* Update last scroll position if we did a full render */
+    if (!useScrollLayer || buffer->needsFullRedraw) {
+        buffer->lastScrollX = buffer->scrollX;
+        buffer->lastScrollY = buffer->scrollY;
+        buffer->needsFullRedraw = FALSE;
     }
 }
 
@@ -618,11 +940,15 @@ VOID UpdateCursor(struct Window *window, struct TextBuffer *buffer)
     lineHeight = GetLineHeight(rp);
     charWidth = GetCharWidth(rp, 'M');
     
-    /* Calculate cursor screen position */
-    screenY = window->BorderTop + (buffer->cursorY - buffer->scrollY) * lineHeight;
-    screenX = window->BorderLeft;
+    /* Calculate text start position (accounting for left margin) */
+    {
+        ULONG textStartX = window->BorderLeft + buffer->leftMargin + 1;
+        
+        /* Calculate cursor screen position */
+        screenY = window->BorderTop + (buffer->cursorY - buffer->scrollY) * lineHeight;
+        screenX = textStartX;
     
-    if (buffer->cursorY < buffer->lineCount) {
+    if (buffer->lines && buffer->cursorY < buffer->lineCount) {
         /* Calculate X position of cursor in line */
         for (i = 0; i < buffer->cursorX && i < buffer->lines[buffer->cursorY].length; i++) {
             screenX += GetCharWidth(rp, (UBYTE)buffer->lines[buffer->cursorY].text[i]);
@@ -636,6 +962,7 @@ VOID UpdateCursor(struct Window *window, struct TextBuffer *buffer)
             screenX -= scrollOffset;
         }
     }
+    }  /* End textStartX scope */
     
     /* Draw cursor using XOR mode for visibility */
     SetDrMd(rp, JAM2);
@@ -675,10 +1002,10 @@ VOID MouseToCursor(struct TextBuffer *buffer, struct Window *window, LONG mouseX
     lineHeight = GetLineHeight(rp);
     charWidth = GetCharWidth(rp, 'M');
     
-    /* Calculate text area bounds */
-    textAreaX = window->BorderLeft;
+    /* Calculate text area bounds (accounting for left margin) */
+    textAreaX = window->BorderLeft + buffer->leftMargin + 1;  /* Text starts after left margin */
     textAreaY = window->BorderTop;
-    textAreaWidth = window->Width - window->BorderLeft - window->BorderRight;
+    textAreaWidth = window->Width - window->BorderLeft - window->BorderRight - buffer->leftMargin - 1;
     textAreaHeight = window->Height - window->BorderTop - window->BorderBottom;
     visibleLines = textAreaHeight / lineHeight;
     
@@ -741,12 +1068,12 @@ VOID MouseToCursor(struct TextBuffer *buffer, struct Window *window, LONG mouseX
 }
 
 /* Delete character after cursor (Delete key) */
-BOOL DeleteForward(struct TextBuffer *buffer)
+BOOL DeleteForward(struct TextBuffer *buffer, struct CleanupStack *stack)
 {
     struct TextLine *line = NULL;
     struct TextLine *nextLine = NULL;
     
-    if (!buffer || buffer->cursorY >= buffer->lineCount) {
+    if (!buffer || !buffer->lines || buffer->cursorY >= buffer->lineCount || !stack) {
         return FALSE;
     }
     
@@ -764,16 +1091,17 @@ BOOL DeleteForward(struct TextBuffer *buffer)
         return TRUE;
     } else if (buffer->cursorY < buffer->lineCount - 1) {
         ULONG currLen = line->length;
-        ULONG nextLen = nextLine->length;
+        ULONG nextLen = 0;
         STRPTR newText = NULL;
         ULONG newAlloc = 0;
 
         /* Merge with next line */
         nextLine = &buffer->lines[buffer->cursorY + 1];
+        nextLen = nextLine->length;
         
         if (currLen + nextLen + 1 > line->allocated) {
             newAlloc = currLen + nextLen + 256;
-            newText = (STRPTR)AllocVec(newAlloc, MEMF_CLEAR);
+            newText = (STRPTR)allocVec(stack, newAlloc, MEMF_CLEAR);
             if (!newText) {
                 return FALSE;
             }
@@ -784,7 +1112,7 @@ BOOL DeleteForward(struct TextBuffer *buffer)
                 CopyMem(nextLine->text, &newText[currLen], nextLen);
             }
             if (line->text) {
-                FreeVec(line->text);
+                freeVec(stack, line->text);
             }
             line->text = newText;
             line->allocated = newAlloc;
@@ -798,7 +1126,7 @@ BOOL DeleteForward(struct TextBuffer *buffer)
         
         /* Remove next line */
         if (nextLine->text) {
-            FreeVec(nextLine->text);
+            freeVec(stack, nextLine->text);
         }
         if (buffer->cursorY + 1 < buffer->lineCount - 1) {
             /* Move lines up */
