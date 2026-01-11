@@ -51,6 +51,15 @@ BOOL TTX_InitLibraries(struct CleanupStack *stack)
     }
     Printf("[INIT] TTX_InitLibraries: icon.library=%lx\n", (ULONG)IconBase);
     
+    WorkbenchBase = openLibrary(stack, "workbench.library", 36L);
+    if (!WorkbenchBase) {
+        /* Workbench library is optional - app icon support won't work without it */
+        Printf("[INIT] TTX_InitLibraries: WARN (workbench.library optional, not found)\n");
+        SetIoErr(ERROR_OBJECT_NOT_FOUND);
+    } else {
+        Printf("[INIT] TTX_InitLibraries: workbench.library=%lx\n", (ULONG)WorkbenchBase);
+    }
+    
     CxBase = openLibrary(stack, "commodities.library", 0L);
     if (!CxBase) {
         /* Commodities is optional for single-instance, but preferred */
@@ -611,6 +620,316 @@ VOID TTX_RemoveCommodity(struct TTXApplication *app)
     Printf("[CLEANUP] TTX_RemoveCommodity: (handled by Seiso cleanup stack)\n");
 }
 
+/* Setup app icon for application-level iconification */
+BOOL TTX_SetupAppIcon(struct TTXApplication *app)
+{
+    STRPTR programName = NULL;
+    STRPTR iconName = NULL;
+    ULONG i = 0;
+    
+    Printf("[INIT] TTX_SetupAppIcon: START\n");
+    if (!app || !WorkbenchBase || !IconBase) {
+        Printf("[INIT] TTX_SetupAppIcon: FAIL (app=%lx, WorkbenchBase=%lx, IconBase=%lx)\n", 
+               (ULONG)app, (ULONG)WorkbenchBase, (ULONG)IconBase);
+        return FALSE;
+    }
+    
+    /* App icon will be created when iconifying, not at startup */
+    /* Just initialize the fields */
+    app->appIconPort = NULL;
+    app->appIcon = NULL;
+    app->appIconDO = NULL;
+    app->iconified = FALSE;
+    app->iconifyDeferred = FALSE;
+    app->iconifyState = FALSE;
+    
+    Printf("[INIT] TTX_SetupAppIcon: SUCCESS (deferred)\n");
+    return TRUE;
+}
+
+/* Remove app icon */
+VOID TTX_RemoveAppIcon(struct TTXApplication *app)
+{
+    if (!app) {
+        return;
+    }
+    
+    Printf("[CLEANUP] TTX_RemoveAppIcon: START\n");
+    
+    /* Remove app icon if it exists */
+    if (app->appIcon && WorkbenchBase) {
+        RemoveAppIcon(app->appIcon);
+        app->appIcon = NULL;
+    }
+    
+    /* Free disk object if it exists */
+    if (app->appIconDO && IconBase) {
+        FreeDiskObject(app->appIconDO);
+        app->appIconDO = NULL;
+    }
+    
+    /* Delete message port if it exists */
+    if (app->appIconPort) {
+        struct Message *msg = NULL;
+        /* Clean up any pending messages */
+        Forbid();
+        while ((msg = GetMsg(app->appIconPort)) != NULL) {
+            ReplyMsg(msg);
+        }
+        Permit();
+        DeleteMsgPort(app->appIconPort);
+        app->appIconPort = NULL;
+    }
+    
+    app->iconified = FALSE;
+    
+    Printf("[CLEANUP] TTX_RemoveAppIcon: DONE\n");
+}
+
+/* Deferred iconification - sets flag for main loop to process */
+VOID TTX_Iconify(struct TTXApplication *app, BOOL iconify)
+{
+    if (!app) {
+        return;
+    }
+    
+    Printf("[ICONIFY] TTX_Iconify: deferring iconify=%s\n", iconify ? "TRUE" : "FALSE");
+    app->iconifyDeferred = TRUE;
+    app->iconifyState = iconify;
+}
+
+/* Perform actual iconification/uniconification */
+VOID TTX_DoIconify(struct TTXApplication *app, BOOL iconify)
+{
+    struct Session *session = NULL;
+    STRPTR programName = NULL;
+    STRPTR iconName = NULL;
+    ULONG i = 0;
+    BPTR oldDir = 0;
+    
+    if (!app) {
+        return;
+    }
+    
+    Printf("[ICONIFY] TTX_DoIconify: START (iconify=%s, currently iconified=%s)\n", 
+           iconify ? "TRUE" : "FALSE", app->iconified ? "TRUE" : "FALSE");
+    
+    if (iconify && !app->iconified) {
+        /* Iconify: Close all windows, create app icon */
+        Printf("[ICONIFY] TTX_DoIconify: iconifying application\n");
+        
+        /* Close all windows but keep sessions alive */
+        session = app->sessions;
+        while (session) {
+            if (session->window) {
+                Printf("[ICONIFY] TTX_DoIconify: closing window for session %lu\n", session->sessionID);
+                CloseWindow(session->window);
+                session->window = NULL;  /* Keep session, just close window */
+            }
+            session = session->next;
+        }
+        
+        /* Create message port for app icon */
+        if (!app->appIconPort) {
+            app->appIconPort = CreateMsgPort();
+            if (!app->appIconPort) {
+                Printf("[ICONIFY] TTX_DoIconify: FAIL (CreateMsgPort failed)\n");
+                /* Reopen windows on failure */
+                session = app->sessions;
+                while (session) {
+                    if (!session->window) {
+                        /* TODO: Reopen window - for now just mark as needing reopen */
+                    }
+                    session = session->next;
+                }
+                return;
+            }
+            Printf("[ICONIFY] TTX_DoIconify: created appIconPort=%lx\n", (ULONG)app->appIconPort);
+        }
+        
+        /* Get program name for icon */
+        programName = (STRPTR)FindTask(NULL);
+        if (programName) {
+            programName = programName->tc_Node.ln_Name;
+        }
+        if (!programName) {
+            programName = "TTX";
+        }
+        
+        /* Get disk object for app icon */
+        if (!app->appIconDO && IconBase) {
+            /* Try GetIconTags first (V44+) */
+            if (IconBase->lib_Version >= 44) {
+                app->appIconDO = GetIconTags(programName,
+                    ICONGETA_FailIfUnavailable, FALSE,
+                    TAG_END);
+            } else {
+                /* Fall back to GetDiskObjectNew for older versions */
+                app->appIconDO = GetDiskObjectNew(programName);
+            }
+            
+            if (!app->appIconDO) {
+                Printf("[ICONIFY] TTX_DoIconify: WARN (could not get disk object, using default)\n");
+                /* Continue anyway - AddAppIcon will use default icon */
+            } else {
+                /* Set icon position to NO_ICON_POSITION to let user position it */
+                app->appIconDO->do_CurrentX = NO_ICON_POSITION;
+                app->appIconDO->do_CurrentY = NO_ICON_POSITION;
+            }
+        }
+        
+        /* Add app icon to Workbench */
+        if (WorkbenchBase && app->appIconPort) {
+            iconName = FilePart(programName);
+            if (!iconName || iconName[0] == '\0') {
+                iconName = programName;
+            }
+            
+            app->appIcon = AddAppIcon(0, 0, iconName, app->appIconPort, NULL, app->appIconDO, TAG_END);
+            if (!app->appIcon) {
+                Printf("[ICONIFY] TTX_DoIconify: FAIL (AddAppIcon failed)\n");
+                /* Cleanup and reopen windows */
+                if (app->appIconDO) {
+                    FreeDiskObject(app->appIconDO);
+                    app->appIconDO = NULL;
+                }
+                DeleteMsgPort(app->appIconPort);
+                app->appIconPort = NULL;
+                /* Reopen windows */
+                session = app->sessions;
+                while (session) {
+                    if (!session->window) {
+                        /* TODO: Reopen window */
+                    }
+                    session = session->next;
+                }
+                return;
+            }
+            Printf("[ICONIFY] TTX_DoIconify: created appIcon=%lx\n", (ULONG)app->appIcon);
+        }
+        
+        app->iconified = TRUE;
+        Printf("[ICONIFY] TTX_DoIconify: SUCCESS (iconified)\n");
+        
+    } else if (!iconify && app->iconified) {
+        /* Uniconify: Remove app icon, reopen windows */
+        Printf("[ICONIFY] TTX_DoIconify: uniconifying application\n");
+        
+        /* Remove app icon */
+        if (app->appIcon && WorkbenchBase) {
+            RemoveAppIcon(app->appIcon);
+            app->appIcon = NULL;
+        }
+        
+        /* Free disk object */
+        if (app->appIconDO && IconBase) {
+            FreeDiskObject(app->appIconDO);
+            app->appIconDO = NULL;
+        }
+        
+        /* Delete message port */
+        if (app->appIconPort) {
+            struct Message *msg = NULL;
+            /* Clean up any pending messages */
+            Forbid();
+            while ((msg = GetMsg(app->appIconPort)) != NULL) {
+                ReplyMsg(msg);
+            }
+            Permit();
+            DeleteMsgPort(app->appIconPort);
+            app->appIconPort = NULL;
+        }
+        
+        /* Reopen all windows */
+        session = app->sessions;
+        while (session) {
+            if (!session->window) {
+                Printf("[ICONIFY] TTX_DoIconify: TODO - need to reopen window for session %lu\n", session->sessionID);
+                /* TODO: Implement window reopening */
+                /* For now, we'll need to recreate the window */
+            }
+            session = session->next;
+        }
+        
+        app->iconified = FALSE;
+        Printf("[ICONIFY] TTX_DoIconify: SUCCESS (uniconified)\n");
+    } else {
+        Printf("[ICONIFY] TTX_DoIconify: no change needed (iconify=%s, iconified=%s)\n",
+               iconify ? "TRUE" : "FALSE", app->iconified ? "TRUE" : "FALSE");
+    }
+}
+
+/* Process app icon messages (double-click, file drops) */
+VOID TTX_ProcessAppIcon(struct TTXApplication *app)
+{
+    struct AppMessage *msg = NULL;
+    STRPTR fileName = NULL;
+    STRPTR fullPath = NULL;
+    ULONG i = 0;
+    ULONG pathLen = 0;
+    BPTR oldDir = 0;
+    
+    if (!app || !app->appIconPort) {
+        return;
+    }
+    
+    while ((msg = (struct AppMessage *)GetMsg(app->appIconPort)) != NULL) {
+        Printf("[ICONIFY] TTX_ProcessAppIcon: received message (am_NumArgs=%lu)\n", msg->am_NumArgs);
+        
+        /* Always uniconify on app icon click */
+        TTX_Iconify(app, FALSE);
+        
+        /* Process dropped files */
+        if (msg->am_NumArgs > 0 && msg->am_ArgList) {
+            for (i = 0; i < msg->am_NumArgs; i++) {
+                /* Convert lock+name to full path */
+                fileName = NULL;
+                fullPath = NULL;
+                pathLen = 0;
+                
+                /* Build path from lock and name */
+                if (msg->am_ArgList[i].wa_Lock && msg->am_ArgList[i].wa_Name) {
+                    /* Get current directory to restore later */
+                    oldDir = CurrentDir(msg->am_ArgList[i].wa_Lock);
+                    
+                    /* Build full path - allocate buffer */
+                    pathLen = 256; /* Reasonable max path length */
+                    fullPath = (STRPTR)allocVec(app->cleanupStack, pathLen, MEMF_CLEAR);
+                    if (fullPath) {
+                        /* Get path from lock */
+                        if (NameFromLock(msg->am_ArgList[i].wa_Lock, fullPath, pathLen)) {
+                            /* Add filename */
+                            if (AddPart(fullPath, msg->am_ArgList[i].wa_Name, pathLen)) {
+                                Printf("[ICONIFY] TTX_ProcessAppIcon: opening file '%s'\n", fullPath);
+                                TTX_CreateSession(app, fullPath);
+                            } else {
+                                Printf("[ICONIFY] TTX_ProcessAppIcon: WARN (AddPart failed)\n");
+                            }
+                        } else {
+                            Printf("[ICONIFY] TTX_ProcessAppIcon: WARN (NameFromLock failed)\n");
+                        }
+                    }
+                    
+                    /* Restore original directory */
+                    if (oldDir) {
+                        CurrentDir(oldDir);
+                    }
+                } else if (msg->am_ArgList[i].wa_Name) {
+                    /* Just a name, no lock - use as-is */
+                    Printf("[ICONIFY] TTX_ProcessAppIcon: opening file '%s'\n", msg->am_ArgList[i].wa_Name);
+                    TTX_CreateSession(app, msg->am_ArgList[i].wa_Name);
+                }
+            }
+        } else {
+            /* Double-click with no files - just uniconify (already done above) */
+            Printf("[ICONIFY] TTX_ProcessAppIcon: double-click (no files)\n");
+        }
+        
+        /* Reply to message */
+        ReplyMsg((struct Message *)msg);
+    }
+}
+
 /* Create a new session (window) */
 BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
 {
@@ -1000,6 +1319,7 @@ BOOL TTX_HandleCommodityMessage(struct TTXApplication *app, struct Message *msg)
     ULONG cxMsgType = 0;
     BOOL result = FALSE;
     struct TTXMessage *ttxMsg = NULL;
+    struct Session *session = NULL;
     
     if (!app || !msg) {
         return FALSE;
@@ -1067,11 +1387,23 @@ BOOL TTX_HandleCommodityMessage(struct TTXApplication *app, struct Message *msg)
                     result = TRUE;
                     break;
                 case CXCMD_APPEAR:
-                    /* Could show window here if hidden */
+                    /* Show/uniconify application */
+                    TTX_Iconify(app, FALSE);
+                    /* Bring all windows to front */
+                    if (app->sessions) {
+                        session = app->sessions;
+                        while (session) {
+                            if (session->window) {
+                                WindowToFront(session->window);
+                            }
+                            session = session->next;
+                        }
+                    }
                     result = TRUE;
                     break;
                 case CXCMD_DISAPPEAR:
-                    /* Could hide window here */
+                    /* Hide/iconify application */
+                    TTX_Iconify(app, TRUE);
                     result = TRUE;
                     break;
                 case CXCMD_KILL:
@@ -1079,7 +1411,18 @@ BOOL TTX_HandleCommodityMessage(struct TTXApplication *app, struct Message *msg)
                     result = TRUE;
                     break;
                 case CXCMD_UNIQUE:
-                    /* Another instance tried to start */
+                    /* Another instance tried to start - show ourselves */
+                    TTX_Iconify(app, FALSE);
+                    /* Bring all windows to front */
+                    if (app->sessions) {
+                        session = app->sessions;
+                        while (session) {
+                            if (session->window) {
+                                WindowToFront(session->window);
+                            }
+                            session = session->next;
+                        }
+                    }
                     result = TRUE;
                     break;
                 default:
@@ -1584,6 +1927,9 @@ VOID TTX_EventLoop(struct TTXApplication *app)
     if (app->brokerPort) {
         app->sigmask |= (1UL << app->brokerPort->mp_SigBit);
     }
+    if (app->appIconPort) {
+        app->sigmask |= (1UL << app->appIconPort->mp_SigBit);
+    }
     if (app->sessions) {
         session = app->sessions;
         while (session) {
@@ -1598,6 +1944,30 @@ VOID TTX_EventLoop(struct TTXApplication *app)
     app->running = TRUE;
     
     while (app->running) {
+        /* Process deferred iconification first */
+        if (app->iconifyDeferred) {
+            app->iconifyDeferred = FALSE;
+            TTX_DoIconify(app, app->iconifyState);
+            /* Rebuild signal mask after iconification (windows may have changed) */
+            app->sigmask = (1UL << app->appPort->mp_SigBit);
+            if (app->brokerPort) {
+                app->sigmask |= (1UL << app->brokerPort->mp_SigBit);
+            }
+            if (app->appIconPort) {
+                app->sigmask |= (1UL << app->appIconPort->mp_SigBit);
+            }
+            if (app->sessions) {
+                session = app->sessions;
+                while (session) {
+                    if (session->window) {
+                        app->sigmask |= (1UL << session->window->UserPort->mp_SigBit);
+                    }
+                    session = session->next;
+                }
+            }
+            app->sigmask |= SIGBREAKF_CTRL_C;
+        }
+        
         Printf("[EVENT] Waiting for signals (mask=0x%08lx)\n", app->sigmask);
         signals = Wait(app->sigmask);
         Printf("[EVENT] Wait returned: signals=0x%08lx\n", signals);
@@ -1614,6 +1984,11 @@ VOID TTX_EventLoop(struct TTXApplication *app)
             while ((msg = GetMsg(app->brokerPort)) != NULL) {
                 TTX_HandleCommodityMessage(app, msg);
             }
+        }
+        
+        /* Check app icon port (app icon messages) */
+        if (app->appIconPort && (signals & (1UL << app->appIconPort->mp_SigBit))) {
+            TTX_ProcessAppIcon(app);
         }
         
         /* Check application port (inter-instance messages) */
@@ -1729,6 +2104,14 @@ BOOL TTX_Init(struct TTXApplication *app)
         }
     }
     
+    /* Setup app icon support (for iconification) */
+    if (WorkbenchBase && IconBase) {
+        if (!TTX_SetupAppIcon(app)) {
+            /* App icon setup failed, but continue anyway */
+            /* The app can still work without iconification */
+        }
+    }
+    
     Printf("[INIT] TTX_Init: SUCCESS\n");
     return TRUE;
 }
@@ -1743,6 +2126,9 @@ VOID TTX_Cleanup(struct TTXApplication *app)
         Printf("[CLEANUP] TTX_Cleanup: DONE (app=NULL)\n");
         return;
     }
+    
+    /* Remove app icon before destroying sessions */
+    TTX_RemoveAppIcon(app);
     
     /* Destroy all sessions */
     Printf("[CLEANUP] TTX_Cleanup: destroying %lu sessions\n", app->sessionCount);

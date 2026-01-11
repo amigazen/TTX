@@ -49,6 +49,8 @@ BOOL TTX_HandleCommand(struct TTXApplication *app, struct Session *session, STRP
         return TTX_Cmd_CloseDoc(app, session, args, argCount);
     } else if (Stricmp(command, "SetReadOnly") == 0) {
         return TTX_Cmd_SetReadOnly(app, session, args, argCount);
+    } else if (Stricmp(command, "Iconify") == 0) {
+        return TTX_Cmd_Iconify(app, session, args, argCount);
     } else if (Stricmp(command, "Quit") == 0) {
         return TTX_Cmd_Quit(app, session, args, argCount);
     } else {
@@ -78,7 +80,7 @@ BOOL TTX_HandleMenuPick(struct TTXApplication *app, struct Session *session, ULO
     
     /* Menu 0 = Project menu */
     /* Note: In gadtools, menu items are numbered sequentially including bars */
-    /* Menu structure: 0=Title, 1=Open, 2=OpenNew, 3=Insert, 4=Bar, 5=Save, 6=SaveAs, 7=Bar, 8=Clear, 9=Print, 10=Info, 11=Bar, 12=ReadOnly, 13=Bar, 14=Close, 15=Quit */
+    /* Menu structure: 0=Title, 1=Open, 2=OpenNew, 3=Insert, 4=Bar, 5=Save, 6=SaveAs, 7=Bar, 8=Clear, 9=Print, 10=Info, 11=Bar, 12=ReadOnly, 13=Bar, 14=Iconify, 15=Bar, 16=Close, 17=Quit */
     if (menuNumber == 0) {
         switch (itemNumber) {
             case 0:  /* Open... */
@@ -121,13 +123,16 @@ BOOL TTX_HandleMenuPick(struct TTXApplication *app, struct Session *session, ULO
                     args[argCount++] = "Toggle";
                 }
                 break;
-            case 12: /* Bar - skip */
+            case 12: /* Iconify */
+                command = "Iconify";
+                break;
+            case 13: /* Bar - skip */
                 Printf("[MENU] Bar item selected (ignored)\n");
                 return TRUE;
-            case 13: /* Close Window */
+            case 14: /* Close Window */
                 command = "CloseDoc";
                 break;
-            case 14: /* Quit */
+            case 15: /* Quit */
                 command = "Quit";
                 break;
             default:
@@ -166,6 +171,8 @@ BOOL TTX_CreateMenuStrip(struct Session *session)
         {NM_ITEM, "Info...", "?", 0, 0, (APTR)((0UL << 8) | 9UL)},  /* menu 0, item 9 */
         {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
         {NM_ITEM, "Read-Only", NULL, 0, CHECKIT, (APTR)((0UL << 8) | 11UL)},  /* menu 0, item 11 */
+        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
+        {NM_ITEM, "Iconify", "I", 0, 0, (APTR)((0UL << 8) | 12UL)},  /* menu 0, item 12 */
         {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
         {NM_ITEM, "Close Window", "Q", 0, 0, (APTR)((0UL << 8) | 13UL)},  /* menu 0, item 13 */
         {NM_ITEM, "Quit", NULL, 0, 0, (APTR)((0UL << 8) | 14UL)},  /* menu 0, item 14 */
@@ -1026,6 +1033,21 @@ BOOL TTX_Cmd_SetReadOnly(struct TTXApplication *app, struct Session *session, ST
     }
     
     Printf("[CMD] TTX_Cmd_SetReadOnly: SUCCESS (readOnly=%s)\n", session->readOnly ? "TRUE" : "FALSE");
+    return TRUE;
+}
+
+BOOL TTX_Cmd_Iconify(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
+{
+    if (!app) {
+        return FALSE;
+    }
+    
+    Printf("[CMD] TTX_Cmd_Iconify: START (iconified=%s)\n", app->iconified ? "TRUE" : "FALSE");
+    
+    /* Toggle iconification state */
+    TTX_Iconify(app, !app->iconified);
+    
+    Printf("[CMD] TTX_Cmd_Iconify: SUCCESS\n");
     return TRUE;
 }
 

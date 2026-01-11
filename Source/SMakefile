@@ -46,8 +46,8 @@ clean:
 
 # Install target
 install:
-	@echo "Installing TTX..."
-	@copy $(PROGRAM) to C:$(PROGRAM) CLONE
+	@echo "Installing TTX to /SDK/Tools/TTX/"
+	@copy $(PROGRAM) to /SDK/Tools/TTX/$(PROGRAM) CLONE
 
 # Dependencies
 ttx.o: ttx.c ttx.h

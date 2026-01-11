@@ -62,7 +62,7 @@ extern struct Library *KeymapBase;
 extern struct Library *AslBase;
 
 /* Version string */
-static const char *verstag = "$VER: TTX 3.0 (7/1/2026)\n";
+static const char *verstag = "$VER: TTX 3.0 (11/1/2026)\n";
 static const char *stack_cookie = "$STACK: 4096\n";
 
 /* Message port name for single-instance communication */
@@ -131,20 +131,50 @@ struct TTXArgs {
     struct RDArgs *rda;
 };
 
+/* Window state structure - stores window creation parameters for restoration */
+struct WindowState {
+    LONG leftEdge;          /* Window left position */
+    LONG topEdge;           /* Window top position */
+    ULONG innerWidth;       /* Window inner width */
+    ULONG innerHeight;      /* Window inner height */
+    ULONG flags;            /* Window flags (WFLG_*) */
+    ULONG idcmpFlags;       /* IDCMP flags */
+    STRPTR title;           /* Window title */
+    STRPTR screenTitle;     /* Screen title */
+    STRPTR pubScreenName;   /* Public screen name (or NULL for default) */
+    ULONG minWidth;         /* Minimum window width */
+    ULONG minHeight;        /* Minimum window height */
+    ULONG maxWidth;         /* Maximum window width */
+    ULONG maxHeight;        /* Maximum window height */
+    BOOL windowOpen;        /* TRUE if window is currently open */
+};
+
+/* Document state structure - stores document metadata */
+struct DocumentState {
+    STRPTR fileName;        /* File name (or NULL for untitled) */
+    BOOL modified;          /* TRUE if document has been modified since load */
+    BOOL readOnly;           /* TRUE if document is read-only */
+    ULONG loadTime;          /* Time when file was loaded (for "modified since" checks) */
+    ULONG fileSize;          /* File size in bytes (0 if untitled) */
+    BOOL fileExists;         /* TRUE if file exists on disk */
+};
+
 /* Session structure - one per open file/window */
+/* Implements Session-Window-Document model: Session contains Window and Document state */
 struct Session {
     struct Session *next;
     struct Session *prev;
     ULONG sessionID;
     struct CleanupStack *cleanupStack;  /* Pointer to global cleanup stack (app->cleanupStack) */
-    struct Window *window;
-    struct Menu *menuStrip;  /* Menu strip for this window */
-    struct Gadget *vertPropGadget;  /* Vertical scroll bar prop gadget */
-    struct Gadget *horizPropGadget;  /* Horizontal scroll bar prop gadget */
-    STRPTR fileName;
-    struct TextBuffer *buffer;
-    BOOL modified;
-    BOOL readOnly;
+    /* Window state - Intuition window and UI elements */
+    struct Window *window;              /* Intuition window (NULL if closed/iconified) */
+    struct Menu *menuStrip;             /* Menu strip for this window */
+    struct Gadget *vertPropGadget;      /* Vertical scroll bar prop gadget */
+    struct Gadget *horizPropGadget;     /* Horizontal scroll bar prop gadget */
+    struct WindowState windowState;     /* Window creation parameters (for restoration) */
+    /* Document state - file and buffer */
+    struct DocumentState docState;      /* Document metadata */
+    struct TextBuffer *buffer;          /* Text buffer (always present, even when window closed) */
 };
 
 /* Prop gadget IDs */
@@ -167,6 +197,13 @@ struct TTXApplication {
     BOOL backgroundMode;  /* TRUE if running in background mode */
     ULONG signals;
     ULONG sigmask;
+    /* App icon support for application-level iconification */
+    struct MsgPort *appIconPort;  /* Message port for app icon */
+    struct AppIcon *appIcon;      /* App icon object */
+    struct DiskObject *appIconDO; /* Disk object for app icon */
+    BOOL iconified;               /* TRUE if application is iconified */
+    BOOL iconifyDeferred;         /* Defer iconification to main loop */
+    BOOL iconifyState;            /* Desired iconification state */
 };
 
 /* Forward declarations */
@@ -193,6 +230,13 @@ VOID TTX_FreeMenuStrip(struct Session *session);
 BOOL TTX_HandleCommand(struct TTXApplication *app, struct Session *session, STRPTR command, STRPTR *args, ULONG argCount);
 BOOL TTX_HandleMenuPick(struct TTXApplication *app, struct Session *session, ULONG menuNumber, ULONG itemNumber);
 VOID TTX_ShowUsage(VOID);
+VOID TTX_Iconify(struct TTXApplication *app, BOOL iconify);
+VOID TTX_DoIconify(struct TTXApplication *app, BOOL iconify);
+VOID TTX_ProcessAppIcon(struct TTXApplication *app);
+BOOL TTX_SetupAppIcon(struct TTXApplication *app);
+VOID TTX_RemoveAppIcon(struct TTXApplication *app);
+BOOL TTX_SaveWindowState(struct Session *session);
+BOOL TTX_RestoreWindow(struct TTXApplication *app, struct Session *session);
 
 /* Command handler functions - Project menu */
 BOOL TTX_Cmd_OpenFile(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
@@ -204,6 +248,7 @@ BOOL TTX_Cmd_ClearFile(struct TTXApplication *app, struct Session *session, STRP
 BOOL TTX_Cmd_PrintFile(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
 BOOL TTX_Cmd_CloseDoc(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
 BOOL TTX_Cmd_SetReadOnly(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
+BOOL TTX_Cmd_Iconify(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
 BOOL TTX_Cmd_Quit(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
 
 /* Text buffer functions */
