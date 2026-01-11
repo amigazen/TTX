@@ -14,30 +14,37 @@
 #include <dos/dos.h>
 #include <intuition/intuition.h>
 #include <intuition/intuitionbase.h>
+#include <intuition/gadgetclass.h>
+#include <intuition/icclass.h>
+#include <intuition/classusr.h>
+#include <intuition/screens.h>
 #include <utility/tagitem.h>
 #include <graphics/rastport.h>
 #include <graphics/gfx.h>
 #include <graphics/text.h>
 #include <graphics/regions.h>
+#include <graphics/layers.h>
 #include <workbench/startup.h>
 #include <libraries/commodities.h>
+#include <libraries/gadtools.h>
+#include <libraries/asl.h>
 #include <devices/inputevent.h>
 #include <devices/keymap.h>
 #include <libraries/keymap.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/intuition.h>
+#include <proto/layers.h>
 #include <proto/graphics.h>
 #include <proto/utility.h>
 #include <proto/icon.h>
 #include <proto/locale.h>
 #include <proto/rexxsyslib.h>
 #include <proto/wb.h>
+#include <proto/asl.h>
 #include <proto/commodities.h>
 #include <proto/keymap.h>
-#include <intuition/gadgetclass.h>
-#include <intuition/icclass.h>
-#include <intuition/classusr.h>
+#include <proto/gadtools.h>
 #include "seiso.h"
 
 /* Library base pointers */
@@ -46,8 +53,13 @@ extern struct DosLibrary *DOSBase;
 extern struct IntuitionBase *IntuitionBase;
 extern struct Library *UtilityBase;
 extern struct GfxBase *GfxBase;
+extern struct Library *IconBase;
+extern struct LocaleBase *LocaleBase;
+extern struct RxsLib *RexxSysBase;
+extern struct Library *WorkbenchBase;
 extern struct Library *CxBase;
 extern struct Library *KeymapBase;
+extern struct Library *AslBase;
 
 /* Version string */
 static const char *verstag = "$VER: TTX 3.0 (7/1/2026)\n";
@@ -215,4 +227,3 @@ VOID UpdateScrollBars(struct Session *session);
 VOID CalculateMaxScroll(struct TextBuffer *buffer, struct Window *window);
 
 #endif /* TTX_H */
-

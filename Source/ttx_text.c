@@ -6,12 +6,9 @@
  */
 
 #include "ttx.h"
-#include <proto/graphics.h>
-#include <graphics/layers.h>
-#include <proto/layers.h>
 
 /* Initial buffer size constant */
-#define INITIAL_BUFFER_SIZE 65536
+#define INITIAL_BUFFER_SIZE 16384
 
 /* Initialize text buffer */
 BOOL InitTextBuffer(struct TextBuffer *buffer, struct CleanupStack *stack)

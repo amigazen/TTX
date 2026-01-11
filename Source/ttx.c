@@ -10,19 +10,6 @@
 /* Forward declaration for cleanup stack access */
 static struct CleanupStack *g_ttxStack = NULL;
 
-/* Library base pointers */
-extern struct ExecBase *SysBase;
-extern struct DosLibrary *DOSBase;
-extern struct IntuitionBase *IntuitionBase;
-extern struct Library *UtilityBase;
-extern struct GfxBase *GfxBase;
-extern struct Library *IconBase;
-extern struct LocaleBase *LocaleBase;
-extern struct RxsLib *RexxSysBase;
-extern struct Library *WorkbenchBase;
-extern struct Library *CxBase;
-extern struct Library *KeymapBase;
-
 /* Initialize required libraries */
 BOOL TTX_InitLibraries(struct CleanupStack *stack)
 {
@@ -82,6 +69,16 @@ BOOL TTX_InitLibraries(struct CleanupStack *stack)
         return FALSE;
     }
     Printf("[INIT] TTX_InitLibraries: keymap.library=%lx\n", (ULONG)KeymapBase);
+    
+    /* Open asl.library for file requesters */
+    AslBase = openLibrary(stack, "asl.library", 36L);
+    if (!AslBase) {
+        /* ASL library is optional - file requesters won't work without it */
+        Printf("[INIT] TTX_InitLibraries: WARN (asl.library optional, not found)\n");
+        SetIoErr(ERROR_OBJECT_NOT_FOUND);
+    } else {
+        Printf("[INIT] TTX_InitLibraries: asl.library=%lx\n", (ULONG)AslBase);
+    }
     
     Printf("[INIT] TTX_InitLibraries: SUCCESS\n");
     return TRUE;
@@ -1104,27 +1101,102 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
     BOOL result = FALSE;
     
     if (!app || !imsg) {
+        Printf("[EVENT] TTX_HandleIntuitionMessage: FAIL (app=%lx, imsg=%lx)\n", (ULONG)app, (ULONG)imsg);
         return FALSE;
     }
+    
+    Printf("[EVENT] TTX_HandleIntuitionMessage: Class=0x%08lx, Code=0x%04x\n",
+           (ULONG)imsg->Class, (unsigned int)imsg->Code);
     
     /* Find session for this window */
     session = app->sessions;
     while (session) {
         if (session->window == imsg->IDCMPWindow) {
+            Printf("[EVENT] Found session for window %lx\n", (ULONG)imsg->IDCMPWindow);
             break;
         }
         session = session->next;
     }
     
     if (!session) {
+        Printf("[EVENT] No session found for window %lx\n", (ULONG)imsg->IDCMPWindow);
         return FALSE;
     }
     
             switch (imsg->Class) {
                 case IDCMP_MENUPICK:
-                    /* Handle menu selection */
-                    if (imsg->Code != MENUNULL) {
-                        TTX_HandleMenuPick(app, session, (imsg->Code >> 16) & 0xFFFF, imsg->Code & 0xFFFF);
+                    /* Handle menu selection - process NextSelect chain for submenus */
+                    /* According to Intuition guide: menu code is in msg->Code field */
+                    /* Menu number format: 16-bit with 5 bits menu, 6 bits item, 5 bits sub-item */
+                    {
+                        /* Use Code field as per Intuition guide, but if it's 0, try Qualifier (for gadtools) */
+                        UWORD menuCode = (UWORD)imsg->Code;
+                        if (menuCode == 0 && imsg->Qualifier != 0) {
+                            /* For gadtools menus, code might be in Qualifier */
+                            menuCode = (UWORD)imsg->Qualifier;
+                            Printf("[EVENT] IDCMP_MENUPICK: Code was 0, using Qualifier=0x%04x\n", (unsigned int)menuCode);
+                        } else {
+                            Printf("[EVENT] IDCMP_MENUPICK: Code=0x%04x, Qualifier=0x%04x\n", 
+                                   (unsigned int)imsg->Code, (unsigned int)imsg->Qualifier);
+                        }
+                        
+                        /* Check for MENUNULL first */
+                        if (menuCode == MENUNULL || menuCode == 0xFFFF) {
+                            Printf("[EVENT] IDCMP_MENUPICK: MENUNULL (0x%04x), ignoring\n", (unsigned int)menuCode);
+                            result = TRUE;
+                            break;
+                        }
+                        
+                        /* Process menu selection chain as per Intuition guide */
+                        while (menuCode != MENUNULL && menuCode != 0xFFFF) {
+                            UWORD menuNumber = 0;
+                            UWORD itemNumber = 0;
+                            struct MenuItem *item = NULL;
+                            
+                            /* Get the menu item using ItemAddress (as per Intuition guide) */
+                            if (session->window && session->window->MenuStrip) {
+                                item = ItemAddress(session->window->MenuStrip, menuCode);
+                                if (!item) {
+                                    Printf("[EVENT] IDCMP_MENUPICK: ItemAddress returned NULL for code=0x%04x\n", (unsigned int)menuCode);
+                                    break;
+                                }
+                                
+                                /* Get menu/item numbers from UserData if available (our custom storage) */
+                                if (item && GTMENUITEM_USERDATA(item)) {
+                                    ULONG userData = (ULONG)GTMENUITEM_USERDATA(item);
+                                    menuNumber = (userData >> 8) & 0xFF;
+                                    itemNumber = userData & 0xFF;
+                                    Printf("[EVENT] IDCMP_MENUPICK: menuCode=0x%04x, got from UserData: menu=%u, item=%u\n", 
+                                           (unsigned int)menuCode, menuNumber, itemNumber);
+                                } else {
+                                    /* Fallback: Use Intuition macros if available, otherwise extract manually */
+                                    /* Menu number format: 5 bits menu (bits 11-15), 6 bits item (bits 5-10), 5 bits sub (bits 0-4) */
+                                    /* But we only care about menu and item for now */
+                                    menuNumber = (menuCode >> 11) & 0x1F;  /* 5 bits for menu */
+                                    itemNumber = (menuCode >> 5) & 0x3F;   /* 6 bits for item */
+                                    Printf("[EVENT] IDCMP_MENUPICK: menuCode=0x%04x, extracted menu=%u, item=%u (no UserData)\n", 
+                                           (unsigned int)menuCode, menuNumber, itemNumber);
+                                }
+                            } else {
+                                Printf("[EVENT] IDCMP_MENUPICK: no window or MenuStrip\n");
+                                break;
+                            }
+                            
+                            /* Handle this menu item */
+                            if (!TTX_HandleMenuPick(app, session, menuNumber, itemNumber)) {
+                                /* Command failed or was cancelled - stop processing chain */
+                                Printf("[EVENT] IDCMP_MENUPICK: command failed, stopping chain\n");
+                                break;
+                            }
+                            
+                            /* Get next item in chain (for submenus) - as per Intuition guide */
+                            if (item) {
+                                menuCode = item->NextSelect;
+                                Printf("[EVENT] IDCMP_MENUPICK: next in chain=0x%04x\n", (unsigned int)menuCode);
+                            } else {
+                                menuCode = MENUNULL;
+                            }
+                        }
                     }
                     result = TRUE;
                     break;
@@ -1526,10 +1598,13 @@ VOID TTX_EventLoop(struct TTXApplication *app)
     app->running = TRUE;
     
     while (app->running) {
+        Printf("[EVENT] Waiting for signals (mask=0x%08lx)\n", app->sigmask);
         signals = Wait(app->sigmask);
+        Printf("[EVENT] Wait returned: signals=0x%08lx\n", signals);
         
         /* Check for break signal */
         if (signals & SIGBREAKF_CTRL_C) {
+            Printf("[EVENT] Break signal received, exiting\n");
             app->running = FALSE;
             break;
         }
@@ -1579,15 +1654,23 @@ VOID TTX_EventLoop(struct TTXApplication *app)
             while (session) {
                 /* Save next pointer in case session is destroyed */
                 nextSession = session->next;
-                if (session->window && 
-                    (signals & (1UL << session->window->UserPort->mp_SigBit))) {
-                    while ((imsg = (struct IntuiMessage *)GetMsg(session->window->UserPort)) != NULL) {
-                        TTX_HandleIntuitionMessage(app, imsg);
-                        ReplyMsg((struct Message *)imsg);
+                if (session->window) {
+                    ULONG windowSignal = (1UL << session->window->UserPort->mp_SigBit);
+                    if (signals & windowSignal) {
+                        Printf("[EVENT] Window signal received: sigbit=%lu, window=%lx\n", 
+                               session->window->UserPort->mp_SigBit, (ULONG)session->window);
+                        while ((imsg = (struct IntuiMessage *)GetMsg(session->window->UserPort)) != NULL) {
+                            Printf("[EVENT] Got IntuiMessage: Class=0x%08lx, Code=0x%04x, Qualifier=0x%04x\n",
+                                   (ULONG)imsg->Class, (unsigned int)imsg->Code, (unsigned int)imsg->Qualifier);
+                            TTX_HandleIntuitionMessage(app, imsg);
+                            ReplyMsg((struct Message *)imsg);
+                        }
                     }
                 }
                 session = nextSession;
             }
+        } else {
+            Printf("[EVENT] No sessions to check\n");
         }
         
         /* Exit if no sessions left (unless in background mode) */
