@@ -1416,11 +1416,17 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
         /* Get screen draw info for gadget creation */
         drawInfo = GetScreenDrawInfo(winScreen);
         if (drawInfo) {
-            /* Calculate initial scroll values for prop gadgets */
-            /* These will be updated properly after buffer is loaded */
             ULONG initialTotal = 100;
             ULONG initialVisible = 50;
             ULONG initialTop = 0;
+            /* Calculate max scroll values BEFORE creating scroll bars */
+            /* This ensures pageW, pageH, maxScrollX, and maxScrollY are correct */
+            if (session->buffer) {
+                CalculateMaxScroll(session->buffer, session->window);
+            }
+            
+            /* Calculate initial scroll values for prop gadgets */
+            /* These values are now accurate because CalculateMaxScroll was called above */
             
             if (session->buffer) {
                 /* Use buffer dimensions if available */
@@ -1468,13 +1474,27 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
             }
             
             /* Calculate initial horizontal scroll values */
+            /* These values are now accurate because CalculateMaxScroll was called above */
             initialTotal = 100;
             initialVisible = 50;
             initialTop = 0;
             if (session->buffer) {
+                /* Calculate maximum line length for horizontal scrolling */
+                ULONG maxLineLen = 0;
+                ULONG i = 0;
+                
+                if (session->buffer->lines && session->buffer->lineCount > 0) {
+                    for (i = 0; i < session->buffer->lineCount; i++) {
+                        if (session->buffer->lines[i].length > maxLineLen) {
+                            maxLineLen = session->buffer->lines[i].length;
+                        }
+                    }
+                }
+                
+                /* Use calculated values from CalculateMaxScroll */
                 initialVisible = session->buffer->pageW;
-                initialTotal = (session->buffer->maxScrollX > session->buffer->pageW) ? 
-                              session->buffer->maxScrollX : session->buffer->pageW;
+                /* Total should be max line length, not maxScrollX (which is maxLineLen - pageW) */
+                initialTotal = maxLineLen;
                 if (initialTotal < initialVisible) {
                     initialTotal = initialVisible;
                 }
@@ -2584,6 +2604,37 @@ VOID CalculateMaxScroll(struct TextBuffer *buffer, struct Window *window)
         buffer->maxScrollY = buffer->lineCount - buffer->pageH;
     } else {
         buffer->maxScrollY = 0;
+    }
+    
+    /* Calculate visible characters per line (pageW) */
+    /* This must be calculated here so scroll bars can use it during initialization */
+    {
+        ULONG charWidth = 0;
+        ULONG textStartX = 0;
+        ULONG textEndX = 0;
+        ULONG textWidth = 0;
+        ULONG maxChars = 0;
+        
+        charWidth = GetCharWidth(window->RPort, 'M');
+        textStartX = window->BorderLeft + buffer->leftMargin + 1;
+        textEndX = window->Width - (window->BorderRight + 1);
+        
+        if (charWidth > 0) {
+            /* Calculate available text width in pixels */
+            if (textEndX >= textStartX) {
+                textWidth = textEndX - textStartX + 1;
+            } else {
+                textWidth = 0;
+            }
+            /* Convert to characters, subtract 1 for safety */
+            maxChars = textWidth / charWidth;
+            if (maxChars > 0) {
+                maxChars--;
+            }
+            buffer->pageW = maxChars;
+        } else {
+            buffer->pageW = 0;
+        }
     }
     
     /* Calculate maximum line length for horizontal scrolling */
