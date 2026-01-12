@@ -23,7 +23,7 @@ BOOL InitTextBuffer(struct TextBuffer *buffer, struct CleanupStack *stack)
     
     /* Allocate initial line array using cleanup stack */
     buffer->maxLines = 1000;
-    buffer->lines = (struct TextLine *)allocVec(stack, buffer->maxLines * sizeof(struct TextLine), MEMF_CLEAR);
+    buffer->lines = (struct TextLine *)allocVec(buffer->maxLines * sizeof(struct TextLine), MEMF_CLEAR);
     if (!buffer->lines) {
         Printf("[INIT] InitTextBuffer: FAIL (allocVec lines failed)\n");
         return FALSE;
@@ -32,10 +32,10 @@ BOOL InitTextBuffer(struct TextBuffer *buffer, struct CleanupStack *stack)
     
     /* Initialize first line */
     buffer->lines[0].allocated = 256;
-    buffer->lines[0].text = (STRPTR)allocVec(stack, buffer->lines[0].allocated, MEMF_CLEAR);
+    buffer->lines[0].text = (STRPTR)allocVec(buffer->lines[0].allocated, MEMF_CLEAR);
     if (!buffer->lines[0].text) {
         Printf("[INIT] InitTextBuffer: FAIL (allocVec line[0].text failed)\n");
-        freeVec(stack, buffer->lines);
+        freeVec(buffer->lines);
         buffer->lines = NULL;
         return FALSE;
     }
@@ -89,12 +89,12 @@ VOID FreeTextBuffer(struct TextBuffer *buffer, struct CleanupStack *stack)
         for (i = 0; i < buffer->lineCount; i++) {
             if (buffer->lines[i].text) {
                 Printf("[CLEANUP] FreeTextBuffer: freeing line[%lu].text=%lx\n", i, (ULONG)buffer->lines[i].text);
-                freeVec(cleanupStack, buffer->lines[i].text);
+                freeVec(buffer->lines[i].text);
                 buffer->lines[i].text = NULL;
             }
         }
         Printf("[CLEANUP] FreeTextBuffer: freeing lines array=%lx\n", (ULONG)buffer->lines);
-        freeVec(cleanupStack, buffer->lines);
+        freeVec(buffer->lines);
         buffer->lines = NULL;
     }
     
@@ -120,7 +120,7 @@ BOOL LoadFile(STRPTR fileName, struct TextBuffer *buffer, struct CleanupStack *s
     /* Open file for reading using cleanup stack - if file doesn't exist, create empty buffer */
     /* Clear IoErr() before file operations to ensure clean state */
     SetIoErr(0);
-    fileHandle = openFile(stack, fileName, MODE_OLDFILE);
+    fileHandle = openFile(fileName, MODE_OLDFILE);
     if (!fileHandle) {
         /* File doesn't exist or open failed - check error and clear it */
         LONG errorCode = IoErr();
@@ -142,7 +142,7 @@ BOOL LoadFile(STRPTR fileName, struct TextBuffer *buffer, struct CleanupStack *s
     /* Clear existing buffer */
     FreeTextBuffer(buffer, stack);
     if (!InitTextBuffer(buffer, stack)) {
-        closeFile(stack, fileHandle);
+        closeFile(fileHandle);
         return FALSE;
     }
     
@@ -167,26 +167,26 @@ BOOL LoadFile(STRPTR fileName, struct TextBuffer *buffer, struct CleanupStack *s
             struct TextLine *newLines = NULL;
             
             newMax = buffer->maxLines * 2;
-            newLines = (struct TextLine *)allocVec(stack, newMax * sizeof(struct TextLine), MEMF_CLEAR);
+            newLines = (struct TextLine *)allocVec(newMax * sizeof(struct TextLine), MEMF_CLEAR);
             if (!newLines) {
                 FreeTextBuffer(buffer, stack);
-                closeFile(stack, fileHandle);
+                closeFile(fileHandle);
                 return FALSE;
             }
             for (copyIdx = 0; copyIdx < buffer->lineCount; copyIdx++) {
                 newLines[copyIdx] = buffer->lines[copyIdx];
             }
-            freeVec(stack, buffer->lines);
+            freeVec(buffer->lines);
             buffer->lines = newLines;
             buffer->maxLines = newMax;
         }
         
         /* Allocate line text buffer */
         buffer->lines[i].allocated = lineLen + 256;
-        buffer->lines[i].text = (STRPTR)allocVec(stack, buffer->lines[i].allocated, MEMF_CLEAR);
+        buffer->lines[i].text = (STRPTR)allocVec(buffer->lines[i].allocated, MEMF_CLEAR);
         if (!buffer->lines[i].text) {
             FreeTextBuffer(buffer, stack);
-            closeFile(stack, fileHandle);
+            closeFile(fileHandle);
             return FALSE;
         }
         
@@ -205,7 +205,7 @@ BOOL LoadFile(STRPTR fileName, struct TextBuffer *buffer, struct CleanupStack *s
         }
         
         buffer->lines[i].allocated = 256;
-        buffer->lines[i].text = (STRPTR)allocVec(stack, buffer->lines[i].allocated, MEMF_CLEAR);
+        buffer->lines[i].text = (STRPTR)allocVec(buffer->lines[i].allocated, MEMF_CLEAR);
         if (!buffer->lines[i].text) {
             buffer->lineCount = i;
             break;
@@ -230,7 +230,7 @@ BOOL LoadFile(STRPTR fileName, struct TextBuffer *buffer, struct CleanupStack *s
     /* Close file using cleanup stack */
     /* Clear IoErr() before closing to ensure clean state */
     SetIoErr(0);
-    closeFile(stack, fileHandle);
+    closeFile(fileHandle);
     /* Clear IoErr() after closing to prevent dos.library from being left in undefined state */
     SetIoErr(0);
     result = TRUE;
@@ -250,7 +250,7 @@ BOOL SaveFile(STRPTR fileName, struct TextBuffer *buffer, struct CleanupStack *s
     }
     
     /* Open file for writing using cleanup stack */
-    fileHandle = openFile(stack, fileName, MODE_NEWFILE);
+    fileHandle = openFile(fileName, MODE_NEWFILE);
     if (!fileHandle) {
         return FALSE;
     }
@@ -259,21 +259,21 @@ BOOL SaveFile(STRPTR fileName, struct TextBuffer *buffer, struct CleanupStack *s
     for (i = 0; i < buffer->lineCount; i++) {
         if (buffer->lines[i].text && buffer->lines[i].length > 0) {
             if (Write(fileHandle, buffer->lines[i].text, buffer->lines[i].length) != buffer->lines[i].length) {
-                closeFile(stack, fileHandle);
+                closeFile(fileHandle);
                 return FALSE;
             }
         }
         /* Write newline (except for last line if empty) */
         if (i < buffer->lineCount - 1 || (buffer->lines[i].text && buffer->lines[i].length > 0)) {
             if (Write(fileHandle, "\n", 1) != 1) {
-                closeFile(stack, fileHandle);
+                closeFile(fileHandle);
                 return FALSE;
             }
         }
     }
     
     /* Close file using cleanup stack */
-    closeFile(stack, fileHandle);
+    closeFile(fileHandle);
     buffer->modified = FALSE;
     result = TRUE;
     return result;
@@ -298,7 +298,7 @@ BOOL InsertChar(struct TextBuffer *buffer, UBYTE ch, struct CleanupStack *stack)
         if (newAlloc < 256) {
             newAlloc = 256;
         }
-        newText = (STRPTR)allocVec(stack, newAlloc, MEMF_CLEAR);
+        newText = (STRPTR)allocVec(newAlloc, MEMF_CLEAR);
         if (!newText) {
             return FALSE;
         }
@@ -306,7 +306,7 @@ BOOL InsertChar(struct TextBuffer *buffer, UBYTE ch, struct CleanupStack *stack)
             CopyMem(line->text, newText, line->length);
         }
         if (line->text) {
-            freeVec(stack, line->text);
+            freeVec(line->text);
         }
         line->text = newText;
         line->allocated = newAlloc;
@@ -363,7 +363,7 @@ BOOL DeleteChar(struct TextBuffer *buffer, struct CleanupStack *stack)
         
         if (prevLen + currLen + 1 > prevLine->allocated) {
             newAlloc = prevLen + currLen + 256;
-            newText = (STRPTR)allocVec(stack, newAlloc, MEMF_CLEAR);
+            newText = (STRPTR)allocVec(newAlloc, MEMF_CLEAR);
             if (!newText) {
                 return FALSE;
             }
@@ -374,7 +374,7 @@ BOOL DeleteChar(struct TextBuffer *buffer, struct CleanupStack *stack)
                 CopyMem(line->text, &newText[prevLen], currLen);
             }
             if (prevLine->text) {
-                freeVec(stack, prevLine->text);
+                freeVec(prevLine->text);
             }
             prevLine->text = newText;
             prevLine->allocated = newAlloc;
@@ -388,7 +388,7 @@ BOOL DeleteChar(struct TextBuffer *buffer, struct CleanupStack *stack)
         
         /* Remove current line */
         if (line->text) {
-            freeVec(stack, line->text);
+            freeVec(line->text);
         }
         if (buffer->cursorY < buffer->lineCount - 1) {
             /* Move lines down - copy backwards for overlapping memory */
@@ -428,12 +428,12 @@ BOOL InsertNewline(struct TextBuffer *buffer, struct CleanupStack *stack)
         struct TextLine *newLines = NULL;
         
         newMax = buffer->maxLines * 2;
-        newLines = (struct TextLine *)allocVec(stack, newMax * sizeof(struct TextLine), MEMF_CLEAR);
+        newLines = (struct TextLine *)allocVec(newMax * sizeof(struct TextLine), MEMF_CLEAR);
         if (newLines) {
             for (i = 0; i < buffer->lineCount; i++) {
                 newLines[i] = buffer->lines[i];
             }
-            freeVec(stack, buffer->lines);
+            freeVec(buffer->lines);
             buffer->lines = newLines;
             buffer->maxLines = newMax;
         } else {
@@ -453,7 +453,7 @@ BOOL InsertNewline(struct TextBuffer *buffer, struct CleanupStack *stack)
     /* Create new line */
     newLine = &buffer->lines[buffer->cursorY + 1];
     newLine->allocated = remainingLen + 256;
-    newLine->text = (STRPTR)allocVec(stack, newLine->allocated, MEMF_CLEAR);
+    newLine->text = (STRPTR)allocVec(newLine->allocated, MEMF_CLEAR);
     if (!newLine->text) {
         /* Restore line array */
         for (i = buffer->cursorY + 1; i < buffer->lineCount; i++) {
@@ -1150,7 +1150,7 @@ BOOL DeleteForward(struct TextBuffer *buffer, struct CleanupStack *stack)
         
         if (currLen + nextLen + 1 > line->allocated) {
             newAlloc = currLen + nextLen + 256;
-            newText = (STRPTR)allocVec(stack, newAlloc, MEMF_CLEAR);
+            newText = (STRPTR)allocVec(newAlloc, MEMF_CLEAR);
             if (!newText) {
                 return FALSE;
             }
@@ -1161,7 +1161,7 @@ BOOL DeleteForward(struct TextBuffer *buffer, struct CleanupStack *stack)
                 CopyMem(nextLine->text, &newText[currLen], nextLen);
             }
             if (line->text) {
-                freeVec(stack, line->text);
+                freeVec(line->text);
             }
             line->text = newText;
             line->allocated = newAlloc;
@@ -1175,7 +1175,7 @@ BOOL DeleteForward(struct TextBuffer *buffer, struct CleanupStack *stack)
         
         /* Remove next line */
         if (nextLine->text) {
-            freeVec(stack, nextLine->text);
+                freeVec(nextLine->text);
         }
         if (buffer->cursorY + 1 < buffer->lineCount - 1) {
             /* Move lines up */

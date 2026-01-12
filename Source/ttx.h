@@ -25,6 +25,7 @@
 #include <graphics/regions.h>
 #include <graphics/layers.h>
 #include <workbench/startup.h>
+#include <workbench/workbench.h>
 #include <libraries/commodities.h>
 #include <libraries/gadtools.h>
 #include <libraries/asl.h>

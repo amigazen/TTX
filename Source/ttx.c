@@ -19,7 +19,7 @@ BOOL TTX_InitLibraries(struct CleanupStack *stack)
         return FALSE;
     }
     
-    IntuitionBase = (struct IntuitionBase *)openLibrary(stack, "intuition.library", 39L);
+    IntuitionBase = (struct IntuitionBase *)openLibrary("intuition.library", 39L);
     if (!IntuitionBase) {
         Printf("[INIT] TTX_InitLibraries: FAIL (intuition.library)\n");
         SetIoErr(ERROR_OBJECT_NOT_FOUND);
@@ -27,7 +27,7 @@ BOOL TTX_InitLibraries(struct CleanupStack *stack)
     }
     Printf("[INIT] TTX_InitLibraries: intuition.library=%lx\n", (ULONG)IntuitionBase);
     
-    UtilityBase = openLibrary(stack, "utility.library", 39L);
+    UtilityBase = openLibrary("utility.library", 39L);
     if (!UtilityBase) {
         Printf("[INIT] TTX_InitLibraries: FAIL (utility.library)\n");
         SetIoErr(ERROR_OBJECT_NOT_FOUND);
@@ -35,7 +35,7 @@ BOOL TTX_InitLibraries(struct CleanupStack *stack)
     }
     Printf("[INIT] TTX_InitLibraries: utility.library=%lx\n", (ULONG)UtilityBase);
     
-    GfxBase = (struct GfxBase *)openLibrary(stack, "graphics.library", 39L);
+    GfxBase = (struct GfxBase *)openLibrary("graphics.library", 39L);
     if (!GfxBase) {
         Printf("[INIT] TTX_InitLibraries: FAIL (graphics.library)\n");
         SetIoErr(ERROR_OBJECT_NOT_FOUND);
@@ -43,7 +43,7 @@ BOOL TTX_InitLibraries(struct CleanupStack *stack)
     }
     Printf("[INIT] TTX_InitLibraries: graphics.library=%lx\n", (ULONG)GfxBase);
     
-    IconBase = openLibrary(stack, "icon.library", 39L);
+    IconBase = openLibrary("icon.library", 39L);
     if (!IconBase) {
         Printf("[INIT] TTX_InitLibraries: FAIL (icon.library)\n");
         SetIoErr(ERROR_OBJECT_NOT_FOUND);
@@ -51,7 +51,7 @@ BOOL TTX_InitLibraries(struct CleanupStack *stack)
     }
     Printf("[INIT] TTX_InitLibraries: icon.library=%lx\n", (ULONG)IconBase);
     
-    WorkbenchBase = openLibrary(stack, "workbench.library", 36L);
+    WorkbenchBase = openLibrary("workbench.library", 36L);
     if (!WorkbenchBase) {
         /* Workbench library is optional - app icon support won't work without it */
         Printf("[INIT] TTX_InitLibraries: WARN (workbench.library optional, not found)\n");
@@ -60,7 +60,7 @@ BOOL TTX_InitLibraries(struct CleanupStack *stack)
         Printf("[INIT] TTX_InitLibraries: workbench.library=%lx\n", (ULONG)WorkbenchBase);
     }
     
-    CxBase = openLibrary(stack, "commodities.library", 0L);
+    CxBase = openLibrary("commodities.library", 0L);
     if (!CxBase) {
         /* Commodities is optional for single-instance, but preferred */
         Printf("[INIT] TTX_InitLibraries: WARN (commodities.library optional, not found)\n");
@@ -70,7 +70,7 @@ BOOL TTX_InitLibraries(struct CleanupStack *stack)
     }
     
     /* Open keymap.library for MapRawKey */
-    KeymapBase = openLibrary(stack, "keymap.library", 0L);
+    KeymapBase = openLibrary("keymap.library", 0L);
     if (!KeymapBase) {
         /* Keymap.library is required for keyboard input conversion */
         Printf("[INIT] TTX_InitLibraries: FAIL (keymap.library)\n");
@@ -80,7 +80,7 @@ BOOL TTX_InitLibraries(struct CleanupStack *stack)
     Printf("[INIT] TTX_InitLibraries: keymap.library=%lx\n", (ULONG)KeymapBase);
     
     /* Open asl.library for file requesters */
-    AslBase = openLibrary(stack, "asl.library", 36L);
+    AslBase = openLibrary("asl.library", 36L);
     if (!AslBase) {
         /* ASL library is optional - file requesters won't work without it */
         Printf("[INIT] TTX_InitLibraries: WARN (asl.library optional, not found)\n");
@@ -132,7 +132,7 @@ BOOL TTX_ParseArguments(struct TTXArgs *args, struct CleanupStack *stack)
     /* Cast const char * to STRPTR for ReadArgs compatibility */
     /* Clear IoErr() before ReadArgs to ensure clean state */
     SetIoErr(0);
-    args->rda = readArgs(stack, (STRPTR)ttxArgTemplate, argArray, NULL);
+    args->rda = readArgs((STRPTR)ttxArgTemplate, argArray, NULL);
     if (args->rda) {
         /* ReadArgs succeeded - extract arguments */
         /* CRITICAL: Copy file names before freeing RDArgs - they point to memory owned by RDArgs */
@@ -150,7 +150,7 @@ BOOL TTX_ParseArguments(struct TTXArgs *args, struct CleanupStack *stack)
             
             /* Allocate array for copied file pointers */
             if (fileCount > 0) {
-                copiedFiles = (STRPTR *)allocVec(stack, (fileCount + 1) * sizeof(STRPTR), MEMF_CLEAR);
+                copiedFiles = (STRPTR *)allocVec((fileCount + 1) * sizeof(STRPTR), MEMF_CLEAR);
                 if (copiedFiles) {
                     /* Copy each file name string */
                     for (i = 0; i < fileCount; i++) {
@@ -164,7 +164,7 @@ BOOL TTX_ParseArguments(struct TTXArgs *args, struct CleanupStack *stack)
                         
                         /* Allocate and copy string */
                         if (len > 0) {
-                            copy = (STRPTR)allocVec(stack, len + 1, MEMF_CLEAR);
+                            copy = (STRPTR)allocVec(len + 1, MEMF_CLEAR);
                             if (copy) {
                                 CopyMem(readArgsFiles[i], copy, len);
                                 copy[len] = '\0';
@@ -172,9 +172,9 @@ BOOL TTX_ParseArguments(struct TTXArgs *args, struct CleanupStack *stack)
                             } else {
                                 /* Allocation failed - free what we've allocated so far */
                                 for (i = 0; i < fileCount && copiedFiles[i]; i++) {
-                                    freeVec(stack, copiedFiles[i]);
+                                    freeVec(copiedFiles[i]);
                                 }
-                                freeVec(stack, copiedFiles);
+                                freeVec(copiedFiles);
                                 copiedFiles = NULL;
                                 break;
                             }
@@ -200,7 +200,7 @@ BOOL TTX_ParseArguments(struct TTXArgs *args, struct CleanupStack *stack)
                 len++;
             }
             if (len > 0) {
-                copy = (STRPTR)allocVec(stack, len + 1, MEMF_CLEAR);
+                copy = (STRPTR)allocVec(len + 1, MEMF_CLEAR);
                 if (copy) {
                     CopyMem((STRPTR)argArray[1], copy, len);
                     copy[len] = '\0';
@@ -219,7 +219,7 @@ BOOL TTX_ParseArguments(struct TTXArgs *args, struct CleanupStack *stack)
                 len++;
             }
             if (len > 0) {
-                copy = (STRPTR)allocVec(stack, len + 1, MEMF_CLEAR);
+                copy = (STRPTR)allocVec(len + 1, MEMF_CLEAR);
                 if (copy) {
                     CopyMem((STRPTR)argArray[2], copy, len);
                     copy[len] = '\0';
@@ -237,7 +237,7 @@ BOOL TTX_ParseArguments(struct TTXArgs *args, struct CleanupStack *stack)
                 len++;
             }
             if (len > 0) {
-                copy = (STRPTR)allocVec(stack, len + 1, MEMF_CLEAR);
+                copy = (STRPTR)allocVec(len + 1, MEMF_CLEAR);
                 if (copy) {
                     CopyMem((STRPTR)argArray[3], copy, len);
                     copy[len] = '\0';
@@ -255,7 +255,7 @@ BOOL TTX_ParseArguments(struct TTXArgs *args, struct CleanupStack *stack)
                 len++;
             }
             if (len > 0) {
-                copy = (STRPTR)allocVec(stack, len + 1, MEMF_CLEAR);
+                copy = (STRPTR)allocVec(len + 1, MEMF_CLEAR);
                 if (copy) {
                     CopyMem((STRPTR)argArray[4], copy, len);
                     copy[len] = '\0';
@@ -273,7 +273,7 @@ BOOL TTX_ParseArguments(struct TTXArgs *args, struct CleanupStack *stack)
                 len++;
             }
             if (len > 0) {
-                copy = (STRPTR)allocVec(stack, len + 1, MEMF_CLEAR);
+                copy = (STRPTR)allocVec(len + 1, MEMF_CLEAR);
                 if (copy) {
                     CopyMem((STRPTR)argArray[5], copy, len);
                     copy[len] = '\0';
@@ -292,7 +292,7 @@ BOOL TTX_ParseArguments(struct TTXArgs *args, struct CleanupStack *stack)
         
         /* Now safe to free RDArgs - we've copied all the strings */
         if (args->rda && stack) {
-            freeArgs(stack, args->rda);
+            freeArgs(args->rda);
             args->rda = NULL;
         }
         
@@ -337,7 +337,7 @@ BOOL TTX_ParseToolTypes(STRPTR *fileName, struct WBStartup *wbMsg, struct Cleanu
     /* Get icon for this program using cleanup stack */
     /* Clear IoErr() before GetDiskObject to ensure clean state */
     SetIoErr(0);
-    icon = getDiskObject(stack, wbMsg->sm_ArgList[0].wa_Name);
+    icon = getDiskObject(wbMsg->sm_ArgList[0].wa_Name);
     if (!icon) {
         /* GetDiskObject failed - check error code and clear it */
         LONG errorCode = IoErr();
@@ -378,7 +378,7 @@ BOOL TTX_ParseToolTypes(STRPTR *fileName, struct WBStartup *wbMsg, struct Cleanu
         }
         
         /* Allocate and copy using cleanup stack */
-        copy = (STRPTR)allocVec(stack, len + 1, MEMF_CLEAR);
+        copy = (STRPTR)allocVec(len + 1, MEMF_CLEAR);
         if (copy) {
             Printf("[INIT] TTX_ParseToolTypes: allocated copy=%lx\n", (ULONG)copy);
             CopyMem(fileArg, copy, len);
@@ -389,7 +389,7 @@ BOOL TTX_ParseToolTypes(STRPTR *fileName, struct WBStartup *wbMsg, struct Cleanu
     }
     
     /* Remove DiskObject from tracking and free it explicitly */
-    freeDiskObject(stack, icon);
+    freeDiskObject(icon);
     
     return result;
 }
@@ -454,7 +454,7 @@ BOOL TTX_SendToExistingInstance(struct CleanupStack *stack, ULONG msgType, STRPT
     
     /* Allocate message using cleanup stack */
     /* Note: Once sent, the receiving instance will free it, so we remove it from tracking */
-    msg = (struct TTXMessage *)allocVec(stack, sizeof(struct TTXMessage), MEMF_CLEAR);
+    msg = (struct TTXMessage *)allocVec(sizeof(struct TTXMessage), MEMF_CLEAR);
     if (!msg) {
         return FALSE;
     }
@@ -470,7 +470,7 @@ BOOL TTX_SendToExistingInstance(struct CleanupStack *stack, ULONG msgType, STRPT
     
     /* Allocate and copy filename if provided */
     if (fileName && fileNameLen > 0) {
-        fileNameCopy = (STRPTR)allocVec(stack, fileNameLen + 1, MEMF_CLEAR);
+        fileNameCopy = (STRPTR)allocVec(fileNameLen + 1, MEMF_CLEAR);
         if (fileNameCopy) {
             Printf("[INIT] TTX_SendToExistingInstance: allocated fileNameCopy=%lx\n", (ULONG)fileNameCopy);
             CopyMem(fileName, fileNameCopy, fileNameLen);
@@ -478,7 +478,7 @@ BOOL TTX_SendToExistingInstance(struct CleanupStack *stack, ULONG msgType, STRPT
             msg->fileName = fileNameCopy;
         } else {
             Printf("[CLEANUP] TTX_SendToExistingInstance: freeing msg=%lx (error path)\n", (ULONG)msg);
-            freeVec(stack, msg);
+            freeVec(msg);
             return FALSE;
         }
     }
@@ -491,9 +491,9 @@ BOOL TTX_SendToExistingInstance(struct CleanupStack *stack, ULONG msgType, STRPT
     /* Untrack from our stack - receiver takes ownership and will free it after ReplyMsg() */
     /* Use UntrackResource to remove from tracking without calling cleanup function */
     if (msg->fileName) {
-        UntrackResource(stack, msg->fileName);
+        UntrackResource(msg->fileName);
     }
-    UntrackResource(stack, msg);
+    UntrackResource(msg);
     result = TRUE;
     
     return result;
@@ -509,7 +509,7 @@ BOOL TTX_SetupMessagePort(struct TTXApplication *app)
     }
     
     /* Create application message port using Seiso */
-    app->appPort = createMsgPort(app->cleanupStack);
+    app->appPort = createMsgPort();
     if (!app->appPort) {
         Printf("[INIT] TTX_SetupMessagePort: FAIL (createMsgPort failed)\n");
         return FALSE;
@@ -552,9 +552,10 @@ VOID TTX_RemoveMessagePort(struct TTXApplication *app)
 }
 
 /* Setup commodity for single-instance (appears in Exchange) */
-/* Setup commodity for single-instance (appears in Exchange) */
 BOOL TTX_SetupCommodity(struct TTXApplication *app)
 {
+    struct NewBroker nb;
+    LONG brokerError = 0;
     BOOL result = FALSE;
     
     Printf("[INIT] TTX_SetupCommodity: START\n");
@@ -569,41 +570,58 @@ BOOL TTX_SetupCommodity(struct TTXApplication *app)
     }
     
     /* Create message port for commodity broker using Seiso */
-    app->brokerPort = createMsgPort(app->cleanupStack);
+    app->brokerPort = createMsgPort();
     if (!app->brokerPort) {
         Printf("[INIT] TTX_SetupCommodity: FAIL (createMsgPort failed)\n");
         return FALSE;
     }
     Printf("[INIT] TTX_SetupCommodity: brokerPort=%lx\n", (ULONG)app->brokerPort);
     
-    /* Create broker using Seiso */
-    /* Note: cxBroker handles NewBroker setup and activation internally */
-    app->broker = cxBroker(app->cleanupStack, app->brokerPort, "TTX");
-    if (!app->broker) {
-        /* Broker creation failed - could be duplicate instance or other error */
-        /* Duplicate instance detection is handled by TTX_CheckExistingInstance */
-        deleteMsgPort(app->cleanupStack, app->brokerPort);
-        app->brokerPort = NULL;
-        return FALSE;
+    /* Create broker using Seiso - mirrors CxBroker() API */
+    /* COF_SHOW_HIDE enables show/hide commands from Exchange */
+    /* NBU_UNIQUE | NBU_NOTIFY: single instance, notify on duplicate */
+    {
+        struct NewBroker nb;
+        LONG brokerError = 0;
+        
+        /* Initialize NewBroker structure */
+        nb.nb_Version = NB_VERSION;
+        nb.nb_Name = (STRPTR)"TTX";
+        nb.nb_Title = (STRPTR)"TTX";
+        nb.nb_Descr = (STRPTR)"Text Editor";
+        nb.nb_Unique = NBU_UNIQUE | NBU_NOTIFY;  /* Unique name, notify on duplicate */
+        nb.nb_Flags = COF_SHOW_HIDE;             /* Support show/hide commands */
+        nb.nb_Pri = 0;                           /* Normal priority */
+        nb.nb_Port = app->brokerPort;
+        nb.nb_ReservedChannel = 0;
+        
+        Printf("[INIT] TTX_SetupCommodity: creating broker with COF_SHOW_HIDE\n");
+        app->broker = cxBroker(&nb, &brokerError);
+        if (!app->broker) {
+            /* Broker creation failed - could be duplicate instance or other error */
+            Printf("[INIT] TTX_SetupCommodity: FAIL (CxBroker failed, error=%ld)\n", brokerError);
+            /* Duplicate instance detection is handled by TTX_CheckExistingInstance */
+            deleteMsgPort(app->brokerPort);
+            app->brokerPort = NULL;
+            return FALSE;
+        }
     }
     
     /* Verify broker is active (cxBroker activates it, but verify) */
     /* ActivateCxObj returns non-zero on success, 0 on failure */
-    /* Use TRUE (1) to activate, not -1L */
     if (ActivateCxObj(app->broker, TRUE) == 0) {
         /* Broker failed to activate */
         Printf("[INIT] TTX_SetupCommodity: broker activation failed\n");
-        deleteCxObjAll(app->cleanupStack, app->broker);
+        deleteCxObjAll(app->broker);
         app->broker = NULL;
-        deleteMsgPort(app->cleanupStack, app->brokerPort);
+        deleteMsgPort(app->brokerPort);
         app->brokerPort = NULL;
         return FALSE;
     }
     
     /* Check for any broker errors */
     if (CxObjError(app->broker) != 0) {
-        /* Broker has errors, but continue anyway */
-        /* The broker might still be registered */
+        Printf("[INIT] TTX_SetupCommodity: WARN (broker has errors, continuing)\n");
     }
     
     result = TRUE;
@@ -623,10 +641,6 @@ VOID TTX_RemoveCommodity(struct TTXApplication *app)
 /* Setup app icon for application-level iconification */
 BOOL TTX_SetupAppIcon(struct TTXApplication *app)
 {
-    STRPTR programName = NULL;
-    STRPTR iconName = NULL;
-    ULONG i = 0;
-    
     Printf("[INIT] TTX_SetupAppIcon: START\n");
     if (!app || !WorkbenchBase || !IconBase) {
         Printf("[INIT] TTX_SetupAppIcon: FAIL (app=%lx, WorkbenchBase=%lx, IconBase=%lx)\n", 
@@ -698,14 +712,217 @@ VOID TTX_Iconify(struct TTXApplication *app, BOOL iconify)
     app->iconifyState = iconify;
 }
 
+/* Save window state before closing */
+BOOL TTX_SaveWindowState(struct Session *session)
+{
+    if (!session || !session->window) {
+        return FALSE;
+    }
+    
+    Printf("[WINDOW] TTX_SaveWindowState: saving state for session %lu\n", session->sessionID);
+    
+    /* Save window position and size */
+    session->windowState.leftEdge = session->window->LeftEdge;
+    session->windowState.topEdge = session->window->TopEdge;
+    session->windowState.innerWidth = session->window->Width - session->window->BorderLeft - session->window->BorderRight;
+    session->windowState.innerHeight = session->window->Height - session->window->BorderTop - session->window->BorderBottom;
+    session->windowState.flags = session->window->Flags;
+    
+    Printf("[WINDOW] TTX_SaveWindowState: saved pos=(%ld,%ld) size=(%lu,%lu) flags=0x%08lx\n",
+           session->windowState.leftEdge, session->windowState.topEdge,
+           session->windowState.innerWidth, session->windowState.innerHeight,
+           session->windowState.flags);
+    
+    return TRUE;
+}
+
+/* Restore window from saved state */
+BOOL TTX_RestoreWindow(struct TTXApplication *app, struct Session *session)
+{
+    struct Screen *screen = NULL;
+    struct TagItem windowTags[17];
+    
+    if (!app || !session || !app->cleanupStack) {
+        Printf("[WINDOW] TTX_RestoreWindow: FAIL (app=%lx, session=%lx)\n", (ULONG)app, (ULONG)session);
+        return FALSE;
+    }
+    
+    if (session->window) {
+        Printf("[WINDOW] TTX_RestoreWindow: window already open for session %lu\n", session->sessionID);
+        return TRUE;
+    }
+    
+    Printf("[WINDOW] TTX_RestoreWindow: restoring window for session %lu\n", session->sessionID);
+    
+    /* Lock public screen */
+    screen = LockPubScreen(session->windowState.pubScreenName ? session->windowState.pubScreenName : (STRPTR)"Workbench");
+    if (!screen) {
+        Printf("[WINDOW] TTX_RestoreWindow: FAIL (LockPubScreen failed)\n");
+        return FALSE;
+    }
+    
+    /* Build window tags from saved state */
+    windowTags[0].ti_Tag = WA_Flags;
+    windowTags[0].ti_Data = session->windowState.flags;
+    windowTags[1].ti_Tag = WA_InnerWidth;
+    windowTags[1].ti_Data = session->windowState.innerWidth;
+    windowTags[2].ti_Tag = WA_InnerHeight;
+    windowTags[2].ti_Data = session->windowState.innerHeight;
+    windowTags[3].ti_Tag = WA_Title;
+    windowTags[3].ti_Data = (ULONG)(session->windowState.title ? session->windowState.title : (STRPTR)"Untitled");
+    windowTags[4].ti_Tag = WA_IDCMP;
+    windowTags[4].ti_Data = session->windowState.idcmpFlags;
+    windowTags[5].ti_Tag = WA_ScreenTitle;
+    windowTags[5].ti_Data = (ULONG)(session->windowState.screenTitle ? session->windowState.screenTitle : (STRPTR)"TTX");
+    windowTags[6].ti_Tag = WA_AutoAdjust;
+    windowTags[6].ti_Data = TRUE;
+    windowTags[7].ti_Tag = WA_PubScreen;
+    windowTags[7].ti_Data = (ULONG)screen;
+    windowTags[8].ti_Tag = WA_SizeBRight;
+    windowTags[8].ti_Data = TRUE;
+    windowTags[9].ti_Tag = WA_SizeBBottom;
+    windowTags[9].ti_Data = TRUE;
+    windowTags[10].ti_Tag = TAG_DONE;
+    windowTags[10].ti_Data = 0;
+    
+    /* Open window */
+    session->window = openWindowTagList(windowTags);
+    UnlockPubScreen(session->windowState.pubScreenName ? session->windowState.pubScreenName : (STRPTR)"Workbench", screen);
+    
+    if (!session->window) {
+        Printf("[WINDOW] TTX_RestoreWindow: FAIL (openWindow failed)\n");
+        return FALSE;
+    }
+    
+    /* Set window limits */
+    WindowLimits(session->window, session->windowState.minWidth, session->windowState.minHeight,
+                 session->windowState.maxWidth, session->windowState.maxHeight);
+    
+    /* Restore window position if it was set */
+    if (session->windowState.leftEdge != 50 || session->windowState.topEdge != 50) {
+        MoveWindow(session->window, session->windowState.leftEdge, session->windowState.topEdge);
+    }
+    
+    /* Recreate menu strip */
+    if (!TTX_CreateMenuStrip(session)) {
+        Printf("[WINDOW] TTX_RestoreWindow: WARN (CreateMenuStrip failed)\n");
+    }
+    
+    /* Recreate scroll bar gadgets */
+    {
+        struct Screen *winScreen = session->window->WScreen;
+        struct DrawInfo *drawInfo = NULL;
+        struct Gadget *gadgetList = NULL;
+        static LONG icamap[4] = {GA_ID, ICSPECIAL_CODE, 0, 0};
+        ULONG initialTotal = 100;
+        ULONG initialVisible = 50;
+        ULONG initialTop = 0;
+        
+        /* Get screen draw info for gadget creation */
+        drawInfo = GetScreenDrawInfo(winScreen);
+        if (drawInfo) {
+            /* Calculate initial scroll values for prop gadgets */
+            if (session->buffer) {
+                /* Use buffer dimensions if available */
+                initialVisible = session->buffer->pageH;
+                initialTotal = (session->buffer->maxScrollY > session->buffer->pageH) ? 
+                              session->buffer->maxScrollY : session->buffer->pageH;
+                if (initialTotal < initialVisible) {
+                    initialTotal = initialVisible;
+                }
+                initialTop = session->buffer->scrollY;
+            }
+            
+            /* Create vertical scroll bar prop gadget */
+            session->vertPropGadget = (struct Gadget *)NewObject(NULL, PROPGCLASS,
+                GA_RelRight, -session->window->BorderRight + 5,
+                GA_Width, session->window->BorderRight - 8,
+                GA_Top, session->window->BorderTop + 2,
+                GA_RelHeight, -(session->window->BorderTop + session->window->BorderBottom + 4),
+                GA_Next, gadgetList,
+                ICA_TARGET, ICTARGET_IDCMP,
+                ICA_MAP, icamap,
+                PGA_Freedom, FREEVERT,
+                PGA_NewLook, TRUE,
+                PGA_Borderless, TRUE,
+                PGA_VertBody, MAXBODY,
+                PGA_Total, initialTotal,
+                PGA_Visible, initialVisible,
+                PGA_Top, initialTop,
+                GA_ID, GID_VERT_PROP,
+                TAG_DONE);
+            
+            if (session->vertPropGadget) {
+                session->vertPropGadget->Flags |= GFLG_RELRIGHT | GFLG_RELHEIGHT;
+                gadgetList = session->vertPropGadget;
+            }
+            
+            /* Calculate horizontal scroll values */
+            initialTotal = 100;
+            initialVisible = 50;
+            initialTop = 0;
+            if (session->buffer) {
+                initialVisible = session->buffer->pageW;
+                initialTotal = (session->buffer->maxScrollX > session->buffer->pageW) ? 
+                              session->buffer->maxScrollX : session->buffer->pageW;
+                if (initialTotal < initialVisible) {
+                    initialTotal = initialVisible;
+                }
+                initialTop = session->buffer->scrollX;
+            }
+            
+            /* Create horizontal scroll bar prop gadget */
+            session->horizPropGadget = (struct Gadget *)NewObject(NULL, PROPGCLASS,
+                GA_Left, session->window->BorderLeft,
+                GA_RelBottom, -session->window->BorderBottom + 3,
+                GA_RelWidth, -(session->window->BorderLeft + session->window->BorderRight + 2),
+                GA_Height, session->window->BorderBottom - 4,
+                GA_Next, gadgetList,
+                ICA_TARGET, ICTARGET_IDCMP,
+                ICA_MAP, icamap,
+                PGA_Freedom, FREEHORIZ,
+                PGA_NewLook, TRUE,
+                PGA_Borderless, TRUE,
+                PGA_HorizBody, MAXBODY,
+                PGA_Total, initialTotal,
+                PGA_Visible, initialVisible,
+                PGA_Top, initialTop,
+                GA_ID, GID_HORIZ_PROP,
+                TAG_DONE);
+            
+            if (session->horizPropGadget) {
+                session->horizPropGadget->Flags |= GFLG_RELBOTTOM | GFLG_RELWIDTH;
+                gadgetList = session->horizPropGadget;
+            }
+            
+            /* Add gadgets to window */
+            if (gadgetList) {
+                AddGList(session->window, gadgetList, (UWORD)-1, (UWORD)-1, NULL);
+                RefreshGList(gadgetList, session->window, NULL, (UWORD)-1);
+            }
+            
+            FreeScreenDrawInfo(winScreen, drawInfo);
+        }
+    }
+    
+    /* Update scroll bars with current buffer state */
+    if (session->buffer) {
+        CalculateMaxScroll(session->buffer, session->window);
+        UpdateScrollBars(session);
+    }
+    
+    session->windowState.windowOpen = TRUE;
+    
+    Printf("[WINDOW] TTX_RestoreWindow: SUCCESS (window=%lx)\n", (ULONG)session->window);
+    return TRUE;
+}
+
 /* Perform actual iconification/uniconification */
 VOID TTX_DoIconify(struct TTXApplication *app, BOOL iconify)
 {
     struct Session *session = NULL;
     STRPTR programName = NULL;
     STRPTR iconName = NULL;
-    ULONG i = 0;
-    BPTR oldDir = 0;
     
     if (!app) {
         return;
@@ -718,13 +935,19 @@ VOID TTX_DoIconify(struct TTXApplication *app, BOOL iconify)
         /* Iconify: Close all windows, create app icon */
         Printf("[ICONIFY] TTX_DoIconify: iconifying application\n");
         
-        /* Close all windows but keep sessions alive */
+        /* Save window state and close all windows but keep sessions alive */
         session = app->sessions;
         while (session) {
             if (session->window) {
-                Printf("[ICONIFY] TTX_DoIconify: closing window for session %lu\n", session->sessionID);
+                Printf("[ICONIFY] TTX_DoIconify: saving state and closing window for session %lu\n", session->sessionID);
+                TTX_SaveWindowState(session);
                 CloseWindow(session->window);
                 session->window = NULL;  /* Keep session, just close window */
+                session->windowState.windowOpen = FALSE;
+                /* Free menu strip and gadgets - they'll be recreated on restore */
+                TTX_FreeMenuStrip(session);
+                session->vertPropGadget = NULL;
+                session->horizPropGadget = NULL;
             }
             session = session->next;
         }
@@ -748,12 +971,14 @@ VOID TTX_DoIconify(struct TTXApplication *app, BOOL iconify)
         }
         
         /* Get program name for icon */
-        programName = (STRPTR)FindTask(NULL);
-        if (programName) {
-            programName = programName->tc_Node.ln_Name;
-        }
-        if (!programName) {
-            programName = "TTX";
+        {
+            struct Task *task = NULL;
+            task = FindTask(NULL);
+            if (task && task->tc_Node.ln_Name) {
+                programName = task->tc_Node.ln_Name;
+            } else {
+                programName = "TTX";
+            }
         }
         
         /* Get disk object for app icon */
@@ -779,34 +1004,62 @@ VOID TTX_DoIconify(struct TTXApplication *app, BOOL iconify)
         }
         
         /* Add app icon to Workbench */
-        if (WorkbenchBase && app->appIconPort) {
-            iconName = FilePart(programName);
-            if (!iconName || iconName[0] == '\0') {
-                iconName = programName;
-            }
-            
-            app->appIcon = AddAppIcon(0, 0, iconName, app->appIconPort, NULL, app->appIconDO, TAG_END);
-            if (!app->appIcon) {
-                Printf("[ICONIFY] TTX_DoIconify: FAIL (AddAppIcon failed)\n");
-                /* Cleanup and reopen windows */
-                if (app->appIconDO) {
-                    FreeDiskObject(app->appIconDO);
-                    app->appIconDO = NULL;
+        if (!WorkbenchBase) {
+            Printf("[ICONIFY] TTX_DoIconify: FAIL (WorkbenchBase not available)\n");
+            /* Reopen windows on failure */
+            session = app->sessions;
+            while (session) {
+                if (!session->window) {
+                    TTX_RestoreWindow(app, session);
                 }
-                DeleteMsgPort(app->appIconPort);
-                app->appIconPort = NULL;
-                /* Reopen windows */
-                session = app->sessions;
-                while (session) {
-                    if (!session->window) {
-                        /* TODO: Reopen window */
-                    }
-                    session = session->next;
-                }
-                return;
+                session = session->next;
             }
-            Printf("[ICONIFY] TTX_DoIconify: created appIcon=%lx\n", (ULONG)app->appIcon);
+            return;
         }
+        
+        if (!app->appIconPort) {
+            Printf("[ICONIFY] TTX_DoIconify: FAIL (appIconPort not created)\n");
+            /* Reopen windows on failure */
+            session = app->sessions;
+            while (session) {
+                if (!session->window) {
+                    TTX_RestoreWindow(app, session);
+                }
+                session = session->next;
+            }
+            return;
+        }
+        
+        iconName = FilePart(programName);
+        if (!iconName || iconName[0] == '\0') {
+            iconName = programName;
+        }
+        
+        Printf("[ICONIFY] TTX_DoIconify: calling AddAppIcon (name='%s', port=%lx, diskObj=%lx)\n",
+               iconName, (ULONG)app->appIconPort, (ULONG)app->appIconDO);
+        app->appIcon = AddAppIcon(0, 0, iconName, app->appIconPort, NULL, app->appIconDO, TAG_END);
+        if (!app->appIcon) {
+            LONG errorCode = 0;
+            errorCode = IoErr();
+            Printf("[ICONIFY] TTX_DoIconify: FAIL (AddAppIcon failed, IoErr=%ld)\n", errorCode);
+            /* Cleanup and reopen windows */
+            if (app->appIconDO) {
+                FreeDiskObject(app->appIconDO);
+                app->appIconDO = NULL;
+            }
+            DeleteMsgPort(app->appIconPort);
+            app->appIconPort = NULL;
+            /* Reopen windows */
+            session = app->sessions;
+            while (session) {
+                if (!session->window) {
+                    TTX_RestoreWindow(app, session);
+                }
+                session = session->next;
+            }
+            return;
+        }
+        Printf("[ICONIFY] TTX_DoIconify: created appIcon=%lx\n", (ULONG)app->appIcon);
         
         app->iconified = TRUE;
         Printf("[ICONIFY] TTX_DoIconify: SUCCESS (iconified)\n");
@@ -844,9 +1097,17 @@ VOID TTX_DoIconify(struct TTXApplication *app, BOOL iconify)
         session = app->sessions;
         while (session) {
             if (!session->window) {
-                Printf("[ICONIFY] TTX_DoIconify: TODO - need to reopen window for session %lu\n", session->sessionID);
-                /* TODO: Implement window reopening */
-                /* For now, we'll need to recreate the window */
+                Printf("[ICONIFY] TTX_DoIconify: restoring window for session %lu\n", session->sessionID);
+                if (!TTX_RestoreWindow(app, session)) {
+                    Printf("[ICONIFY] TTX_DoIconify: WARN (failed to restore window for session %lu)\n", session->sessionID);
+                } else {
+                    /* Refresh display after restoring window */
+                    if (session->buffer) {
+                        RenderText(session->window, session->buffer);
+                        UpdateCursor(session->window, session->buffer);
+                        UpdateScrollBars(session);
+                    }
+                }
             }
             session = session->next;
         }
@@ -894,7 +1155,7 @@ VOID TTX_ProcessAppIcon(struct TTXApplication *app)
                     
                     /* Build full path - allocate buffer */
                     pathLen = 256; /* Reasonable max path length */
-                    fullPath = (STRPTR)allocVec(app->cleanupStack, pathLen, MEMF_CLEAR);
+                    fullPath = (STRPTR)allocVec(pathLen, MEMF_CLEAR);
                     if (fullPath) {
                         /* Get path from lock */
                         if (NameFromLock(msg->am_ArgList[i].wa_Lock, fullPath, pathLen)) {
@@ -946,7 +1207,7 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
     }
     
     /* Allocate session structure on global cleanup stack */
-    session = (struct Session *)allocVec(app->cleanupStack, sizeof(struct Session), MEMF_CLEAR);
+    session = (struct Session *)allocVec(sizeof(struct Session), MEMF_CLEAR);
     if (!session) {
         Printf("[INIT] TTX_CreateSession: FAIL (allocVec session failed)\n");
         return FALSE;
@@ -956,29 +1217,50 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
     /* Initialize session */
     session->sessionID = app->nextSessionID++;
     session->cleanupStack = app->cleanupStack;  /* Store pointer to global cleanup stack */
-    session->modified = FALSE;
-    session->readOnly = FALSE;
     session->window = NULL;
     session->menuStrip = NULL;  /* Will be created after window is opened */
     session->vertPropGadget = NULL;  /* Vertical scroll bar prop gadget */
     session->horizPropGadget = NULL;  /* Horizontal scroll bar prop gadget */
-    session->fileName = NULL;
     session->buffer = NULL;
     session->next = NULL;  /* Initialize list pointers */
     session->prev = NULL;
     
+    /* Initialize window state with defaults */
+    session->windowState.leftEdge = 50;  /* Default position */
+    session->windowState.topEdge = 50;
+    session->windowState.innerWidth = 600;  /* Default size */
+    session->windowState.innerHeight = 400;
+    session->windowState.flags = WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_SIZEGADGET | WFLG_CLOSEGADGET | WFLG_ACTIVATE | WFLG_SMART_REFRESH | WFLG_NEWLOOKMENUS | WFLG_REPORTMOUSE;
+    session->windowState.idcmpFlags = IDCMP_CLOSEWINDOW | IDCMP_VANILLAKEY | IDCMP_RAWKEY | IDCMP_REFRESHWINDOW | IDCMP_NEWSIZE | IDCMP_MOUSEBUTTONS | IDCMP_MENUPICK | IDCMP_IDCMPUPDATE;
+    session->windowState.title = NULL;
+    session->windowState.screenTitle = NULL;
+    session->windowState.pubScreenName = NULL;
+    session->windowState.minWidth = 200;
+    session->windowState.minHeight = 100;
+    session->windowState.maxWidth = 32767;
+    session->windowState.maxHeight = 32767;
+    session->windowState.windowOpen = FALSE;
+    
+    /* Initialize document state */
+    session->docState.fileName = NULL;
+    session->docState.modified = FALSE;
+    session->docState.readOnly = FALSE;
+    session->docState.loadTime = 0;
+    session->docState.fileSize = 0;
+    session->docState.fileExists = FALSE;
+    
     /* Allocate and initialize text buffer using global cleanup stack */
-    session->buffer = (struct TextBuffer *)allocVec(app->cleanupStack, sizeof(struct TextBuffer), MEMF_CLEAR);
+    session->buffer = (struct TextBuffer *)allocVec(sizeof(struct TextBuffer), MEMF_CLEAR);
     if (!session->buffer) {
         Printf("[INIT] TTX_CreateSession: FAIL (allocVec buffer failed)\n");
-        freeVec(app->cleanupStack, session);
+        freeVec(session);
         return FALSE;
     }
     Printf("[INIT] TTX_CreateSession: buffer=%lx\n", (ULONG)session->buffer);
     
     if (!InitTextBuffer(session->buffer, app->cleanupStack)) {
         Printf("[INIT] TTX_CreateSession: FAIL (InitTextBuffer failed)\n");
-        freeVec(app->cleanupStack, session);
+        freeVec(session);
         return FALSE;
     }
     
@@ -989,42 +1271,75 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
             titleLen++;
         }
         if (titleLen > 0) {
-            session->fileName = (STRPTR)allocVec(app->cleanupStack, titleLen + 1, MEMF_CLEAR);
-            if (session->fileName) {
-                Printf("[INIT] TTX_CreateSession: allocated fileName=%lx\n", (ULONG)session->fileName);
-                CopyMem(fileName, session->fileName, titleLen);
-                session->fileName[titleLen] = '\0';
+            session->docState.fileName = (STRPTR)allocVec(titleLen + 1, MEMF_CLEAR);
+            if (session->docState.fileName) {
+                Printf("[INIT] TTX_CreateSession: allocated fileName=%lx\n", (ULONG)session->docState.fileName);
+                CopyMem(fileName, session->docState.fileName, titleLen);
+                session->docState.fileName[titleLen] = '\0';
+                /* Check if file exists and get its size */
+                {
+                    BPTR fileLock = 0;
+                    struct FileInfoBlock *fib = NULL;
+                    BPTR oldDir = 0;
+                    
+                    fileLock = Lock(fileName, SHARED_LOCK);
+                    if (fileLock) {
+                        oldDir = CurrentDir(fileLock);
+                        fib = (struct FileInfoBlock *)allocVec(sizeof(struct FileInfoBlock), MEMF_CLEAR);
+                        if (fib && Examine(fileLock, fib)) {
+                            session->docState.fileExists = TRUE;
+                            session->docState.fileSize = fib->fib_Size;
+                            session->docState.loadTime = fib->fib_Date.ds_Days * 86400L + fib->fib_Date.ds_Minute * 60L + fib->fib_Date.ds_Tick / 50L;
+                        }
+                        if (fib) {
+                            freeVec(fib);
+                        }
+                        if (oldDir) {
+                            CurrentDir(oldDir);
+                        }
+                        UnLock(fileLock);
+                    }
+                }
             }
         }
     }
     
     /* Create window title */
-    if (session->fileName) {
+    if (session->docState.fileName) {
         titleLen = 0;
-        while (session->fileName[titleLen] != '\0') {
+        while (session->docState.fileName[titleLen] != '\0') {
             titleLen++;
         }
     } else {
         titleLen = 8; /* "Untitled" */
     }
     
-    titleText = (STRPTR)allocVec(app->cleanupStack, titleLen + 20, MEMF_CLEAR);
+    titleText = (STRPTR)allocVec(titleLen + 20, MEMF_CLEAR);
     if (titleText) {
         Printf("[INIT] TTX_CreateSession: allocated titleText=%lx\n", (ULONG)titleText);
-        if (session->fileName) {
-            CopyMem(session->fileName, titleText, titleLen);
+        if (session->docState.fileName) {
+            CopyMem(session->docState.fileName, titleText, titleLen);
             titleText[titleLen] = '\0';
         } else {
             CopyMem("Untitled", titleText, 8);
             titleText[8] = '\0';
         }
+        /* Store title in window state */
+        session->windowState.title = titleText;
+    }
+    
+    /* Store screen title */
+    session->windowState.screenTitle = (STRPTR)allocVec(4, MEMF_CLEAR);
+    if (session->windowState.screenTitle) {
+        CopyMem("TTX", session->windowState.screenTitle, 3);
+        session->windowState.screenTitle[3] = '\0';
     }
     
     /* Lock public screen (temporary, doesn't need tracking) */
     screen = LockPubScreen((STRPTR)"Workbench");
     if (!screen) {
         Printf("[INIT] TTX_CreateSession: FAIL (LockPubScreen failed)\n");
-        freeVec(app->cleanupStack, session);
+        freeVec(session);
         return FALSE;
     }
     
@@ -1034,17 +1349,17 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
         struct TagItem windowTags[17];
         /* Set base flags first - includes drag bar, depth, size, close gadgets */
         windowTags[0].ti_Tag = WA_Flags;
-        windowTags[0].ti_Data = WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_SIZEGADGET | WFLG_CLOSEGADGET | WFLG_ACTIVATE | WFLG_SMART_REFRESH | WFLG_NEWLOOKMENUS | WFLG_REPORTMOUSE;
+        windowTags[0].ti_Data = session->windowState.flags;
         windowTags[1].ti_Tag = WA_InnerWidth;
-        windowTags[1].ti_Data = 600;
+        windowTags[1].ti_Data = session->windowState.innerWidth;
         windowTags[2].ti_Tag = WA_InnerHeight;
-        windowTags[2].ti_Data = 400;
+        windowTags[2].ti_Data = session->windowState.innerHeight;
         windowTags[3].ti_Tag = WA_Title;
-        windowTags[3].ti_Data = (ULONG)(titleText ? titleText : (session->fileName ? session->fileName : (STRPTR)"Untitled"));
+        windowTags[3].ti_Data = (ULONG)(session->windowState.title ? session->windowState.title : (STRPTR)"Untitled");
         windowTags[4].ti_Tag = WA_IDCMP;
-        windowTags[4].ti_Data = IDCMP_CLOSEWINDOW | IDCMP_VANILLAKEY | IDCMP_RAWKEY | IDCMP_REFRESHWINDOW | IDCMP_NEWSIZE | IDCMP_MOUSEBUTTONS | IDCMP_MENUPICK | IDCMP_IDCMPUPDATE;
+        windowTags[4].ti_Data = session->windowState.idcmpFlags;
         windowTags[5].ti_Tag = WA_ScreenTitle;
-        windowTags[5].ti_Data = (ULONG)"TTX";
+        windowTags[5].ti_Data = (ULONG)(session->windowState.screenTitle ? session->windowState.screenTitle : (STRPTR)"TTX");
         windowTags[6].ti_Tag = WA_AutoAdjust;
         windowTags[6].ti_Data = TRUE;
         windowTags[7].ti_Tag = WA_PubScreen;
@@ -1058,14 +1373,14 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
         windowTags[10].ti_Tag = TAG_DONE;
         windowTags[10].ti_Data = 0;
         
-        session->window = openWindowTagList(app->cleanupStack, windowTags);
+        session->window = openWindowTagList(windowTags);
     }
     
     UnlockPubScreen((STRPTR)"Workbench", screen);
     
     if (!session->window) {
         Printf("[INIT] TTX_CreateSession: FAIL (openWindow failed)\n");
-        freeVec(app->cleanupStack, session);
+        freeVec(session);
         return FALSE;
     }
     Printf("[INIT] TTX_CreateSession: window=%lx\n", (ULONG)session->window);
@@ -1074,7 +1389,17 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
            (session->window->Flags & WFLG_DRAGBAR) ? "YES" : "NO");
     
     /* Set window limits */
-    WindowLimits(session->window, 200, 100, 32767, 32767);
+    WindowLimits(session->window, session->windowState.minWidth, session->windowState.minHeight, 
+                 session->windowState.maxWidth, session->windowState.maxHeight);
+    
+    /* Save window position and size from actual window */
+    if (session->window) {
+        session->windowState.leftEdge = session->window->LeftEdge;
+        session->windowState.topEdge = session->window->TopEdge;
+        session->windowState.innerWidth = session->window->Width - session->window->BorderLeft - session->window->BorderRight;
+        session->windowState.innerHeight = session->window->Height - session->window->BorderTop - session->window->BorderBottom;
+        session->windowState.windowOpen = TRUE;
+    }
     
     /* Create scroll bar prop gadgets */
     /* Note: Must be created AFTER window is opened so we can use window border values */
@@ -1214,8 +1539,8 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
     }
     
     /* Load file if filename provided */
-    if (session->fileName && session->buffer) {
-        if (!LoadFile(session->fileName, session->buffer, app->cleanupStack)) {
+    if (session->docState.fileName && session->buffer) {
+        if (!LoadFile(session->docState.fileName, session->buffer, app->cleanupStack)) {
             /* File load failed, but keep empty buffer */
         }
     }
@@ -1306,7 +1631,7 @@ VOID TTX_DestroySession(struct TTXApplication *app, struct Session *session)
     /* Free session structure from global cleanup stack */
     Printf("[CLEANUP] TTX_DestroySession: freeing session=%lx\n", (ULONG)session);
     if (app && app->cleanupStack && session) {
-        freeVec(app->cleanupStack, session);
+        freeVec(session);
     }
     Printf("[CLEANUP] TTX_DestroySession: DONE (remaining sessions=%lu)\n", app->sessionCount);
 }
@@ -1579,7 +1904,7 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                     
                 case IDCMP_VANILLAKEY:
                 case IDCMP_RAWKEY:
-            if (session->buffer && !session->readOnly) {
+            if (session->buffer && !session->docState.readOnly) {
                 UBYTE keyCode = imsg->Code;
                 ULONG qualifiers = imsg->Qualifier;
                 struct InputEvent ievent;
@@ -1639,9 +1964,10 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                         break;
                     } else if (keyCode == 0x45 && (qualifiers & IEQUALIFIER_CONTROL)) {
                         /* Ctrl+E = Save */
-                        if (session->fileName && session->buffer && app->cleanupStack) {
-                            if (SaveFile(session->fileName, session->buffer, app->cleanupStack)) {
-                                session->modified = FALSE;
+                        if (session->docState.fileName && session->buffer && app->cleanupStack) {
+                            if (SaveFile(session->docState.fileName, session->buffer, app->cleanupStack)) {
+                                session->docState.modified = FALSE;
+                                session->buffer->modified = FALSE;
                             }
                         }
                         processed = TRUE;
@@ -1791,7 +2117,7 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                 }
                 
                 if (processed) {
-                    session->modified = session->buffer->modified;
+                    session->docState.modified = session->buffer->modified;
                 }
             }
             result = TRUE;
@@ -2034,11 +2360,11 @@ VOID TTX_EventLoop(struct TTXApplication *app)
                     if (signals & windowSignal) {
                         Printf("[EVENT] Window signal received: sigbit=%lu, window=%lx\n", 
                                session->window->UserPort->mp_SigBit, (ULONG)session->window);
-                        while ((imsg = (struct IntuiMessage *)GetMsg(session->window->UserPort)) != NULL) {
+                    while ((imsg = (struct IntuiMessage *)GetMsg(session->window->UserPort)) != NULL) {
                             Printf("[EVENT] Got IntuiMessage: Class=0x%08lx, Code=0x%04x, Qualifier=0x%04x\n",
                                    (ULONG)imsg->Class, (unsigned int)imsg->Code, (unsigned int)imsg->Qualifier);
-                            TTX_HandleIntuitionMessage(app, imsg);
-                            ReplyMsg((struct Message *)imsg);
+                        TTX_HandleIntuitionMessage(app, imsg);
+                        ReplyMsg((struct Message *)imsg);
                         }
                     }
                 }
@@ -2072,7 +2398,7 @@ BOOL TTX_Init(struct TTXApplication *app)
     }
     
     /* Use default cleanup stack created by Seiso auto-init */
-    app->cleanupStack = GetDefaultStack();
+    app->cleanupStack = GetCleanupStack();
     if (!app->cleanupStack) {
         Printf("[INIT] TTX_Init: FAIL (GetDefaultStack failed)\n");
         return FALSE;
@@ -2152,8 +2478,11 @@ VOID TTX_Cleanup(struct TTXApplication *app)
         app->appPort = NULL;
     }
     
+    /* Broker is tracked by Seiso cleanup stack and will be cleaned up automatically */
+    /* Just clear our reference */
+    
     /* Clean up any pending messages from broker port before stack cleanup */
-    /* This must be done BEFORE the broker is cleaned up by the stack */
+    /* This must be done AFTER the broker is deleted */
     /* According to commodities.library docs, messages sent to a commodity program
      * from a sender object must be sent back using ReplyMsg() */
     if (app->brokerPort) {
@@ -2501,7 +2830,7 @@ int main(int argc, char *argv[])
                 len++;
             }
             if (len > 0 && app.cleanupStack) {
-                fileName = (STRPTR)allocVec(app.cleanupStack, len + 1, MEMF_CLEAR);
+                fileName = (STRPTR)allocVec(len + 1, MEMF_CLEAR);
                 if (fileName) {
                     Printf("[INIT] main: allocated fileName=%lx\n", (ULONG)fileName);
                     CopyMem(fullPath, fileName, len);
@@ -2529,7 +2858,7 @@ int main(int argc, char *argv[])
     if (parseResult && ttxArgs.unload) {
         /* TODO: Implement unload from background */
         if (rda && app.cleanupStack) {
-            freeArgs(app.cleanupStack, rda);
+            freeArgs(rda);
             rda = NULL; /* Prevent double-free */
         }
         TTX_Cleanup(&app);
@@ -2542,7 +2871,7 @@ int main(int argc, char *argv[])
         app.backgroundMode = TRUE;
         /* Free parsed arguments */
         if (rda && app.cleanupStack) {
-            freeArgs(app.cleanupStack, rda);
+            freeArgs(rda);
             rda = NULL; /* Prevent double-free */
         }
         /* Run event loop even with no sessions (background mode) */
@@ -2562,7 +2891,7 @@ int main(int argc, char *argv[])
             if (TTX_CheckExistingInstance(ttxArgs.files[0])) {
                 /* Message sent to existing instance, exit */
                 if (rda && app.cleanupStack) {
-                    freeArgs(app.cleanupStack, rda);
+                    freeArgs(rda);
                     rda = NULL; /* Prevent double-free */
                 }
                 TTX_Cleanup(&app);
@@ -2572,7 +2901,7 @@ int main(int argc, char *argv[])
             /* No files but NOWINDOW not set - check for existing instance */
             if (TTX_CheckExistingInstance(NULL)) {
                 if (rda && app.cleanupStack) {
-                    freeArgs(app.cleanupStack, rda);
+                    freeArgs(rda);
                     rda = NULL; /* Prevent double-free */
                 }
                 TTX_Cleanup(&app);
@@ -2624,7 +2953,7 @@ int main(int argc, char *argv[])
     
     /* Free parsed arguments */
     if (rda && app.cleanupStack) {
-        freeArgs(app.cleanupStack, rda);
+        freeArgs(rda);
         rda = NULL; /* Prevent double-free */
     }
     

@@ -230,7 +230,7 @@ BOOL TTX_CreateMenuStrip(struct Session *session)
     /* Cleanup stack processes in LIFO order, so menu (added last) will be freed first */
     /* Use RESOURCE_TYPE_MEMORY with custom cleanup function since there's no RESOURCE_TYPE_MENU */
     if (session->cleanupStack) {
-        if (!PushResource(session->cleanupStack, RESOURCE_TYPE_MEMORY, menuStrip, cleanupMenuStrip)) {
+        if (!PushResource(RESOURCE_TYPE_MEMORY, menuStrip, cleanupMenuStrip)) {
             Printf("[MENU] TTX_CreateMenuStrip: WARN (failed to track menu on cleanup stack)\n");
             /* Continue anyway - menu will be freed manually in TTX_FreeMenuStrip */
         } else {
@@ -275,7 +275,7 @@ VOID TTX_FreeMenuStrip(struct Session *session)
         
         /* Remove from cleanup stack tracking (if tracked) */
         if (session->cleanupStack) {
-            UntrackResource(session->cleanupStack, session->menuStrip);
+            UntrackResource(session->menuStrip);
         }
         
         /* Free the menu */
@@ -341,7 +341,7 @@ static STRPTR TTX_ShowFileRequester(struct TTXApplication *app, struct Session *
     }
     
     /* Track requester on cleanup stack */
-    if (!PushResource(app->cleanupStack, RESOURCE_TYPE_MEMORY, fileReq, cleanupFileRequester)) {
+        if (!PushResource(RESOURCE_TYPE_MEMORY, fileReq, cleanupFileRequester)) {
         Printf("[ASL] TTX_ShowFileRequester: WARN (failed to track requester on cleanup stack)\n");
     }
     
@@ -368,7 +368,7 @@ static STRPTR TTX_ShowFileRequester(struct TTXApplication *app, struct Session *
         /* Allocate full path string */
         fullPathLen = drawerLen + fileLen + 2;  /* +2 for '/' and '\0' */
         if (fullPathLen > 2) {
-            fullPath = (STRPTR)allocVec(app->cleanupStack, fullPathLen, MEMF_CLEAR);
+            fullPath = (STRPTR)allocVec(fullPathLen, MEMF_CLEAR);
             if (fullPath) {
                 /* Copy drawer */
                 if (selectedDrawer && drawerLen > 0) {
@@ -387,7 +387,7 @@ static STRPTR TTX_ShowFileRequester(struct TTXApplication *app, struct Session *
                     fullPath[fileLen] = '\0';
                 } else {
                     /* Empty selection */
-                    freeVec(app->cleanupStack, fullPath);
+                    freeVec(fullPath);
                     fullPath = NULL;
                 }
                 
@@ -402,7 +402,7 @@ static STRPTR TTX_ShowFileRequester(struct TTXApplication *app, struct Session *
     
     /* Remove from cleanup stack and free requester */
     if (fileReq) {
-        UntrackResource(app->cleanupStack, fileReq);
+        UntrackResource(fileReq);
         if (AslBase) {
             FreeAslRequest(fileReq);
         }
@@ -468,7 +468,7 @@ static STRPTR TTX_ShowSaveFileRequester(struct TTXApplication *app, struct Sessi
     }
     
     /* Track requester on cleanup stack */
-    if (!PushResource(app->cleanupStack, RESOURCE_TYPE_MEMORY, fileReq, cleanupFileRequester)) {
+        if (!PushResource(RESOURCE_TYPE_MEMORY, fileReq, cleanupFileRequester)) {
         Printf("[ASL] TTX_ShowSaveFileRequester: WARN (failed to track requester on cleanup stack)\n");
     }
     
@@ -495,7 +495,7 @@ static STRPTR TTX_ShowSaveFileRequester(struct TTXApplication *app, struct Sessi
         /* Allocate full path string */
         fullPathLen = drawerLen + fileLen + 2;  /* +2 for '/' and '\0' */
         if (fullPathLen > 2) {
-            fullPath = (STRPTR)allocVec(app->cleanupStack, fullPathLen, MEMF_CLEAR);
+            fullPath = (STRPTR)allocVec(fullPathLen, MEMF_CLEAR);
             if (fullPath) {
                 /* Copy drawer */
                 if (selectedDrawer && drawerLen > 0) {
@@ -514,7 +514,7 @@ static STRPTR TTX_ShowSaveFileRequester(struct TTXApplication *app, struct Sessi
                     fullPath[fileLen] = '\0';
                 } else {
                     /* Empty selection */
-                    freeVec(app->cleanupStack, fullPath);
+                    freeVec(fullPath);
                     fullPath = NULL;
                 }
                 
@@ -529,7 +529,7 @@ static STRPTR TTX_ShowSaveFileRequester(struct TTXApplication *app, struct Sessi
     
     /* Remove from cleanup stack and free requester */
     if (fileReq) {
-        UntrackResource(app->cleanupStack, fileReq);
+        UntrackResource(fileReq);
         if (AslBase) {
             FreeAslRequest(fileReq);
         }
@@ -576,7 +576,7 @@ BOOL TTX_Cmd_OpenFile(struct TTXApplication *app, struct Session *session, STRPT
     }
     
     /* Save old filename for cleanup */
-    oldFileName = session->fileName;
+    oldFileName = session->docState.fileName;
     
     /* Allocate new filename and copy it */
     if (fileName && app->cleanupStack) {
@@ -593,18 +593,18 @@ BOOL TTX_Cmd_OpenFile(struct TTXApplication *app, struct Session *session, STRPT
         }
         fileNameLen++; /* Add 1 for NUL terminator */
         
-        newFileName = allocVec(app->cleanupStack, fileNameLen, MEMF_CLEAR);
+        newFileName = allocVec(fileNameLen, MEMF_CLEAR);
         if (newFileName) {
             endPtr = Strncpy(newFileName, fileName, fileNameLen);
             if (!endPtr) {
                 /* String was truncated - this shouldn't happen since we allocated the right size */
                 Printf("[CMD] TTX_Cmd_OpenFile: WARN (filename truncated)\n");
             }
-            session->fileName = newFileName;
+            session->docState.fileName = newFileName;
         } else {
             Printf("[CMD] TTX_Cmd_OpenFile: FAIL (could not allocate filename)\n");
             if (selectedFile && app->cleanupStack) {
-                freeVec(app->cleanupStack, selectedFile);
+                freeVec(selectedFile);
             }
             return FALSE;
         }
@@ -615,7 +615,7 @@ BOOL TTX_Cmd_OpenFile(struct TTXApplication *app, struct Session *session, STRPT
     if (!InitTextBuffer(session->buffer, app->cleanupStack)) {
         Printf("[CMD] TTX_Cmd_OpenFile: FAIL (InitTextBuffer failed)\n");
         if (selectedFile && app->cleanupStack) {
-            freeVec(app->cleanupStack, selectedFile);
+            freeVec(selectedFile);
         }
         return FALSE;
     }
@@ -627,17 +627,17 @@ BOOL TTX_Cmd_OpenFile(struct TTXApplication *app, struct Session *session, STRPT
     }
     
     /* Free old filename if we had one */
-    if (oldFileName && app->cleanupStack) {
-        freeVec(app->cleanupStack, oldFileName);
+        if (oldFileName && app->cleanupStack) {
+            freeVec(oldFileName);
     }
     
     /* Free selected file path if we allocated it (the filename is now in session->fileName) */
     if (selectedFile && app->cleanupStack) {
-        freeVec(app->cleanupStack, selectedFile);
+        freeVec(selectedFile);
     }
     
     /* Update window title */
-    if (session->window && session->fileName) {
+    if (session->window && session->docState.fileName) {
         STRPTR titleText = NULL;
         ULONG titleLen = 0;
         ULONG fileNameLen = 0;
@@ -645,19 +645,19 @@ BOOL TTX_Cmd_OpenFile(struct TTXApplication *app, struct Session *session, STRPT
         STRPTR tempPtr = NULL;
         
         /* Calculate filename length (utility.library V39 doesn't have Strlen) */
-        tempPtr = session->fileName;
+        tempPtr = session->docState.fileName;
         while (tempPtr && *tempPtr != '\0') {
             fileNameLen++;
             tempPtr++;
         }
         
         titleLen = fileNameLen + 10; /* "TTX - " + filename + null */
-        titleText = allocVec(app->cleanupStack, titleLen, MEMF_CLEAR);
+        titleText = allocVec(titleLen, MEMF_CLEAR);
         if (titleText) {
             /* Use Strncpy chaining to concatenate strings */
             endPtr = Strncpy(titleText, "TTX - ", titleLen);
             if (endPtr) {
-                Strncpy(endPtr, session->fileName, titleLen - (ULONG)(endPtr - titleText));
+                Strncpy(endPtr, session->docState.fileName, titleLen - (ULONG)(endPtr - titleText));
             }
             SetWindowTitles(session->window, titleText, (STRPTR)-1);
         }
@@ -714,7 +714,7 @@ BOOL TTX_Cmd_OpenDoc(struct TTXApplication *app, struct Session *session, STRPTR
         
         /* Free selected file path */
         if (selectedFile && app->cleanupStack) {
-            freeVec(app->cleanupStack, selectedFile);
+            freeVec(selectedFile);
         }
         
         return result;
@@ -737,13 +737,13 @@ BOOL TTX_Cmd_SaveFile(struct TTXApplication *app, struct Session *session, STRPT
         return FALSE;
     }
     
-    if (!session->fileName) {
+    if (!session->docState.fileName) {
         /* No filename - use Save As instead */
         return TTX_Cmd_SaveFileAs(app, session, args, argCount);
     }
     
-    if (SaveFile(session->fileName, session->buffer, app->cleanupStack)) {
-        session->modified = FALSE;
+    if (SaveFile(session->docState.fileName, session->buffer, app->cleanupStack)) {
+        session->docState.modified = FALSE;
         session->buffer->modified = FALSE;
         Printf("[CMD] TTX_Cmd_SaveFile: SUCCESS\n");
         return TRUE;
@@ -778,9 +778,9 @@ BOOL TTX_Cmd_SaveFileAs(struct TTXApplication *app, struct Session *session, STR
     /* Check if filename provided in args */
     if (args && argCount > 0 && args[0]) {
         fileName = args[0];
-    } else if (session->fileName) {
+    } else if (session->docState.fileName) {
         /* Use current filename as initial value */
-        fileName = session->fileName;
+        fileName = session->docState.fileName;
     }
     
     /* If no filename provided, show file requester */
@@ -792,8 +792,8 @@ BOOL TTX_Cmd_SaveFileAs(struct TTXApplication *app, struct Session *session, STR
         
         /* Extract initial file and drawer from current filename if available */
         /* Note: We need to copy the strings since we can't modify the original */
-        if (session->fileName) {
-            STRPTR currentFileName = session->fileName;
+        if (session->docState.fileName) {
+            STRPTR currentFileName = session->docState.fileName;
             ULONG len = 0;
             ULONG lastSlash = 0;
             BOOL foundSlash = FALSE;
@@ -817,7 +817,7 @@ BOOL TTX_Cmd_SaveFileAs(struct TTXApplication *app, struct Session *session, STR
                 
                 /* Allocate drawer string */
                 if (drawerLen > 0) {
-                    initialDrawer = (STRPTR)allocVec(app->cleanupStack, drawerLen + 1, MEMF_CLEAR);
+                    initialDrawer = (STRPTR)allocVec(drawerLen + 1, MEMF_CLEAR);
                     if (initialDrawer) {
                         CopyMem(currentFileName, initialDrawer, drawerLen);
                         initialDrawer[drawerLen] = '\0';
@@ -826,7 +826,7 @@ BOOL TTX_Cmd_SaveFileAs(struct TTXApplication *app, struct Session *session, STR
                 
                 /* Allocate file string */
                 if (fileLen > 0) {
-                    initialFile = (STRPTR)allocVec(app->cleanupStack, fileLen + 1, MEMF_CLEAR);
+                    initialFile = (STRPTR)allocVec(fileLen + 1, MEMF_CLEAR);
                     if (initialFile) {
                         CopyMem(&currentFileName[lastSlash + 1], initialFile, fileLen);
                         initialFile[fileLen] = '\0';
@@ -835,7 +835,7 @@ BOOL TTX_Cmd_SaveFileAs(struct TTXApplication *app, struct Session *session, STR
             } else {
                 /* No '/' - just file name */
                 if (len > 0) {
-                    initialFile = (STRPTR)allocVec(app->cleanupStack, len + 1, MEMF_CLEAR);
+                    initialFile = (STRPTR)allocVec(len + 1, MEMF_CLEAR);
                     if (initialFile) {
                         CopyMem(currentFileName, initialFile, len);
                         initialFile[len] = '\0';
@@ -851,10 +851,10 @@ BOOL TTX_Cmd_SaveFileAs(struct TTXApplication *app, struct Session *session, STR
             Printf("[CMD] TTX_Cmd_SaveFileAs: cancelled or failed\n");
             /* Free initial file and drawer strings if we allocated them */
             if (initialFile && app->cleanupStack) {
-                freeVec(app->cleanupStack, initialFile);
+                freeVec(initialFile);
             }
             if (initialDrawer && app->cleanupStack) {
-                freeVec(app->cleanupStack, initialDrawer);
+                freeVec(initialDrawer);
             }
             return FALSE;
         }
@@ -862,7 +862,7 @@ BOOL TTX_Cmd_SaveFileAs(struct TTXApplication *app, struct Session *session, STR
     }
     
     /* Save old filename to free later if we allocated a new one */
-    oldFileName = session->fileName;
+    oldFileName = session->docState.fileName;
     
     /* Allocate and copy new filename */
     if (fileName) {
@@ -871,15 +871,15 @@ BOOL TTX_Cmd_SaveFileAs(struct TTXApplication *app, struct Session *session, STR
             len++;
         }
         if (len > 0) {
-            session->fileName = (STRPTR)allocVec(app->cleanupStack, len + 1, MEMF_CLEAR);
-            if (session->fileName) {
-                CopyMem(fileName, session->fileName, len);
-                session->fileName[len] = '\0';
+            session->docState.fileName = (STRPTR)allocVec(len + 1, MEMF_CLEAR);
+            if (session->docState.fileName) {
+                CopyMem(fileName, session->docState.fileName, len);
+                session->docState.fileName[len] = '\0';
             } else {
                 Printf("[CMD] TTX_Cmd_SaveFileAs: FAIL (allocVec fileName failed)\n");
                 /* Free selected file if we allocated it */
                 if (selectedFile && app->cleanupStack) {
-                    freeVec(app->cleanupStack, selectedFile);
+                    freeVec(selectedFile);
                 }
                 return FALSE;
             }
@@ -887,15 +887,15 @@ BOOL TTX_Cmd_SaveFileAs(struct TTXApplication *app, struct Session *session, STR
     }
     
     /* Save file */
-    if (SaveFile(session->fileName, session->buffer, app->cleanupStack)) {
-        session->modified = FALSE;
+    if (SaveFile(session->docState.fileName, session->buffer, app->cleanupStack)) {
+        session->docState.modified = FALSE;
         session->buffer->modified = FALSE;
         result = TRUE;
-        Printf("[CMD] TTX_Cmd_SaveFileAs: SUCCESS (saved to '%s')\n", session->fileName);
+        Printf("[CMD] TTX_Cmd_SaveFileAs: SUCCESS (saved to '%s')\n", session->docState.fileName);
         
         /* Free old filename if we replaced it */
-        if (oldFileName && oldFileName != session->fileName && app->cleanupStack) {
-            freeVec(app->cleanupStack, oldFileName);
+        if (oldFileName && oldFileName != session->docState.fileName && app->cleanupStack) {
+            freeVec(oldFileName);
         }
     } else {
         LONG errorCode = IoErr();
@@ -906,24 +906,24 @@ BOOL TTX_Cmd_SaveFileAs(struct TTXApplication *app, struct Session *session, STR
         Printf("[CMD] TTX_Cmd_SaveFileAs: FAIL (SaveFile failed)\n");
         
         /* Restore old filename on failure */
-        if (session->fileName && session->fileName != oldFileName && app->cleanupStack) {
-            freeVec(app->cleanupStack, session->fileName);
+        if (session->docState.fileName && session->docState.fileName != oldFileName && app->cleanupStack) {
+            freeVec(session->docState.fileName);
         }
-        session->fileName = oldFileName;
+        session->docState.fileName = oldFileName;
         result = FALSE;
     }
     
     /* Free selected file path if we allocated it */
     if (selectedFile && app->cleanupStack) {
-        freeVec(app->cleanupStack, selectedFile);
+        freeVec(selectedFile);
     }
     
     /* Free initial file and drawer strings if we allocated them */
     if (initialFile && app->cleanupStack && initialFile != fileName) {
-        freeVec(app->cleanupStack, initialFile);
+        freeVec(initialFile);
     }
     if (initialDrawer && app->cleanupStack) {
-        freeVec(app->cleanupStack, initialDrawer);
+        freeVec(initialDrawer);
     }
     
     return result;
@@ -940,7 +940,7 @@ BOOL TTX_Cmd_ClearFile(struct TTXApplication *app, struct Session *session, STRP
     /* Clear all lines except first empty line */
     for (i = 1; i < session->buffer->lineCount; i++) {
         if (session->buffer->lines[i].text) {
-            freeVec(session->cleanupStack, session->buffer->lines[i].text);
+            freeVec(session->buffer->lines[i].text);
             session->buffer->lines[i].text = NULL;
         }
     }
@@ -954,7 +954,7 @@ BOOL TTX_Cmd_ClearFile(struct TTXApplication *app, struct Session *session, STRP
     session->buffer->scrollX = 0;
     session->buffer->scrollY = 0;
     session->buffer->modified = TRUE;
-    session->modified = TRUE;
+    session->docState.modified = TRUE;
     
     /* Force full redraw */
     if (session->buffer) {
@@ -999,9 +999,9 @@ BOOL TTX_Cmd_SetReadOnly(struct TTXApplication *app, struct Session *session, ST
     }
     
     if (toggle) {
-        session->readOnly = !session->readOnly;
+        session->docState.readOnly = !session->docState.readOnly;
     } else {
-        session->readOnly = TRUE;
+        session->docState.readOnly = TRUE;
     }
     
     /* Update menu checkmark */
@@ -1021,7 +1021,7 @@ BOOL TTX_Cmd_SetReadOnly(struct TTXApplication *app, struct Session *session, ST
             }
             
             if (item) {
-                if (session->readOnly) {
+                if (session->docState.readOnly) {
                     item->Flags |= CHECKED;
                 } else {
                     item->Flags &= ~CHECKED;
@@ -1032,7 +1032,7 @@ BOOL TTX_Cmd_SetReadOnly(struct TTXApplication *app, struct Session *session, ST
         }
     }
     
-    Printf("[CMD] TTX_Cmd_SetReadOnly: SUCCESS (readOnly=%s)\n", session->readOnly ? "TRUE" : "FALSE");
+    Printf("[CMD] TTX_Cmd_SetReadOnly: SUCCESS (readOnly=%s)\n", session->docState.readOnly ? "TRUE" : "FALSE");
     return TRUE;
 }
 
