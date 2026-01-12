@@ -1367,3 +1367,811 @@ BOOL DeleteForward(struct TextBuffer *buffer, struct CleanupStack *stack)
     return FALSE;
 }
 
+/* ============================================================================
+ * Delete Operations
+ * ============================================================================ */
+
+/* Delete to end of line */
+BOOL DeleteEOL(struct TextBuffer *buffer, struct CleanupStack *stack)
+{
+    ULONG startX = 0;
+    ULONG endX = 0;
+    
+    if (!buffer || buffer->cursorY >= buffer->lineCount || !stack) {
+        return FALSE;
+    }
+    
+    startX = buffer->cursorX;
+    endX = buffer->lines[buffer->cursorY].length;
+    
+    if (startX >= endX) {
+        return FALSE;  /* Nothing to delete */
+    }
+    
+    /* Set marking and delete */
+    SetMarking(buffer, buffer->cursorY, startX, buffer->cursorY, endX);
+    return DeleteBlock(buffer, stack);
+}
+
+/* Delete to end of word */
+BOOL DeleteEOW(struct TextBuffer *buffer, struct CleanupStack *stack)
+{
+    ULONG startX = 0;
+    ULONG startY = 0;
+    ULONG endX = 0;
+    ULONG endY = 0;
+    
+    if (!buffer || buffer->cursorY >= buffer->lineCount || !stack) {
+        return FALSE;
+    }
+    
+    startX = buffer->cursorX;
+    startY = buffer->cursorY;
+    
+    /* Move to end of word */
+    if (!MoveEndOfWord(buffer)) {
+        return FALSE;
+    }
+    
+    endX = buffer->cursorX;
+    endY = buffer->cursorY;
+    
+    /* Restore cursor and delete */
+    buffer->cursorX = startX;
+    buffer->cursorY = startY;
+    
+    if (startY == endY && startX < endX) {
+        SetMarking(buffer, startY, startX, endY, endX);
+        return DeleteBlock(buffer, stack);
+    }
+    
+    return FALSE;
+}
+
+/* Delete to start of line */
+BOOL DeleteSOL(struct TextBuffer *buffer, struct CleanupStack *stack)
+{
+    ULONG startX = 0;
+    ULONG endX = 0;
+    
+    if (!buffer || buffer->cursorY >= buffer->lineCount || !stack) {
+        return FALSE;
+    }
+    
+    endX = buffer->cursorX;
+    startX = 0;
+    
+    if (startX >= endX) {
+        return FALSE;  /* Nothing to delete */
+    }
+    
+    /* Set marking and delete */
+    SetMarking(buffer, buffer->cursorY, startX, buffer->cursorY, endX);
+    if (DeleteBlock(buffer, stack)) {
+        buffer->cursorX = 0;
+        return TRUE;
+    }
+    
+    return FALSE;
+}
+
+/* Delete to start of word */
+BOOL DeleteSOW(struct TextBuffer *buffer, struct CleanupStack *stack)
+{
+    ULONG startX = 0;
+    ULONG startY = 0;
+    ULONG endX = 0;
+    ULONG endY = 0;
+    
+    if (!buffer || buffer->cursorY >= buffer->lineCount || !stack) {
+        return FALSE;
+    }
+    
+    endX = buffer->cursorX;
+    endY = buffer->cursorY;
+    
+    /* Move to start of word */
+    if (!MoveStartOfWord(buffer)) {
+        return FALSE;
+    }
+    
+    startX = buffer->cursorX;
+    startY = buffer->cursorY;
+    
+    if (startY == endY && startX < endX) {
+        SetMarking(buffer, startY, startX, endY, endX);
+        if (DeleteBlock(buffer, stack)) {
+            buffer->cursorX = startX;
+            return TRUE;
+        }
+    }
+    
+    return FALSE;
+}
+
+/* Delete entire line */
+BOOL DeleteLine(struct TextBuffer *buffer, struct CleanupStack *stack)
+{
+    ULONG lineY = 0;
+    ULONG i = 0;
+    
+    if (!buffer || buffer->cursorY >= buffer->lineCount || !stack) {
+        return FALSE;
+    }
+    
+    lineY = buffer->cursorY;
+    
+    /* Free line text */
+    if (buffer->lines[lineY].text) {
+        freeVec(buffer->lines[lineY].text);
+        buffer->lines[lineY].text = NULL;
+    }
+    
+    /* Shift lines up */
+    for (i = lineY; i < buffer->lineCount - 1; i++) {
+        buffer->lines[i] = buffer->lines[i + 1];
+    }
+    
+    buffer->lineCount--;
+    
+    /* Ensure at least one empty line */
+    if (buffer->lineCount == 0) {
+        buffer->lines[0].allocated = 256;
+        buffer->lines[0].text = (STRPTR)allocVec(256, MEMF_CLEAR);
+        if (!buffer->lines[0].text) {
+            return FALSE;
+        }
+        buffer->lines[0].text[0] = '\0';
+        buffer->lines[0].length = 0;
+        buffer->lineCount = 1;
+    }
+    
+    /* Adjust cursor */
+    if (buffer->cursorY >= buffer->lineCount) {
+        buffer->cursorY = buffer->lineCount - 1;
+    }
+    if (buffer->cursorY == lineY && buffer->cursorY < buffer->lineCount) {
+        buffer->cursorX = 0;
+        if (buffer->cursorX > buffer->lines[buffer->cursorY].length) {
+            buffer->cursorX = buffer->lines[buffer->cursorY].length;
+        }
+    }
+    
+    buffer->modified = TRUE;
+    return TRUE;
+}
+
+/* ============================================================================
+ * Text Insertion Operations
+ * ============================================================================ */
+
+/* Insert text string at cursor */
+BOOL InsertText(struct TextBuffer *buffer, STRPTR text, struct CleanupStack *stack)
+{
+    ULONG i = 0;
+    UBYTE ch = 0;
+    
+    if (!buffer || !text || !stack) {
+        return FALSE;
+    }
+    
+    /* Insert each character */
+    i = 0;
+    while (text[i] != '\0') {
+        ch = (UBYTE)text[i];
+        if (ch == '\n') {
+            if (!InsertNewline(buffer, stack)) {
+                return FALSE;
+            }
+        } else {
+            if (!InsertChar(buffer, ch, stack)) {
+                return FALSE;
+            }
+        }
+        i++;
+    }
+    
+    return TRUE;
+}
+
+/* Get character at cursor */
+UBYTE GetCharAtCursor(struct TextBuffer *buffer)
+{
+    if (!buffer || buffer->cursorY >= buffer->lineCount) {
+        return 0;
+    }
+    
+    if (buffer->cursorX < buffer->lines[buffer->cursorY].length) {
+        return (UBYTE)buffer->lines[buffer->cursorY].text[buffer->cursorX];
+    }
+    
+    return 0;
+}
+
+/* Get current line text */
+STRPTR GetCurrentLine(struct TextBuffer *buffer, struct CleanupStack *stack)
+{
+    STRPTR result = NULL;
+    ULONG len = 0;
+    
+    if (!buffer || buffer->cursorY >= buffer->lineCount || !stack) {
+        return NULL;
+    }
+    
+    len = buffer->lines[buffer->cursorY].length;
+    result = (STRPTR)allocVec(len + 1, MEMF_CLEAR);
+    if (!result) {
+        return NULL;
+    }
+    
+    if (len > 0) {
+        CopyMem(buffer->lines[buffer->cursorY].text, result, len);
+    }
+    result[len] = '\0';
+    
+    return result;
+}
+
+/* Set character at cursor */
+BOOL SetCharAtCursor(struct TextBuffer *buffer, UBYTE ch, struct CleanupStack *stack)
+{
+    if (!buffer || buffer->cursorY >= buffer->lineCount || !stack) {
+        return FALSE;
+    }
+    
+    if (buffer->cursorX < buffer->lines[buffer->cursorY].length) {
+        buffer->lines[buffer->cursorY].text[buffer->cursorX] = (char)ch;
+        buffer->modified = TRUE;
+        return TRUE;
+    } else {
+        /* Insert at end of line */
+        return InsertChar(buffer, ch, stack);
+    }
+}
+
+/* Swap current and previous characters */
+BOOL SwapChars(struct TextBuffer *buffer, struct CleanupStack *stack)
+{
+    UBYTE currCh = 0;
+    UBYTE prevCh = 0;
+    
+    if (!buffer || buffer->cursorY >= buffer->lineCount || !stack) {
+        return FALSE;
+    }
+    
+    /* Get current character */
+    currCh = GetCharAtCursor(buffer);
+    if (currCh == 0) {
+        return FALSE;
+    }
+    
+    /* Get previous character */
+    if (buffer->cursorX > 0) {
+        prevCh = (UBYTE)buffer->lines[buffer->cursorY].text[buffer->cursorX - 1];
+    } else if (buffer->cursorY > 0) {
+        ULONG prevLen = buffer->lines[buffer->cursorY - 1].length;
+        if (prevLen > 0) {
+            prevCh = (UBYTE)buffer->lines[buffer->cursorY - 1].text[prevLen - 1];
+        } else {
+            return FALSE;
+        }
+    } else {
+        return FALSE;
+    }
+    
+    /* Swap */
+    if (buffer->cursorX > 0) {
+        buffer->lines[buffer->cursorY].text[buffer->cursorX - 1] = (char)currCh;
+        buffer->lines[buffer->cursorY].text[buffer->cursorX] = (char)prevCh;
+        buffer->modified = TRUE;
+        return TRUE;
+    } else {
+        /* Cross-line swap - move cursor back, swap, move forward */
+        ULONG prevLen = 0;
+        buffer->cursorY--;
+        prevLen = buffer->lines[buffer->cursorY].length;
+        buffer->cursorX = prevLen - 1;
+        buffer->lines[buffer->cursorY].text[prevLen - 1] = (char)currCh;
+        buffer->cursorY++;
+        buffer->cursorX = 0;
+        if (!InsertChar(buffer, prevCh, stack)) {
+            return FALSE;
+        }
+        buffer->cursorX = 1;
+        if (!DeleteChar(buffer, stack)) {
+            return FALSE;
+        }
+        buffer->cursorX = 0;
+        return TRUE;
+    }
+}
+
+/* Toggle case of character at cursor */
+BOOL ToggleCharCase(struct TextBuffer *buffer, struct CleanupStack *stack)
+{
+    UBYTE ch = 0;
+    UBYTE newCh = 0;
+    
+    if (!buffer || buffer->cursorY >= buffer->lineCount || !stack) {
+        return FALSE;
+    }
+    
+    ch = GetCharAtCursor(buffer);
+    if (ch == 0) {
+        return FALSE;
+    }
+    
+    if (ch >= 'a' && ch <= 'z') {
+        newCh = ch - 'a' + 'A';
+    } else if (ch >= 'A' && ch <= 'Z') {
+        newCh = ch - 'A' + 'a';
+    } else {
+        return FALSE;  /* Not a letter */
+    }
+    
+    return SetCharAtCursor(buffer, newCh, stack);
+}
+
+/* ============================================================================
+ * Word Operations
+ * ============================================================================ */
+
+/* Get word at cursor */
+STRPTR GetWordAtCursor(struct TextBuffer *buffer, struct CleanupStack *stack)
+{
+    ULONG startX = 0;
+    ULONG endX = 0;
+    ULONG wordLen = 0;
+    STRPTR result = NULL;
+    ULONG savedX = 0;
+    ULONG savedY = 0;
+    
+    if (!buffer || buffer->cursorY >= buffer->lineCount || !stack) {
+        return NULL;
+    }
+    
+    savedX = buffer->cursorX;
+    savedY = buffer->cursorY;
+    
+    /* Find word boundaries */
+    if (!MoveStartOfWord(buffer)) {
+        buffer->cursorX = savedX;
+        buffer->cursorY = savedY;
+        return NULL;
+    }
+    startX = buffer->cursorX;
+    
+    if (!MoveEndOfWord(buffer)) {
+        buffer->cursorX = savedX;
+        buffer->cursorY = savedY;
+        return NULL;
+    }
+    endX = buffer->cursorX;
+    
+    /* Restore cursor */
+    buffer->cursorX = savedX;
+    buffer->cursorY = savedY;
+    
+    if (startX >= endX || buffer->cursorY != savedY) {
+        return NULL;  /* Word spans multiple lines - not supported */
+    }
+    
+    wordLen = endX - startX;
+    result = (STRPTR)allocVec(wordLen + 1, MEMF_CLEAR);
+    if (!result) {
+        return NULL;
+    }
+    
+    CopyMem(&buffer->lines[buffer->cursorY].text[startX], result, wordLen);
+    result[wordLen] = '\0';
+    
+    return result;
+}
+
+/* Replace word at cursor */
+BOOL ReplaceWordAtCursor(struct TextBuffer *buffer, STRPTR newWord, struct CleanupStack *stack)
+{
+    ULONG startX = 0;
+    ULONG endX = 0;
+    ULONG savedX = 0;
+    ULONG savedY = 0;
+    ULONG newWordLen = 0;
+    ULONG i = 0;
+    
+    if (!buffer || buffer->cursorY >= buffer->lineCount || !newWord || !stack) {
+        return FALSE;
+    }
+    
+    savedX = buffer->cursorX;
+    savedY = buffer->cursorY;
+    
+    /* Find word boundaries */
+    if (!MoveStartOfWord(buffer)) {
+        buffer->cursorX = savedX;
+        buffer->cursorY = savedY;
+        return FALSE;
+    }
+    startX = buffer->cursorX;
+    
+    if (!MoveEndOfWord(buffer)) {
+        buffer->cursorX = savedX;
+        buffer->cursorY = savedY;
+        return FALSE;
+    }
+    endX = buffer->cursorX;
+    
+    if (startX >= endX || buffer->cursorY != savedY) {
+        buffer->cursorX = savedX;
+        buffer->cursorY = savedY;
+        return FALSE;
+    }
+    
+    /* Calculate new word length */
+    newWordLen = 0;
+    while (newWord[newWordLen] != '\0') {
+        newWordLen++;
+    }
+    
+    /* Delete old word */
+    buffer->cursorX = startX;
+    SetMarking(buffer, buffer->cursorY, startX, buffer->cursorY, endX);
+    if (!DeleteBlock(buffer, stack)) {
+        buffer->cursorX = savedX;
+        buffer->cursorY = savedY;
+        return FALSE;
+    }
+    
+    /* Insert new word */
+    for (i = 0; i < newWordLen; i++) {
+        if (!InsertChar(buffer, (UBYTE)newWord[i], stack)) {
+            buffer->cursorX = savedX;
+            buffer->cursorY = savedY;
+            return FALSE;
+        }
+    }
+    
+    return TRUE;
+}
+
+/* ============================================================================
+ * Case Conversion Operations
+ * ============================================================================ */
+
+/* Convert selection to uppercase */
+BOOL ConvertToUpper(struct TextBuffer *buffer, struct CleanupStack *stack)
+{
+    ULONG startY = 0;
+    ULONG startX = 0;
+    ULONG stopY = 0;
+    ULONG stopX = 0;
+    ULONG i = 0;
+    ULONG j = 0;
+    UBYTE ch = 0;
+    
+    if (!buffer || !stack) {
+        return FALSE;
+    }
+    
+    if (!buffer->marking.enabled) {
+        return FALSE;
+    }
+    
+    startY = buffer->marking.startY;
+    startX = buffer->marking.startX;
+    stopY = buffer->marking.stopY;
+    stopX = buffer->marking.stopX;
+    
+    /* Normalize */
+    if (stopY < startY || (stopY == startY && stopX < startX)) {
+        ULONG temp = startY;
+        startY = stopY;
+        stopY = temp;
+        temp = startX;
+        startX = stopX;
+        stopX = temp;
+    }
+    
+    /* Convert characters */
+    for (i = startY; i <= stopY && i < buffer->lineCount; i++) {
+        ULONG lineStart = (i == startY) ? startX : 0;
+        ULONG lineEnd = (i == stopY) ? stopX : buffer->lines[i].length;
+        
+        for (j = lineStart; j < lineEnd && j < buffer->lines[i].length; j++) {
+            ch = (UBYTE)buffer->lines[i].text[j];
+            if (ch >= 'a' && ch <= 'z') {
+                buffer->lines[i].text[j] = (char)(ch - 'a' + 'A');
+                buffer->modified = TRUE;
+            }
+        }
+    }
+    
+    return TRUE;
+}
+
+/* Convert selection to lowercase */
+BOOL ConvertToLower(struct TextBuffer *buffer, struct CleanupStack *stack)
+{
+    ULONG startY = 0;
+    ULONG startX = 0;
+    ULONG stopY = 0;
+    ULONG stopX = 0;
+    ULONG i = 0;
+    ULONG j = 0;
+    UBYTE ch = 0;
+    
+    if (!buffer || !stack) {
+        return FALSE;
+    }
+    
+    if (!buffer->marking.enabled) {
+        return FALSE;
+    }
+    
+    startY = buffer->marking.startY;
+    startX = buffer->marking.startX;
+    stopY = buffer->marking.stopY;
+    stopX = buffer->marking.stopX;
+    
+    /* Normalize */
+    if (stopY < startY || (stopY == startY && stopX < startX)) {
+        ULONG temp = startY;
+        startY = stopY;
+        stopY = temp;
+        temp = startX;
+        startX = stopX;
+        stopX = temp;
+    }
+    
+    /* Convert characters */
+    for (i = startY; i <= stopY && i < buffer->lineCount; i++) {
+        ULONG lineStart = (i == startY) ? startX : 0;
+        ULONG lineEnd = (i == stopY) ? stopX : buffer->lines[i].length;
+        
+        for (j = lineStart; j < lineEnd && j < buffer->lines[i].length; j++) {
+            ch = (UBYTE)buffer->lines[i].text[j];
+            if (ch >= 'A' && ch <= 'Z') {
+                buffer->lines[i].text[j] = (char)(ch - 'A' + 'a');
+                buffer->modified = TRUE;
+            }
+        }
+    }
+    
+    return TRUE;
+}
+
+/* ============================================================================
+ * Indentation Operations
+ * ============================================================================ */
+
+/* Shift lines left (remove leading spaces/tabs) */
+BOOL ShiftLeft(struct TextBuffer *buffer, struct CleanupStack *stack)
+{
+    ULONG startY = 0;
+    ULONG stopY = 0;
+    ULONG i = 0;
+    ULONG j = 0;
+    ULONG removeCount = 0;
+    
+    if (!buffer || !stack) {
+        return FALSE;
+    }
+    
+    if (buffer->marking.enabled) {
+        startY = buffer->marking.startY;
+        stopY = buffer->marking.stopY;
+        if (stopY < startY) {
+            ULONG temp = startY;
+            startY = stopY;
+            stopY = temp;
+        }
+    } else {
+        startY = buffer->cursorY;
+        stopY = buffer->cursorY;
+    }
+    
+    /* Remove leading spaces/tabs from each line */
+    for (i = startY; i <= stopY && i < buffer->lineCount; i++) {
+        removeCount = 0;
+        while (removeCount < buffer->lines[i].length &&
+               (buffer->lines[i].text[removeCount] == ' ' ||
+                buffer->lines[i].text[removeCount] == '\t')) {
+            removeCount++;
+        }
+        
+        if (removeCount > 0) {
+            /* Shift characters left */
+            for (j = removeCount; j <= buffer->lines[i].length; j++) {
+                buffer->lines[i].text[j - removeCount] = buffer->lines[i].text[j];
+            }
+            buffer->lines[i].length -= removeCount;
+            buffer->modified = TRUE;
+        }
+    }
+    
+    return TRUE;
+}
+
+/* Shift lines right (add leading spaces) */
+BOOL ShiftRight(struct TextBuffer *buffer, struct CleanupStack *stack)
+{
+    ULONG startY = 0;
+    ULONG stopY = 0;
+    ULONG i = 0;
+    ULONG j = 0;
+    ULONG tabSize = 4;  /* Default tab size */
+    STRPTR newText = NULL;
+    ULONG newAlloc = 0;
+    
+    if (!buffer || !stack) {
+        return FALSE;
+    }
+    
+    if (buffer->marking.enabled) {
+        startY = buffer->marking.startY;
+        stopY = buffer->marking.stopY;
+        if (stopY < startY) {
+            ULONG temp = startY;
+            startY = stopY;
+            stopY = temp;
+        }
+    } else {
+        startY = buffer->cursorY;
+        stopY = buffer->cursorY;
+    }
+    
+    /* Add leading spaces to each line */
+    for (i = startY; i <= stopY && i < buffer->lineCount; i++) {
+        if (buffer->lines[i].length + tabSize >= buffer->lines[i].allocated) {
+            newAlloc = buffer->lines[i].allocated * 2;
+            if (newAlloc < buffer->lines[i].length + tabSize + 256) {
+                newAlloc = buffer->lines[i].length + tabSize + 256;
+            }
+            newText = (STRPTR)allocVec(newAlloc, MEMF_CLEAR);
+            if (!newText) {
+                continue;
+            }
+            if (buffer->lines[i].text && buffer->lines[i].length > 0) {
+                CopyMem(buffer->lines[i].text, newText, buffer->lines[i].length);
+            }
+            if (buffer->lines[i].text) {
+                freeVec(buffer->lines[i].text);
+            }
+            buffer->lines[i].text = newText;
+            buffer->lines[i].allocated = newAlloc;
+        }
+        
+        /* Shift characters right */
+        for (j = buffer->lines[i].length; j > 0; j--) {
+            buffer->lines[i].text[j + tabSize - 1] = buffer->lines[i].text[j - 1];
+        }
+        
+        /* Add spaces */
+        for (j = 0; j < tabSize; j++) {
+            buffer->lines[i].text[j] = ' ';
+        }
+        
+        buffer->lines[i].length += tabSize;
+        buffer->lines[i].text[buffer->lines[i].length] = '\0';
+        buffer->modified = TRUE;
+    }
+    
+    return TRUE;
+}
+
+/* Convert tabs to spaces in selection */
+BOOL ConvertTabsToSpaces(struct TextBuffer *buffer, struct CleanupStack *stack)
+{
+    ULONG startY = 0;
+    ULONG startX = 0;
+    ULONG stopY = 0;
+    ULONG stopX = 0;
+    ULONG i = 0;
+    ULONG j = 0;
+    ULONG tabSize = 4;
+    STRPTR newText = NULL;
+    ULONG newAlloc = 0;
+    ULONG newLen = 0;
+    ULONG tabCount = 0;
+    
+    if (!buffer || !stack) {
+        return FALSE;
+    }
+    
+    if (buffer->marking.enabled) {
+        startY = buffer->marking.startY;
+        startX = buffer->marking.startX;
+        stopY = buffer->marking.stopY;
+        stopX = buffer->marking.stopX;
+    } else {
+        startY = 0;
+        startX = 0;
+        stopY = buffer->lineCount - 1;
+        stopX = 0;
+    }
+    
+    /* Normalize */
+    if (stopY < startY || (stopY == startY && stopX < startX)) {
+        ULONG temp = startY;
+        startY = stopY;
+        stopY = temp;
+        temp = startX;
+        startX = stopX;
+        stopX = temp;
+    }
+    
+    /* Convert tabs to spaces */
+    for (i = startY; i <= stopY && i < buffer->lineCount; i++) {
+        ULONG lineStart = (i == startY) ? startX : 0;
+        ULONG lineEnd = (i == stopY) ? stopX : buffer->lines[i].length;
+        
+        /* Count tabs in this range */
+        tabCount = 0;
+        for (j = lineStart; j < lineEnd && j < buffer->lines[i].length; j++) {
+            if (buffer->lines[i].text[j] == '\t') {
+                tabCount++;
+            }
+        }
+        
+        if (tabCount > 0) {
+            /* Calculate new length */
+            newLen = buffer->lines[i].length + (tabCount * (tabSize - 1));
+            
+            /* Allocate new buffer if needed */
+            if (newLen >= buffer->lines[i].allocated) {
+                newAlloc = newLen + 256;
+                newText = (STRPTR)allocVec(newAlloc, MEMF_CLEAR);
+                if (!newText) {
+                    continue;
+                }
+                if (buffer->lines[i].text && lineStart > 0) {
+                    CopyMem(buffer->lines[i].text, newText, lineStart);
+                }
+            } else {
+                newText = buffer->lines[i].text;
+                newAlloc = buffer->lines[i].allocated;
+            }
+            
+            /* Convert */
+            newLen = lineStart;
+            for (j = lineStart; j < lineEnd && j < buffer->lines[i].length; j++) {
+                if (buffer->lines[i].text[j] == '\t') {
+                    ULONG k = 0;
+                    for (k = 0; k < tabSize; k++) {
+                        newText[newLen++] = ' ';
+                    }
+                } else {
+                    newText[newLen++] = buffer->lines[i].text[j];
+                }
+            }
+            
+            /* Copy rest of line */
+            if (j < buffer->lines[i].length) {
+                ULONG restLen = 0;
+                restLen = buffer->lines[i].length - j;
+                CopyMem(&buffer->lines[i].text[j], &newText[newLen], restLen);
+                newLen += restLen;
+            }
+            newText[newLen] = '\0';
+            
+            if (newText != buffer->lines[i].text) {
+                if (buffer->lines[i].text) {
+                    freeVec(buffer->lines[i].text);
+                }
+                buffer->lines[i].text = newText;
+                buffer->lines[i].allocated = newAlloc;
+            }
+            buffer->lines[i].length = newLen;
+            buffer->modified = TRUE;
+        }
+    }
+    
+    return TRUE;
+}
+
+/* Convert spaces to tabs in selection */
+BOOL ConvertSpacesToTabs(struct TextBuffer *buffer, struct CleanupStack *stack)
+{
+    /* TODO: Implement spaces to tabs conversion */
+    /* This is more complex as it requires detecting tab stops */
+    return FALSE;
+}

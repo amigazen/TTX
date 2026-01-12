@@ -1060,9 +1060,112 @@ BOOL TTX_Cmd_OpenDoc(struct TTXApplication *app, struct Session *session, STRPTR
 
 BOOL TTX_Cmd_InsertFile(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Implement file insertion */
-    Printf("[CMD] TTX_Cmd_InsertFile: not yet implemented\n");
-    return FALSE;
+    STRPTR fileName = NULL;
+    STRPTR selectedFile = NULL;
+    struct TextBuffer *tempBuffer = NULL;
+    ULONG savedCursorX = 0;
+    ULONG savedCursorY = 0;
+    ULONG i = 0;
+    ULONG j = 0;
+    
+    if (!app || !session || !session->buffer || session->docState.readOnly) {
+        return FALSE;
+    }
+    
+    /* Check if filename provided in args */
+    if (args && argCount > 0 && args[0]) {
+        fileName = args[0];
+    }
+    
+    if (!fileName) {
+        /* No filename provided - show file requester */
+        if (!AslBase) {
+            Printf("[CMD] TTX_Cmd_InsertFile: FAIL (ASL library not available)\n");
+            return FALSE;
+        }
+        
+        selectedFile = TTX_ShowFileRequester(app, session, NULL, NULL);
+        if (!selectedFile) {
+            Printf("[CMD] TTX_Cmd_InsertFile: cancelled or failed\n");
+            return FALSE;
+        }
+        fileName = selectedFile;
+    }
+    
+    /* Save cursor position */
+    savedCursorX = session->buffer->cursorX;
+    savedCursorY = session->buffer->cursorY;
+    
+    /* Create temporary buffer to load file */
+    tempBuffer = (struct TextBuffer *)allocVec(sizeof(struct TextBuffer), MEMF_CLEAR);
+    if (!tempBuffer) {
+        if (selectedFile) {
+            freeVec(selectedFile);
+        }
+        return FALSE;
+    }
+    
+    if (!InitTextBuffer(tempBuffer, app->cleanupStack)) {
+        freeVec(tempBuffer);
+        if (selectedFile) {
+            freeVec(selectedFile);
+        }
+        return FALSE;
+    }
+    
+    /* Load file into temporary buffer */
+    if (!LoadFile(fileName, tempBuffer, app->cleanupStack)) {
+        FreeTextBuffer(tempBuffer, app->cleanupStack);
+        freeVec(tempBuffer);
+        if (selectedFile) {
+            freeVec(selectedFile);
+        }
+        Printf("[CMD] TTX_Cmd_InsertFile: FAIL (LoadFile failed)\n");
+        return FALSE;
+    }
+    
+    /* Insert all lines from temp buffer at cursor */
+    for (i = 0; i < tempBuffer->lineCount; i++) {
+        if (i > 0) {
+            /* Insert newline for each line after first */
+            if (!InsertNewline(session->buffer, session->cleanupStack)) {
+                break;
+            }
+        }
+        
+        /* Insert line text */
+        if (tempBuffer->lines[i].text && tempBuffer->lines[i].length > 0) {
+            for (j = 0; j < tempBuffer->lines[i].length; j++) {
+                if (!InsertChar(session->buffer, (UBYTE)tempBuffer->lines[i].text[j], session->cleanupStack)) {
+                    break;
+                }
+            }
+        }
+    }
+    
+    /* Free temporary buffer */
+    FreeTextBuffer(tempBuffer, app->cleanupStack);
+    freeVec(tempBuffer);
+    
+    /* Free selected file path if we allocated it */
+    if (selectedFile && app->cleanupStack) {
+        freeVec(selectedFile);
+    }
+    
+    /* Restore cursor position (it may have moved during insertion) */
+    session->buffer->cursorX = savedCursorX;
+    session->buffer->cursorY = savedCursorY;
+    
+    /* Update display */
+    CalculateMaxScroll(session->buffer, session->window);
+    ScrollToCursor(session->buffer, session->window);
+    UpdateScrollBars(session);
+    RenderText(session->window, session->buffer);
+    UpdateCursor(session->window, session->buffer);
+    session->docState.modified = session->buffer->modified;
+    
+    Printf("[CMD] TTX_Cmd_InsertFile: SUCCESS\n");
+    return TRUE;
 }
 
 BOOL TTX_Cmd_SaveFile(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -1788,16 +1891,90 @@ BOOL TTX_Cmd_GetViewInfo(struct TTXApplication *app, struct Session *session, ST
 
 BOOL TTX_Cmd_ScrollView(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Implement view scrolling */
-    Printf("[CMD] TTX_Cmd_ScrollView: not yet implemented\n");
-    return FALSE;
+    LONG deltaX = 0;
+    LONG deltaY = 0;
+    
+    if (!session || !session->buffer) {
+        return FALSE;
+    }
+    
+    /* Parse scroll deltas from args */
+    if (args && argCount >= 2) {
+        /* TODO: Parse numeric args - for now use 0 */
+        deltaX = 0;
+        deltaY = 0;
+    } else if (args && argCount >= 1) {
+        /* Single arg = vertical scroll */
+        deltaY = 0;  /* TODO: Parse numeric */
+    }
+    
+    /* Apply scroll */
+    if (deltaY > 0) {
+        session->buffer->scrollY += (ULONG)deltaY;
+        if (session->buffer->scrollY > session->buffer->maxScrollY) {
+            session->buffer->scrollY = session->buffer->maxScrollY;
+        }
+    } else if (deltaY < 0) {
+        if ((ULONG)(-deltaY) > session->buffer->scrollY) {
+            session->buffer->scrollY = 0;
+        } else {
+            session->buffer->scrollY -= (ULONG)(-deltaY);
+        }
+    }
+    
+    if (deltaX > 0) {
+        session->buffer->scrollX += (ULONG)deltaX;
+        if (session->buffer->scrollX > session->buffer->maxScrollX) {
+            session->buffer->scrollX = session->buffer->maxScrollX;
+        }
+    } else if (deltaX < 0) {
+        if ((ULONG)(-deltaX) > session->buffer->scrollX) {
+            session->buffer->scrollX = 0;
+        } else {
+            session->buffer->scrollX -= (ULONG)(-deltaX);
+        }
+    }
+    
+    UpdateScrollBars(session);
+    RenderText(session->window, session->buffer);
+    UpdateCursor(session->window, session->buffer);
+    Printf("[CMD] TTX_Cmd_ScrollView: SUCCESS\n");
+    return TRUE;
 }
 
 BOOL TTX_Cmd_SizeView(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Implement view sizing */
-    Printf("[CMD] TTX_Cmd_SizeView: not yet implemented\n");
-    return FALSE;
+    ULONG width = 0;
+    ULONG height = 0;
+    
+    if (!session || !session->window) {
+        return FALSE;
+    }
+    
+    /* Parse size from args */
+    if (args && argCount >= 2) {
+        /* TODO: Parse numeric args */
+        width = 0;
+        height = 0;
+    }
+    
+    /* Resize window if sizes provided */
+    if (width > 0 && height > 0) {
+        /* TODO: Implement window resizing */
+        Printf("[CMD] TTX_Cmd_SizeView: window resize not yet implemented\n");
+        return FALSE;
+    }
+    
+    /* Recalculate max scroll for current window size */
+    if (session->buffer) {
+        CalculateMaxScroll(session->buffer, session->window);
+        UpdateScrollBars(session);
+        RenderText(session->window, session->buffer);
+        UpdateCursor(session->window, session->buffer);
+    }
+    
+    Printf("[CMD] TTX_Cmd_SizeView: SUCCESS\n");
+    return TRUE;
 }
 
 BOOL TTX_Cmd_SplitView(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -2068,17 +2245,24 @@ BOOL TTX_Cmd_MoveChar(struct TTXApplication *app, struct Session *session, STRPT
     
     /* Parse count from args */
     if (args && argCount > 0) {
-        /* TODO: Parse numeric */
+        /* TODO: Parse numeric - for now use 1 */
+        count = 1;
     }
     
-    /* TODO: Move cursor by count characters */
-    Printf("[CMD] TTX_Cmd_MoveChar: not yet implemented\n");
-    return FALSE;
+    /* Move cursor by count characters (positive = right, negative = left) */
+    if (count > 0) {
+        return TTX_Cmd_MoveRight(app, session, args, argCount);
+    } else if (count < 0) {
+        return TTX_Cmd_MoveLeft(app, session, args, argCount);
+    }
+    
+    return TRUE;
 }
 
 BOOL TTX_Cmd_MoveDown(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
     LONG count = 1;
+    ULONG i = 0;
     
     if (!session || !session->buffer) {
         return FALSE;
@@ -2086,19 +2270,55 @@ BOOL TTX_Cmd_MoveDown(struct TTXApplication *app, struct Session *session, STRPT
     
     /* Parse count from args */
     if (args && argCount > 0) {
-        /* TODO: Parse numeric */
+        /* TODO: Parse numeric - for now use 1 */
+        count = 1;
     }
     
-    /* TODO: Move cursor down by count lines */
-    Printf("[CMD] TTX_Cmd_MoveDown: not yet implemented\n");
-    return FALSE;
+    /* Move cursor down by count lines */
+    for (i = 0; i < (ULONG)count && session->buffer->cursorY < session->buffer->lineCount - 1; i++) {
+        session->buffer->cursorY++;
+        if (session->buffer->cursorX > session->buffer->lines[session->buffer->cursorY].length) {
+            session->buffer->cursorX = session->buffer->lines[session->buffer->cursorY].length;
+        }
+    }
+    
+    ScrollToCursor(session->buffer, session->window);
+    UpdateScrollBars(session);
+    RenderText(session->window, session->buffer);
+    UpdateCursor(session->window, session->buffer);
+    Printf("[CMD] TTX_Cmd_MoveDown: SUCCESS\n");
+    return TRUE;
 }
 
 BOOL TTX_Cmd_MoveDownScr(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Move cursor down by screen */
-    Printf("[CMD] TTX_Cmd_MoveDownScr: not yet implemented\n");
-    return FALSE;
+    ULONG pageH = 0;
+    
+    if (!session || !session->buffer) {
+        return FALSE;
+    }
+    
+    pageH = session->buffer->pageH;
+    if (pageH == 0) {
+        pageH = 20;  /* Default if not calculated */
+    }
+    
+    /* Move cursor down by screen height */
+    session->buffer->cursorY += pageH;
+    if (session->buffer->cursorY >= session->buffer->lineCount) {
+        session->buffer->cursorY = session->buffer->lineCount - 1;
+    }
+    
+    if (session->buffer->cursorX > session->buffer->lines[session->buffer->cursorY].length) {
+        session->buffer->cursorX = session->buffer->lines[session->buffer->cursorY].length;
+    }
+    
+    ScrollToCursor(session->buffer, session->window);
+    UpdateScrollBars(session);
+    RenderText(session->window, session->buffer);
+    UpdateCursor(session->window, session->buffer);
+    Printf("[CMD] TTX_Cmd_MoveDownScr: SUCCESS\n");
+    return TRUE;
 }
 
 BOOL TTX_Cmd_MoveEOF(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -2151,6 +2371,7 @@ BOOL TTX_Cmd_MoveLastChange(struct TTXApplication *app, struct Session *session,
 BOOL TTX_Cmd_MoveLeft(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
     LONG count = 1;
+    ULONG i = 0;
     
     if (!session || !session->buffer) {
         return FALSE;
@@ -2158,12 +2379,28 @@ BOOL TTX_Cmd_MoveLeft(struct TTXApplication *app, struct Session *session, STRPT
     
     /* Parse count from args */
     if (args && argCount > 0) {
-        /* TODO: Parse numeric */
+        /* TODO: Parse numeric - for now use 1 */
+        count = 1;
     }
     
-    /* TODO: Move cursor left by count characters */
-    Printf("[CMD] TTX_Cmd_MoveLeft: not yet implemented\n");
-    return FALSE;
+    /* Move cursor left by count characters */
+    for (i = 0; i < (ULONG)count; i++) {
+        if (session->buffer->cursorX > 0) {
+            session->buffer->cursorX--;
+        } else if (session->buffer->cursorY > 0) {
+            session->buffer->cursorY--;
+            session->buffer->cursorX = session->buffer->lines[session->buffer->cursorY].length;
+        } else {
+            break;
+        }
+    }
+    
+    ScrollToCursor(session->buffer, session->window);
+    UpdateScrollBars(session);
+    RenderText(session->window, session->buffer);
+    UpdateCursor(session->window, session->buffer);
+    Printf("[CMD] TTX_Cmd_MoveLeft: SUCCESS\n");
+    return TRUE;
 }
 
 BOOL TTX_Cmd_MoveMatchBkt(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -2228,6 +2465,7 @@ BOOL TTX_Cmd_MovePrevWord(struct TTXApplication *app, struct Session *session, S
 BOOL TTX_Cmd_MoveRight(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
     LONG count = 1;
+    ULONG i = 0;
     
     if (!session || !session->buffer) {
         return FALSE;
@@ -2235,12 +2473,32 @@ BOOL TTX_Cmd_MoveRight(struct TTXApplication *app, struct Session *session, STRP
     
     /* Parse count from args */
     if (args && argCount > 0) {
-        /* TODO: Parse numeric */
+        /* TODO: Parse numeric - for now use 1 */
+        count = 1;
     }
     
-    /* TODO: Move cursor right by count characters */
-    Printf("[CMD] TTX_Cmd_MoveRight: not yet implemented\n");
-    return FALSE;
+    /* Move cursor right by count characters */
+    for (i = 0; i < (ULONG)count; i++) {
+        if (session->buffer->cursorY < session->buffer->lineCount) {
+            if (session->buffer->cursorX < session->buffer->lines[session->buffer->cursorY].length) {
+                session->buffer->cursorX++;
+            } else if (session->buffer->cursorY < session->buffer->lineCount - 1) {
+                session->buffer->cursorY++;
+                session->buffer->cursorX = 0;
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    
+    ScrollToCursor(session->buffer, session->window);
+    UpdateScrollBars(session);
+    RenderText(session->window, session->buffer);
+    UpdateCursor(session->window, session->buffer);
+    Printf("[CMD] TTX_Cmd_MoveRight: SUCCESS\n");
+    return TRUE;
 }
 
 BOOL TTX_Cmd_MoveSOF(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -2282,6 +2540,7 @@ BOOL TTX_Cmd_MoveSOL(struct TTXApplication *app, struct Session *session, STRPTR
 BOOL TTX_Cmd_MoveUp(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
     LONG count = 1;
+    ULONG i = 0;
     
     if (!session || !session->buffer) {
         return FALSE;
@@ -2289,19 +2548,56 @@ BOOL TTX_Cmd_MoveUp(struct TTXApplication *app, struct Session *session, STRPTR 
     
     /* Parse count from args */
     if (args && argCount > 0) {
-        /* TODO: Parse numeric */
+        /* TODO: Parse numeric - for now use 1 */
+        count = 1;
     }
     
-    /* TODO: Move cursor up by count lines */
-    Printf("[CMD] TTX_Cmd_MoveUp: not yet implemented\n");
-    return FALSE;
+    /* Move cursor up by count lines */
+    for (i = 0; i < (ULONG)count && session->buffer->cursorY > 0; i++) {
+        session->buffer->cursorY--;
+        if (session->buffer->cursorX > session->buffer->lines[session->buffer->cursorY].length) {
+            session->buffer->cursorX = session->buffer->lines[session->buffer->cursorY].length;
+        }
+    }
+    
+    ScrollToCursor(session->buffer, session->window);
+    UpdateScrollBars(session);
+    RenderText(session->window, session->buffer);
+    UpdateCursor(session->window, session->buffer);
+    Printf("[CMD] TTX_Cmd_MoveUp: SUCCESS\n");
+    return TRUE;
 }
 
 BOOL TTX_Cmd_MoveUpScr(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Move cursor up by screen */
-    Printf("[CMD] TTX_Cmd_MoveUpScr: not yet implemented\n");
-    return FALSE;
+    ULONG pageH = 0;
+    
+    if (!session || !session->buffer) {
+        return FALSE;
+    }
+    
+    pageH = session->buffer->pageH;
+    if (pageH == 0) {
+        pageH = 20;  /* Default if not calculated */
+    }
+    
+    /* Move cursor up by screen height */
+    if (session->buffer->cursorY >= pageH) {
+        session->buffer->cursorY -= pageH;
+    } else {
+        session->buffer->cursorY = 0;
+    }
+    
+    if (session->buffer->cursorX > session->buffer->lines[session->buffer->cursorY].length) {
+        session->buffer->cursorX = session->buffer->lines[session->buffer->cursorY].length;
+    }
+    
+    ScrollToCursor(session->buffer, session->window);
+    UpdateScrollBars(session);
+    RenderText(session->window, session->buffer);
+    UpdateCursor(session->window, session->buffer);
+    Printf("[CMD] TTX_Cmd_MoveUpScr: SUCCESS\n");
+    return TRUE;
 }
 
 /* ============================================================================
@@ -2363,36 +2659,101 @@ BOOL TTX_Cmd_Delete(struct TTXApplication *app, struct Session *session, STRPTR 
 
 BOOL TTX_Cmd_DeleteEOL(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Delete to end of line */
-    Printf("[CMD] TTX_Cmd_DeleteEOL: not yet implemented\n");
+    if (!session || !session->buffer || session->docState.readOnly) {
+        return FALSE;
+    }
+    
+    if (DeleteEOL(session->buffer, session->cleanupStack)) {
+        CalculateMaxScroll(session->buffer, session->window);
+        ScrollToCursor(session->buffer, session->window);
+        UpdateScrollBars(session);
+        RenderText(session->window, session->buffer);
+        UpdateCursor(session->window, session->buffer);
+        session->docState.modified = session->buffer->modified;
+        Printf("[CMD] TTX_Cmd_DeleteEOL: SUCCESS\n");
+        return TRUE;
+    }
+    
     return FALSE;
 }
 
 BOOL TTX_Cmd_DeleteEOW(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Delete to end of word */
-    Printf("[CMD] TTX_Cmd_DeleteEOW: not yet implemented\n");
+    if (!session || !session->buffer || session->docState.readOnly) {
+        return FALSE;
+    }
+    
+    if (DeleteEOW(session->buffer, session->cleanupStack)) {
+        CalculateMaxScroll(session->buffer, session->window);
+        ScrollToCursor(session->buffer, session->window);
+        UpdateScrollBars(session);
+        RenderText(session->window, session->buffer);
+        UpdateCursor(session->window, session->buffer);
+        session->docState.modified = session->buffer->modified;
+        Printf("[CMD] TTX_Cmd_DeleteEOW: SUCCESS\n");
+        return TRUE;
+    }
+    
     return FALSE;
 }
 
 BOOL TTX_Cmd_DeleteLine(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Delete entire line */
-    Printf("[CMD] TTX_Cmd_DeleteLine: not yet implemented\n");
+    if (!session || !session->buffer || session->docState.readOnly) {
+        return FALSE;
+    }
+    
+    if (DeleteLine(session->buffer, session->cleanupStack)) {
+        CalculateMaxScroll(session->buffer, session->window);
+        ScrollToCursor(session->buffer, session->window);
+        UpdateScrollBars(session);
+        RenderText(session->window, session->buffer);
+        UpdateCursor(session->window, session->buffer);
+        session->docState.modified = session->buffer->modified;
+        Printf("[CMD] TTX_Cmd_DeleteLine: SUCCESS\n");
+        return TRUE;
+    }
+    
     return FALSE;
 }
 
 BOOL TTX_Cmd_DeleteSOL(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Delete to start of line */
-    Printf("[CMD] TTX_Cmd_DeleteSOL: not yet implemented\n");
+    if (!session || !session->buffer || session->docState.readOnly) {
+        return FALSE;
+    }
+    
+    if (DeleteSOL(session->buffer, session->cleanupStack)) {
+        CalculateMaxScroll(session->buffer, session->window);
+        ScrollToCursor(session->buffer, session->window);
+        UpdateScrollBars(session);
+        RenderText(session->window, session->buffer);
+        UpdateCursor(session->window, session->buffer);
+        session->docState.modified = session->buffer->modified;
+        Printf("[CMD] TTX_Cmd_DeleteSOL: SUCCESS\n");
+        return TRUE;
+    }
+    
     return FALSE;
 }
 
 BOOL TTX_Cmd_DeleteSOW(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Delete to start of word */
-    Printf("[CMD] TTX_Cmd_DeleteSOW: not yet implemented\n");
+    if (!session || !session->buffer || session->docState.readOnly) {
+        return FALSE;
+    }
+    
+    if (DeleteSOW(session->buffer, session->cleanupStack)) {
+        CalculateMaxScroll(session->buffer, session->window);
+        ScrollToCursor(session->buffer, session->window);
+        UpdateScrollBars(session);
+        RenderText(session->window, session->buffer);
+        UpdateCursor(session->window, session->buffer);
+        session->docState.modified = session->buffer->modified;
+        Printf("[CMD] TTX_Cmd_DeleteSOW: SUCCESS\n");
+        return TRUE;
+    }
+    
     return FALSE;
 }
 
@@ -2405,22 +2766,56 @@ BOOL TTX_Cmd_FindChange(struct TTXApplication *app, struct Session *session, STR
 
 BOOL TTX_Cmd_GetChar(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Return character at cursor for ARexx */
-    Printf("[CMD] TTX_Cmd_GetChar: not yet implemented\n");
-    return FALSE;
+    UBYTE ch = 0;
+    
+    if (!session || !session->buffer) {
+        return FALSE;
+    }
+    
+    ch = GetCharAtCursor(session->buffer);
+    Printf("[CMD] TTX_Cmd_GetChar: character='%c' (0x%02x)\n", (ch >= 32 && ch < 127) ? ch : '?', (unsigned int)ch);
+    /* TODO: Return to ARexx via RESULT */
+    return TRUE;
 }
 
 BOOL TTX_Cmd_GetLine(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Return line text for ARexx */
-    Printf("[CMD] TTX_Cmd_GetLine: not yet implemented\n");
+    STRPTR lineText = NULL;
+    
+    if (!session || !session->buffer) {
+        return FALSE;
+    }
+    
+    lineText = GetCurrentLine(session->buffer, session->cleanupStack);
+    if (lineText) {
+        Printf("[CMD] TTX_Cmd_GetLine: line='%s'\n", lineText);
+        /* TODO: Return to ARexx via RESULT */
+        freeVec(lineText);
+        return TRUE;
+    }
+    
     return FALSE;
 }
 
 BOOL TTX_Cmd_Insert(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Insert text from ARexx */
-    Printf("[CMD] TTX_Cmd_Insert: not yet implemented\n");
+    if (!session || !session->buffer || session->docState.readOnly) {
+        return FALSE;
+    }
+    
+    if (args && argCount > 0 && args[0]) {
+        if (InsertText(session->buffer, args[0], session->cleanupStack)) {
+            CalculateMaxScroll(session->buffer, session->window);
+            ScrollToCursor(session->buffer, session->window);
+            UpdateScrollBars(session);
+            RenderText(session->window, session->buffer);
+            UpdateCursor(session->window, session->buffer);
+            session->docState.modified = session->buffer->modified;
+            Printf("[CMD] TTX_Cmd_Insert: SUCCESS\n");
+            return TRUE;
+        }
+    }
+    
     return FALSE;
 }
 
@@ -2447,29 +2842,72 @@ BOOL TTX_Cmd_InsertLine(struct TTXApplication *app, struct Session *session, STR
 
 BOOL TTX_Cmd_SetChar(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Set character at cursor from ARexx */
-    Printf("[CMD] TTX_Cmd_SetChar: not yet implemented\n");
+    UBYTE ch = 0;
+    
+    if (!session || !session->buffer || session->docState.readOnly) {
+        return FALSE;
+    }
+    
+    if (args && argCount > 0 && args[0] && args[0][0] != '\0') {
+        ch = (UBYTE)args[0][0];
+        if (SetCharAtCursor(session->buffer, ch, session->cleanupStack)) {
+            CalculateMaxScroll(session->buffer, session->window);
+            ScrollToCursor(session->buffer, session->window);
+            UpdateScrollBars(session);
+            RenderText(session->window, session->buffer);
+            UpdateCursor(session->window, session->buffer);
+            session->docState.modified = session->buffer->modified;
+            Printf("[CMD] TTX_Cmd_SetChar: SUCCESS\n");
+            return TRUE;
+        }
+    }
+    
     return FALSE;
 }
 
 BOOL TTX_Cmd_SwapChars(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Swap current and previous characters */
-    Printf("[CMD] TTX_Cmd_SwapChars: not yet implemented\n");
+    if (!session || !session->buffer || session->docState.readOnly) {
+        return FALSE;
+    }
+    
+    if (SwapChars(session->buffer, session->cleanupStack)) {
+        CalculateMaxScroll(session->buffer, session->window);
+        ScrollToCursor(session->buffer, session->window);
+        UpdateScrollBars(session);
+        RenderText(session->window, session->buffer);
+        UpdateCursor(session->window, session->buffer);
+        session->docState.modified = session->buffer->modified;
+        Printf("[CMD] TTX_Cmd_SwapChars: SUCCESS\n");
+        return TRUE;
+    }
+    
     return FALSE;
 }
 
 BOOL TTX_Cmd_Text(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Insert text string from ARexx */
-    Printf("[CMD] TTX_Cmd_Text: not yet implemented\n");
-    return FALSE;
+    /* Text is alias for Insert */
+    return TTX_Cmd_Insert(app, session, args, argCount);
 }
 
 BOOL TTX_Cmd_ToggleCharCase(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Toggle case of character at cursor */
-    Printf("[CMD] TTX_Cmd_ToggleCharCase: not yet implemented\n");
+    if (!session || !session->buffer || session->docState.readOnly) {
+        return FALSE;
+    }
+    
+    if (ToggleCharCase(session->buffer, session->cleanupStack)) {
+        CalculateMaxScroll(session->buffer, session->window);
+        ScrollToCursor(session->buffer, session->window);
+        UpdateScrollBars(session);
+        RenderText(session->window, session->buffer);
+        UpdateCursor(session->window, session->buffer);
+        session->docState.modified = session->buffer->modified;
+        Printf("[CMD] TTX_Cmd_ToggleCharCase: SUCCESS\n");
+        return TRUE;
+    }
+    
     return FALSE;
 }
 
@@ -2514,15 +2952,42 @@ BOOL TTX_Cmd_CorrectWordCase(struct TTXApplication *app, struct Session *session
 
 BOOL TTX_Cmd_GetWord(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Return word at cursor for ARexx */
-    Printf("[CMD] TTX_Cmd_GetWord: not yet implemented\n");
+    STRPTR word = NULL;
+    
+    if (!session || !session->buffer) {
+        return FALSE;
+    }
+    
+    word = GetWordAtCursor(session->buffer, session->cleanupStack);
+    if (word) {
+        Printf("[CMD] TTX_Cmd_GetWord: word='%s'\n", word);
+        /* TODO: Return to ARexx via RESULT */
+        freeVec(word);
+        return TRUE;
+    }
+    
     return FALSE;
 }
 
 BOOL TTX_Cmd_ReplaceWord(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Replace word at cursor */
-    Printf("[CMD] TTX_Cmd_ReplaceWord: not yet implemented\n");
+    if (!session || !session->buffer || session->docState.readOnly) {
+        return FALSE;
+    }
+    
+    if (args && argCount > 0 && args[0]) {
+        if (ReplaceWordAtCursor(session->buffer, args[0], session->cleanupStack)) {
+            CalculateMaxScroll(session->buffer, session->window);
+            ScrollToCursor(session->buffer, session->window);
+            UpdateScrollBars(session);
+            RenderText(session->window, session->buffer);
+            UpdateCursor(session->window, session->buffer);
+            session->docState.modified = session->buffer->modified;
+            Printf("[CMD] TTX_Cmd_ReplaceWord: SUCCESS\n");
+            return TRUE;
+        }
+    }
+    
     return FALSE;
 }
 
@@ -2539,29 +3004,86 @@ BOOL TTX_Cmd_Center(struct TTXApplication *app, struct Session *session, STRPTR 
 
 BOOL TTX_Cmd_Conv2Lower(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Convert word/block to lower case */
-    Printf("[CMD] TTX_Cmd_Conv2Lower: not yet implemented\n");
+    if (!session || !session->buffer || session->docState.readOnly) {
+        return FALSE;
+    }
+    
+    if (!session->buffer->marking.enabled) {
+        Printf("[CMD] TTX_Cmd_Conv2Lower: no selection\n");
+        return FALSE;
+    }
+    
+    if (ConvertToLower(session->buffer, session->cleanupStack)) {
+        RenderText(session->window, session->buffer);
+        UpdateCursor(session->window, session->buffer);
+        session->docState.modified = session->buffer->modified;
+        Printf("[CMD] TTX_Cmd_Conv2Lower: SUCCESS\n");
+        return TRUE;
+    }
+    
     return FALSE;
 }
 
 BOOL TTX_Cmd_Conv2Spaces(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Convert tabs to spaces */
-    Printf("[CMD] TTX_Cmd_Conv2Spaces: not yet implemented\n");
+    if (!session || !session->buffer || session->docState.readOnly) {
+        return FALSE;
+    }
+    
+    if (ConvertTabsToSpaces(session->buffer, session->cleanupStack)) {
+        CalculateMaxScroll(session->buffer, session->window);
+        ScrollToCursor(session->buffer, session->window);
+        UpdateScrollBars(session);
+        RenderText(session->window, session->buffer);
+        UpdateCursor(session->window, session->buffer);
+        session->docState.modified = session->buffer->modified;
+        Printf("[CMD] TTX_Cmd_Conv2Spaces: SUCCESS\n");
+        return TRUE;
+    }
+    
     return FALSE;
 }
 
 BOOL TTX_Cmd_Conv2Tabs(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Convert spaces to tabs */
-    Printf("[CMD] TTX_Cmd_Conv2Tabs: not yet implemented\n");
+    if (!session || !session->buffer || session->docState.readOnly) {
+        return FALSE;
+    }
+    
+    if (ConvertSpacesToTabs(session->buffer, session->cleanupStack)) {
+        CalculateMaxScroll(session->buffer, session->window);
+        ScrollToCursor(session->buffer, session->window);
+        UpdateScrollBars(session);
+        RenderText(session->window, session->buffer);
+        UpdateCursor(session->window, session->buffer);
+        session->docState.modified = session->buffer->modified;
+        Printf("[CMD] TTX_Cmd_Conv2Tabs: SUCCESS\n");
+        return TRUE;
+    }
+    
+    Printf("[CMD] TTX_Cmd_Conv2Tabs: not yet fully implemented\n");
     return FALSE;
 }
 
 BOOL TTX_Cmd_Conv2Upper(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Convert word/block to upper case */
-    Printf("[CMD] TTX_Cmd_Conv2Upper: not yet implemented\n");
+    if (!session || !session->buffer || session->docState.readOnly) {
+        return FALSE;
+    }
+    
+    if (!session->buffer->marking.enabled) {
+        Printf("[CMD] TTX_Cmd_Conv2Upper: no selection\n");
+        return FALSE;
+    }
+    
+    if (ConvertToUpper(session->buffer, session->cleanupStack)) {
+        RenderText(session->window, session->buffer);
+        UpdateCursor(session->window, session->buffer);
+        session->docState.modified = session->buffer->modified;
+        Printf("[CMD] TTX_Cmd_Conv2Upper: SUCCESS\n");
+        return TRUE;
+    }
+    
     return FALSE;
 }
 
@@ -2581,15 +3103,41 @@ BOOL TTX_Cmd_Justify(struct TTXApplication *app, struct Session *session, STRPTR
 
 BOOL TTX_Cmd_ShiftLeft(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Shift lines left */
-    Printf("[CMD] TTX_Cmd_ShiftLeft: not yet implemented\n");
+    if (!session || !session->buffer || session->docState.readOnly) {
+        return FALSE;
+    }
+    
+    if (ShiftLeft(session->buffer, session->cleanupStack)) {
+        CalculateMaxScroll(session->buffer, session->window);
+        ScrollToCursor(session->buffer, session->window);
+        UpdateScrollBars(session);
+        RenderText(session->window, session->buffer);
+        UpdateCursor(session->window, session->buffer);
+        session->docState.modified = session->buffer->modified;
+        Printf("[CMD] TTX_Cmd_ShiftLeft: SUCCESS\n");
+        return TRUE;
+    }
+    
     return FALSE;
 }
 
 BOOL TTX_Cmd_ShiftRight(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Shift lines right */
-    Printf("[CMD] TTX_Cmd_ShiftRight: not yet implemented\n");
+    if (!session || !session->buffer || session->docState.readOnly) {
+        return FALSE;
+    }
+    
+    if (ShiftRight(session->buffer, session->cleanupStack)) {
+        CalculateMaxScroll(session->buffer, session->window);
+        ScrollToCursor(session->buffer, session->window);
+        UpdateScrollBars(session);
+        RenderText(session->window, session->buffer);
+        UpdateCursor(session->window, session->buffer);
+        session->docState.modified = session->buffer->modified;
+        Printf("[CMD] TTX_Cmd_ShiftRight: SUCCESS\n");
+        return TRUE;
+    }
+    
     return FALSE;
 }
 

@@ -462,5 +462,29 @@ ULONG GetCharWidth(struct RastPort *rp, UBYTE ch);
 ULONG GetLineHeight(struct RastPort *rp);
 VOID UpdateScrollBars(struct Session *session);
 VOID CalculateMaxScroll(struct TextBuffer *buffer, struct Window *window);
+/* Delete operations */
+BOOL DeleteEOL(struct TextBuffer *buffer, struct CleanupStack *stack);
+BOOL DeleteEOW(struct TextBuffer *buffer, struct CleanupStack *stack);
+BOOL DeleteSOL(struct TextBuffer *buffer, struct CleanupStack *stack);
+BOOL DeleteSOW(struct TextBuffer *buffer, struct CleanupStack *stack);
+BOOL DeleteLine(struct TextBuffer *buffer, struct CleanupStack *stack);
+/* Text insertion operations */
+BOOL InsertText(struct TextBuffer *buffer, STRPTR text, struct CleanupStack *stack);
+UBYTE GetCharAtCursor(struct TextBuffer *buffer);
+STRPTR GetCurrentLine(struct TextBuffer *buffer, struct CleanupStack *stack);
+BOOL SetCharAtCursor(struct TextBuffer *buffer, UBYTE ch, struct CleanupStack *stack);
+BOOL SwapChars(struct TextBuffer *buffer, struct CleanupStack *stack);
+BOOL ToggleCharCase(struct TextBuffer *buffer, struct CleanupStack *stack);
+/* Word operations */
+STRPTR GetWordAtCursor(struct TextBuffer *buffer, struct CleanupStack *stack);
+BOOL ReplaceWordAtCursor(struct TextBuffer *buffer, STRPTR newWord, struct CleanupStack *stack);
+/* Case conversion operations */
+BOOL ConvertToUpper(struct TextBuffer *buffer, struct CleanupStack *stack);
+BOOL ConvertToLower(struct TextBuffer *buffer, struct CleanupStack *stack);
+/* Indentation operations */
+BOOL ShiftLeft(struct TextBuffer *buffer, struct CleanupStack *stack);
+BOOL ShiftRight(struct TextBuffer *buffer, struct CleanupStack *stack);
+BOOL ConvertTabsToSpaces(struct TextBuffer *buffer, struct CleanupStack *stack);
+BOOL ConvertSpacesToTabs(struct TextBuffer *buffer, struct CleanupStack *stack);
 
 #endif /* TTX_H */
