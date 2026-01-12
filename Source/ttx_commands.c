@@ -1841,23 +1841,101 @@ BOOL TTX_Cmd_UpdateView(struct TTXApplication *app, struct Session *session, STR
 
 BOOL TTX_Cmd_CopyBlk(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Implement block copying to clipboard */
-    Printf("[CMD] TTX_Cmd_CopyBlk: not yet implemented\n");
-    return FALSE;
+    STRPTR blockText = NULL;
+    
+    if (!session || !session->buffer || !session->buffer->marking.enabled) {
+        Printf("[CMD] TTX_Cmd_CopyBlk: FAIL (no selection)\n");
+        return FALSE;
+    }
+    
+    /* Get selected text */
+    blockText = GetBlock(session->buffer, session->cleanupStack);
+    if (!blockText) {
+        Printf("[CMD] TTX_Cmd_CopyBlk: FAIL (GetBlock failed)\n");
+        return FALSE;
+    }
+    
+    /* TODO: Copy to clipboard - for now just print */
+    Printf("[CMD] TTX_Cmd_CopyBlk: SUCCESS (text='%s')\n", blockText);
+    
+    /* Free block text */
+    freeVec(blockText);
+    
+    return TRUE;
 }
 
 BOOL TTX_Cmd_CutBlk(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Implement block cutting to clipboard */
-    Printf("[CMD] TTX_Cmd_CutBlk: not yet implemented\n");
-    return FALSE;
+    STRPTR blockText = NULL;
+    
+    if (!session || !session->buffer || session->docState.readOnly) {
+        return FALSE;
+    }
+    
+    if (!session->buffer->marking.enabled) {
+        Printf("[CMD] TTX_Cmd_CutBlk: FAIL (no selection)\n");
+        return FALSE;
+    }
+    
+    /* Get selected text */
+    blockText = GetBlock(session->buffer, session->cleanupStack);
+    if (!blockText) {
+        Printf("[CMD] TTX_Cmd_CutBlk: FAIL (GetBlock failed)\n");
+        return FALSE;
+    }
+    
+    /* TODO: Copy to clipboard - for now just print */
+    Printf("[CMD] TTX_Cmd_CutBlk: SUCCESS (text='%s')\n", blockText);
+    
+    /* Delete the block */
+    if (!DeleteBlock(session->buffer, session->cleanupStack)) {
+        freeVec(blockText);
+        Printf("[CMD] TTX_Cmd_CutBlk: FAIL (DeleteBlock failed)\n");
+        return FALSE;
+    }
+    
+    /* Free block text */
+    freeVec(blockText);
+    
+    /* Update display */
+    CalculateMaxScroll(session->buffer, session->window);
+    ScrollToCursor(session->buffer, session->window);
+    UpdateScrollBars(session);
+    RenderText(session->window, session->buffer);
+    UpdateCursor(session->window, session->buffer);
+    session->docState.modified = session->buffer->modified;
+    
+    Printf("[CMD] TTX_Cmd_CutBlk: SUCCESS\n");
+    return TRUE;
 }
 
 BOOL TTX_Cmd_DeleteBlk(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Implement block deletion */
-    Printf("[CMD] TTX_Cmd_DeleteBlk: not yet implemented\n");
-    return FALSE;
+    if (!session || !session->buffer || session->docState.readOnly) {
+        return FALSE;
+    }
+    
+    if (!session->buffer->marking.enabled) {
+        Printf("[CMD] TTX_Cmd_DeleteBlk: FAIL (no selection)\n");
+        return FALSE;
+    }
+    
+    /* Delete the block */
+    if (!DeleteBlock(session->buffer, session->cleanupStack)) {
+        Printf("[CMD] TTX_Cmd_DeleteBlk: FAIL (DeleteBlock failed)\n");
+        return FALSE;
+    }
+    
+    /* Update display */
+    CalculateMaxScroll(session->buffer, session->window);
+    ScrollToCursor(session->buffer, session->window);
+    UpdateScrollBars(session);
+    RenderText(session->window, session->buffer);
+    UpdateCursor(session->window, session->buffer);
+    session->docState.modified = session->buffer->modified;
+    
+    Printf("[CMD] TTX_Cmd_DeleteBlk: SUCCESS\n");
+    return TRUE;
 }
 
 BOOL TTX_Cmd_EncryptBlk(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -1883,9 +1961,19 @@ BOOL TTX_Cmd_GetBlkInfo(struct TTXApplication *app, struct Session *session, STR
 
 BOOL TTX_Cmd_MarkBlk(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Implement block marking */
-    Printf("[CMD] TTX_Cmd_MarkBlk: not yet implemented\n");
-    return FALSE;
+    if (!session || !session->buffer) {
+        return FALSE;
+    }
+    
+    /* Mark all text */
+    MarkAllBlock(session->buffer);
+    
+    /* Update display to show selection */
+    RenderText(session->window, session->buffer);
+    UpdateCursor(session->window, session->buffer);
+    
+    Printf("[CMD] TTX_Cmd_MarkBlk: SUCCESS\n");
+    return TRUE;
 }
 
 /* ============================================================================
@@ -2041,17 +2129,16 @@ BOOL TTX_Cmd_MoveEOL(struct TTXApplication *app, struct Session *session, STRPTR
     }
     
     /* Move to end of line */
-    if (session->buffer->cursorY < session->buffer->lineCount) {
-        session->buffer->cursorX = session->buffer->lines[session->buffer->cursorY].length;
-        ScrollToCursor(session->buffer, session->window);
-        UpdateScrollBars(session);
-        RenderText(session->window, session->buffer);
-        UpdateCursor(session->window, session->buffer);
-        Printf("[CMD] TTX_Cmd_MoveEOL: SUCCESS\n");
-        return TRUE;
+    if (!MoveEndOfLine(session->buffer)) {
+        return FALSE;
     }
     
-    return FALSE;
+    ScrollToCursor(session->buffer, session->window);
+    UpdateScrollBars(session);
+    RenderText(session->window, session->buffer);
+    UpdateCursor(session->window, session->buffer);
+    Printf("[CMD] TTX_Cmd_MoveEOL: SUCCESS\n");
+    return TRUE;
 }
 
 BOOL TTX_Cmd_MoveLastChange(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -2095,9 +2182,21 @@ BOOL TTX_Cmd_MoveNextTabStop(struct TTXApplication *app, struct Session *session
 
 BOOL TTX_Cmd_MoveNextWord(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Move to next word */
-    Printf("[CMD] TTX_Cmd_MoveNextWord: not yet implemented\n");
-    return FALSE;
+    if (!session || !session->buffer) {
+        return FALSE;
+    }
+    
+    if (!MoveNextWord(session->buffer)) {
+        return FALSE;
+    }
+    
+    ScrollToCursor(session->buffer, session->window);
+    UpdateScrollBars(session);
+    RenderText(session->window, session->buffer);
+    UpdateCursor(session->window, session->buffer);
+    
+    Printf("[CMD] TTX_Cmd_MoveNextWord: SUCCESS\n");
+    return TRUE;
 }
 
 BOOL TTX_Cmd_MovePrevTabStop(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -2109,9 +2208,21 @@ BOOL TTX_Cmd_MovePrevTabStop(struct TTXApplication *app, struct Session *session
 
 BOOL TTX_Cmd_MovePrevWord(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Move to previous word */
-    Printf("[CMD] TTX_Cmd_MovePrevWord: not yet implemented\n");
-    return FALSE;
+    if (!session || !session->buffer) {
+        return FALSE;
+    }
+    
+    if (!MovePrevWord(session->buffer)) {
+        return FALSE;
+    }
+    
+    ScrollToCursor(session->buffer, session->window);
+    UpdateScrollBars(session);
+    RenderText(session->window, session->buffer);
+    UpdateCursor(session->window, session->buffer);
+    
+    Printf("[CMD] TTX_Cmd_MovePrevWord: SUCCESS\n");
+    return TRUE;
 }
 
 BOOL TTX_Cmd_MoveRight(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -2156,7 +2267,10 @@ BOOL TTX_Cmd_MoveSOL(struct TTXApplication *app, struct Session *session, STRPTR
     }
     
     /* Move to start of line */
-    session->buffer->cursorX = 0;
+    if (!MoveStartOfLine(session->buffer)) {
+        return FALSE;
+    }
+    
     ScrollToCursor(session->buffer, session->window);
     UpdateScrollBars(session);
     RenderText(session->window, session->buffer);

@@ -88,6 +88,15 @@ struct TextLine {
     ULONG allocated;
 };
 
+/* Text selection/marking structure */
+struct TextMarking {
+    BOOL enabled;                /* Boolean that indicates whether block is on/off */
+    ULONG startY;                /* Line where marking starts */
+    ULONG startX;                /* X position of start */
+    ULONG stopY;                 /* Line where marking ends */
+    ULONG stopX;                 /* X position of stop */
+};
+
 struct TextBuffer {
     struct TextLine *lines;
     ULONG lineCount;
@@ -104,6 +113,7 @@ struct TextBuffer {
     SHORT scrollXShift;  /* Scaling shift factor for horizontal scroll (for values > 0xFFFF) */
     SHORT scrollYShift;  /* Scaling shift factor for vertical scroll (for values > 0xFFFF) */
     BOOL modified;
+    struct TextMarking marking;  /* Text selection/marking */
     /* Graphics v39+ features for optimized rendering */
     struct BitMap *superBitMap;  /* Super bitmap for off-screen rendering (larger than window) */
     ULONG superWidth;             /* Width of super bitmap in pixels */
@@ -172,6 +182,10 @@ struct Session {
     /* Document state - file and buffer */
     struct DocumentState docState;      /* Document metadata */
     struct TextBuffer *buffer;          /* Text buffer (always present, even when window closed) */
+    /* Mouse selection state */
+    BOOL mouseSelecting;                /* TRUE if mouse button is down and we're selecting */
+    ULONG selectStartX;                 /* Selection start X position */
+    ULONG selectStartY;                 /* Selection start Y position */
 };
 
 /* Prop gadget IDs */
@@ -431,6 +445,19 @@ VOID FreeSuperBitMap(struct TextBuffer *buffer);
 VOID RenderText(struct Window *window, struct TextBuffer *buffer);
 VOID UpdateCursor(struct Window *window, struct TextBuffer *buffer);
 VOID ScrollToCursor(struct TextBuffer *buffer, struct Window *window);
+/* Block operations */
+STRPTR GetBlock(struct TextBuffer *buffer, struct CleanupStack *stack);
+BOOL DeleteBlock(struct TextBuffer *buffer, struct CleanupStack *stack);
+VOID MarkAllBlock(struct TextBuffer *buffer);
+VOID SetMarking(struct TextBuffer *buffer, ULONG startY, ULONG startX, ULONG stopY, ULONG stopX);
+VOID ClearMarking(struct TextBuffer *buffer);
+/* Word navigation */
+BOOL MoveNextWord(struct TextBuffer *buffer);
+BOOL MovePrevWord(struct TextBuffer *buffer);
+BOOL MoveEndOfLine(struct TextBuffer *buffer);
+BOOL MoveStartOfLine(struct TextBuffer *buffer);
+BOOL MoveEndOfWord(struct TextBuffer *buffer);
+BOOL MoveStartOfWord(struct TextBuffer *buffer);
 ULONG GetCharWidth(struct RastPort *rp, UBYTE ch);
 ULONG GetLineHeight(struct RastPort *rp);
 VOID UpdateScrollBars(struct Session *session);

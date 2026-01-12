@@ -57,6 +57,13 @@ BOOL InitTextBuffer(struct TextBuffer *buffer, struct CleanupStack *stack)
     buffer->scrollYShift = 0;  /* No scaling initially */
     buffer->modified = FALSE;
     
+    /* Initialize text selection/marking */
+    buffer->marking.enabled = FALSE;
+    buffer->marking.startY = 0;
+    buffer->marking.startX = 0;
+    buffer->marking.stopY = 0;
+    buffer->marking.stopX = 0;
+    
     /* Initialize graphics v39+ features */
     buffer->superBitMap = NULL;
     buffer->superWidth = 0;
@@ -871,8 +878,69 @@ VOID RenderText(struct Window *window, struct TextBuffer *buffer)
     y = window->BorderTop;
     for (i = startY; i < endY && y < maxY; i++) {
         if (i < buffer->lineCount) {
+            ULONG selectStartX = 0;
+            ULONG selectStopX = 0;
+            BOOL lineHasSelection = FALSE;
+            ULONG selectStartPixel = 0;
+            ULONG selectStopPixel = 0;
+            
             lineText = buffer->lines[i].text;
             lineLen = buffer->lines[i].length;
+            
+            /* Check if this line has selection */
+            if (buffer->marking.enabled) {
+                ULONG markStartY = buffer->marking.startY;
+                ULONG markStartX = buffer->marking.startX;
+                ULONG markStopY = buffer->marking.stopY;
+                ULONG markStopX = buffer->marking.stopX;
+                
+                /* Normalize marking (ensure start is before stop) */
+                if (markStopY < markStartY || (markStopY == markStartY && markStopX < markStartX)) {
+                    ULONG tempY = markStartY;
+                    ULONG tempX = markStartX;
+                    markStartY = markStopY;
+                    markStartX = markStopX;
+                    markStopY = tempY;
+                    markStopX = tempX;
+                }
+                
+                /* Check if this line is within selection */
+                if (i >= markStartY && i <= markStopY) {
+                    if (i == markStartY && i == markStopY) {
+                        /* Single line selection */
+                        if (markStartX < lineLen && markStopX > 0) {
+                            selectStartX = markStartX;
+                            selectStopX = markStopX;
+                            if (selectStopX > lineLen) {
+                                selectStopX = lineLen;
+                            }
+                            lineHasSelection = TRUE;
+                        }
+                    } else if (i == markStartY) {
+                        /* First line of multi-line selection */
+                        if (markStartX < lineLen) {
+                            selectStartX = markStartX;
+                            selectStopX = lineLen;
+                            lineHasSelection = TRUE;
+                        }
+                    } else if (i == markStopY) {
+                        /* Last line of multi-line selection */
+                        if (markStopX > 0) {
+                            selectStartX = 0;
+                            selectStopX = markStopX;
+                            if (selectStopX > lineLen) {
+                                selectStopX = lineLen;
+                            }
+                            lineHasSelection = TRUE;
+                        }
+                    } else {
+                        /* Middle line of multi-line selection */
+                        selectStartX = 0;
+                        selectStopX = lineLen;
+                        lineHasSelection = TRUE;
+                    }
+                }
+            }
             
             /* ScollX_PageW = ScrollX + PageW + 1 (maximum character index that should be visible) */
             maxVisibleChar = 0;
@@ -941,13 +1009,85 @@ VOID RenderText(struct Window *window, struct TextBuffer *buffer)
                         actualChars++;
                     }
                     
-                    /* Render only the characters that fit */
-                    if (actualChars > 0) {
-                        Move(rp, textX, y + rp->Font->tf_Baseline);
-                        Text(rp, &lineText[renderStart], actualChars);
-                        textEndPixel = testX;  /* Use measured width */
+                    /* Render text in segments if there's a selection on this line */
+                    if (lineHasSelection && selectStartX < renderStart + actualChars && selectStopX > renderStart) {
+                        /* Render text with selection highlighting */
+                        ULONG segStart = renderStart;
+                        ULONG segEnd = renderStart + actualChars;
+                        ULONG currentX = textX;
+                        ULONG charIdx = 0;
+                        
+                        /* Segment 1: Before selection (if any) */
+                        if (selectStartX > renderStart) {
+                            ULONG beforeLen = (selectStartX < segEnd) ? (selectStartX - renderStart) : actualChars;
+                            if (beforeLen > 0) {
+                                SetAPen(rp, 1);  /* Black text */
+                                Move(rp, currentX, y + rp->Font->tf_Baseline);
+                                Text(rp, &lineText[renderStart], beforeLen);
+                                /* Calculate pixel position after this segment */
+                                for (charIdx = 0; charIdx < beforeLen; charIdx++) {
+                                    currentX += GetCharWidth(rp, (UBYTE)lineText[renderStart + charIdx]);
+                                }
+                            }
+                        }
+                        
+                        /* Segment 2: Selection (inverted colors) */
+                        if (selectStopX > renderStart && selectStartX < segEnd) {
+                            ULONG selStart = (selectStartX > renderStart) ? selectStartX : renderStart;
+                            ULONG selEnd = (selectStopX < segEnd) ? selectStopX : segEnd;
+                            ULONG selLen = selEnd - selStart;
+                            
+                            if (selLen > 0 && selStart < lineLen) {
+                                /* Draw selection background */
+                                ULONG selStartPixel = currentX;
+                                ULONG selStopPixel = currentX;
+                                ULONG measureIdx = 0;
+                                
+                                for (measureIdx = selStart; measureIdx < selEnd && measureIdx < lineLen; measureIdx++) {
+                                    selStopPixel += GetCharWidth(rp, (UBYTE)lineText[measureIdx]);
+                                }
+                                
+                                SetBPen(rp, 1);  /* Black background */
+                                SetAPen(rp, 2);  /* Grey text */
+                                SetDrMd(rp, JAM2);
+                                RectFill(rp, selStartPixel, y, selStopPixel - 1, y + lineHeight - 1);
+                                
+                                /* Render selected text with inverted colors */
+                                SetAPen(rp, 2);  /* Grey text on black background */
+                                Move(rp, selStartPixel, y + rp->Font->tf_Baseline);
+                                Text(rp, &lineText[selStart], selLen);
+                                
+                                currentX = selStopPixel;
+                                SetAPen(rp, 1);  /* Restore black text */
+                                SetDrMd(rp, JAM1);
+                            }
+                        }
+                        
+                        /* Segment 3: After selection (if any) */
+                        if (selectStopX < segEnd) {
+                            ULONG afterStart = selectStopX;
+                            ULONG afterLen = segEnd - afterStart;
+                            if (afterLen > 0 && afterStart < lineLen) {
+                                SetAPen(rp, 1);  /* Black text */
+                                Move(rp, currentX, y + rp->Font->tf_Baseline);
+                                Text(rp, &lineText[afterStart], afterLen);
+                                /* Calculate pixel position after this segment */
+                                for (charIdx = 0; charIdx < afterLen; charIdx++) {
+                                    currentX += GetCharWidth(rp, (UBYTE)lineText[afterStart + charIdx]);
+                                }
+                            }
+                        }
+                        
+                        textEndPixel = currentX;
                     } else {
-                        textEndPixel = textStartX;
+                        /* No selection on this line - render normally */
+                        if (actualChars > 0) {
+                            Move(rp, textX, y + rp->Font->tf_Baseline);
+                            Text(rp, &lineText[renderStart], actualChars);
+                            textEndPixel = testX;  /* Use measured width */
+                        } else {
+                            textEndPixel = textStartX;
+                        }
                     }
                 } else {
                     /* No text to render - start position is textStartX */

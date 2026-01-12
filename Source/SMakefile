@@ -8,10 +8,10 @@
 PROGRAM = TTX
 
 # Source files
-SRCS = ttx.c ttx_text.c ttx_commands.c
+SRCS = ttx.c ttx_text.c ttx_commands.c ttx_block.c
 
 # Object files
-OBJS = ttx.o ttx_text.o ttx_commands.o
+OBJS = ttx.o ttx_text.o ttx_commands.o ttx_block.o
 
 # Compiler and linker
 CC = sc
@@ -40,9 +40,13 @@ ttx_text.o: ttx_text.c ttx.h
 ttx_commands.o: ttx_commands.c ttx.h
 	$(CC) ttx_commands.c OBJNAME=ttx_commands.o IDIR=include: 
 
+# Compile TTX block operations
+ttx_block.o: ttx_block.c ttx.h
+	$(CC) ttx_block.c OBJNAME=ttx_block.o IDIR=include: 
+
 # Clean target
 clean:
-	Delete $(OBJS) $(PROGRAM) ttx.o ttx_text.o ttx_commands.o
+	Delete $(OBJS) $(PROGRAM) ttx.o ttx_text.o ttx_commands.o ttx_block.o
 
 # Install target
 install:

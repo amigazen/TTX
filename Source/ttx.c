@@ -1225,6 +1225,9 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
     session->vertPropGadget = NULL;  /* Vertical scroll bar prop gadget */
     session->horizPropGadget = NULL;  /* Horizontal scroll bar prop gadget */
     session->buffer = NULL;
+    session->mouseSelecting = FALSE;  /* Mouse selection state */
+    session->selectStartX = 0;
+    session->selectStartY = 0;
     session->next = NULL;  /* Initialize list pointers */
     session->prev = NULL;
     
@@ -1234,7 +1237,7 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
     session->windowState.innerWidth = 600;  /* Default size */
     session->windowState.innerHeight = 400;
     session->windowState.flags = WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_SIZEGADGET | WFLG_CLOSEGADGET | WFLG_ACTIVATE | WFLG_SMART_REFRESH | WFLG_NEWLOOKMENUS | WFLG_REPORTMOUSE;
-    session->windowState.idcmpFlags = IDCMP_CLOSEWINDOW | IDCMP_VANILLAKEY | IDCMP_RAWKEY | IDCMP_REFRESHWINDOW | IDCMP_NEWSIZE | IDCMP_MOUSEBUTTONS | IDCMP_MENUPICK | IDCMP_IDCMPUPDATE;
+    session->windowState.idcmpFlags = IDCMP_CLOSEWINDOW | IDCMP_VANILLAKEY | IDCMP_RAWKEY | IDCMP_REFRESHWINDOW | IDCMP_NEWSIZE | IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE | IDCMP_MENUPICK | IDCMP_IDCMPUPDATE;
     session->windowState.title = NULL;
     session->windowState.screenTitle = NULL;
     session->windowState.pubScreenName = NULL;
@@ -1904,12 +1907,75 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                     break;
                     
                 case IDCMP_MOUSEBUTTONS:
-            /* Handle mouse clicks to position cursor */
-            if (imsg->Code == IECODE_LBUTTON && !(imsg->Code & 0x80)) {
-                /* Left mouse button press (not release) */
+            /* Handle mouse clicks to position cursor and start/end selection */
+            {
+                ULONG newCursorX = 0;
+                ULONG newCursorY = 0;
+                BOOL isButtonPress = FALSE;
+                BOOL isButtonRelease = FALSE;
+                
+                /* Check for left button press (not release) */
+                if (imsg->Code == IECODE_LBUTTON && !(imsg->Code & 0x80)) {
+                    isButtonPress = TRUE;
+                }
+                /* Check for left button release */
+                if (imsg->Code == (IECODE_LBUTTON | IECODE_UP_PREFIX)) {
+                    isButtonRelease = TRUE;
+                }
+                
+                if (isButtonPress || isButtonRelease) {
+                    /* Convert mouse coordinates to cursor position */
+                    MouseToCursor(session->buffer, session->window, imsg->MouseX, imsg->MouseY, &newCursorX, &newCursorY);
+                    
+                    /* Update cursor position */
+                    if (session->buffer && session->buffer->lines && newCursorY < session->buffer->lineCount) {
+                        session->buffer->cursorY = newCursorY;
+                        if (newCursorX <= session->buffer->lines[newCursorY].length) {
+                            session->buffer->cursorX = newCursorX;
+                        } else {
+                            session->buffer->cursorX = session->buffer->lines[newCursorY].length;
+                        }
+                    }
+                    
+                    if (isButtonPress) {
+                        /* Start selection */
+                        session->mouseSelecting = TRUE;
+                        session->selectStartX = session->buffer->cursorX;
+                        session->selectStartY = session->buffer->cursorY;
+                        /* Set marking start */
+                        SetMarking(session->buffer, session->selectStartY, session->selectStartX, 
+                                  session->selectStartY, session->selectStartX);
+                        Printf("[EVENT] IDCMP_MOUSEBUTTONS: selection started at (%lu,%lu)\n", 
+                               session->selectStartX, session->selectStartY);
+                    } else if (isButtonRelease) {
+                        /* End selection */
+                        if (session->mouseSelecting) {
+                            /* Update marking end */
+                            SetMarking(session->buffer, session->selectStartY, session->selectStartX,
+                                      session->buffer->cursorY, session->buffer->cursorX);
+                            session->mouseSelecting = FALSE;
+                            Printf("[EVENT] IDCMP_MOUSEBUTTONS: selection ended at (%lu,%lu)\n",
+                                   session->buffer->cursorX, session->buffer->cursorY);
+                        }
+                    }
+                    
+                    CalculateMaxScroll(session->buffer, session->window);
+                    ScrollToCursor(session->buffer, session->window);
+                    UpdateScrollBars(session);
+                    RenderText(session->window, session->buffer);
+                    UpdateCursor(session->window, session->buffer);
+                    result = TRUE;
+                }
+            }
+                    break;
+                    
+                case IDCMP_MOUSEMOVE:
+            /* Handle mouse movement during selection */
+            if (session->mouseSelecting) {
                 ULONG newCursorX = 0;
                 ULONG newCursorY = 0;
                 
+                /* Convert mouse coordinates to cursor position */
                 MouseToCursor(session->buffer, session->window, imsg->MouseX, imsg->MouseY, &newCursorX, &newCursorY);
                 
                 /* Update cursor position */
@@ -1922,7 +1988,11 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                     }
                 }
                 
-                CalculateMaxScroll(session->buffer, session->window);
+                /* Update marking end */
+                SetMarking(session->buffer, session->selectStartY, session->selectStartX,
+                          session->buffer->cursorY, session->buffer->cursorX);
+                
+                /* Scroll if cursor moved outside visible area */
                 ScrollToCursor(session->buffer, session->window);
                 UpdateScrollBars(session);
                 RenderText(session->window, session->buffer);
