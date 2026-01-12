@@ -1439,12 +1439,14 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
             /* GA_Width sets explicit width (border size minus padding) */
             /* GA_Top sets absolute top position (border top plus padding) */
             /* GA_RelHeight with negative value makes it span full height accounting for top/bottom */
-            /* Prop gadgets require PGA_Total, PGA_Visible, and PGA_Top to be set at creation */
+            /* Important: Must stop before horizontal scroll bar at bottom */
+            /* The horizontal scroll bar is at the bottom border, so vertical scroll bar should stop there */
+            /* Height = window height - top border - bottom border (where horizontal scroll bar is) */
             session->vertPropGadget = (struct Gadget *)NewObject(NULL, PROPGCLASS,
                 GA_RelRight, -session->window->BorderRight + 5,  /* Position from right edge */
                 GA_Width, session->window->BorderRight - 8,        /* Width of slider */
                 GA_Top, session->window->BorderTop + 2,           /* Top position */
-                GA_RelHeight, -(session->window->BorderTop + session->window->BorderBottom + 4),  /* Height */
+                GA_RelHeight, -(session->window->BorderTop + session->window->BorderBottom + 4),  /* Height - stops before horizontal scroll bar */
                 GA_Next, gadgetList,
                 ICA_TARGET, ICTARGET_IDCMP,
                 ICA_MAP, icamap,
@@ -1486,12 +1488,14 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
             /* GA_RelWidth with negative value makes it span full width accounting for left/right */
             /* GA_Height sets explicit height (border size minus padding) */
             /* Prop gadgets require PGA_Total, PGA_Visible, and PGA_Top to be set at creation */
+            /* Note: Horizontal scroll bar must be added BEFORE vertical scroll bar in the chain */
+            /* so that it appears below the text area and doesn't interfere with vertical scrolling */
             session->horizPropGadget = (struct Gadget *)NewObject(NULL, PROPGCLASS,
                 GA_Left, session->window->BorderLeft,              /* Start at left border */
                 GA_RelBottom, -session->window->BorderBottom + 3,  /* Position from bottom */
                 GA_RelWidth, -(session->window->BorderLeft + session->window->BorderRight + 2),  /* Width */
                 GA_Height, session->window->BorderBottom - 4,      /* Height of slider */
-                GA_Next, gadgetList,
+                GA_Next, gadgetList,  /* Chain to vertical scroll bar (if it exists) */
                 ICA_TARGET, ICTARGET_IDCMP,
                 ICA_MAP, icamap,
                 PGA_Freedom, FREEHORIZ,
@@ -1507,6 +1511,8 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
             if (session->horizPropGadget) {
                 /* Set relative positioning flags for horizontal scrollbar */
                 session->horizPropGadget->Flags |= GFLG_RELBOTTOM | GFLG_RELWIDTH;
+                /* Make horizontal scroll bar the head of the gadget list */
+                /* This ensures it's processed first and appears at the bottom */
                 gadgetList = session->horizPropGadget;
                 Printf("[INIT] TTX_CreateSession: horizontal prop gadget created\n");
             }
@@ -1917,7 +1923,6 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                 BOOL processed = FALSE;
                 
                 /* Handle VANILLAKEY first - these are already converted by Intuition */
-                /* Annotate handles VANILLAKEY directly for printable characters */
                 if (imsg->Class == IDCMP_VANILLAKEY) {
                     /* Filter out arrow keys that might come as VANILLAKEY */
                     /* Arrow keys should be handled as RAWKEY, but some systems might send them as VANILLAKEY */
@@ -2205,27 +2210,40 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app, struct IntuiMessage 
                             result = TRUE;
                         } else if (gadgetID == GID_HORIZ_PROP) {
                             /* Horizontal scroll bar moved */
+                            Printf("[EVENT] IDCMP_IDCMPUPDATE: horizontal scroll bar (gadgetID=%lu)\n", gadgetID);
                             gadget = session->horizPropGadget;
                             if (gadget && session->buffer) {
                                 GetAttr(PGA_Top, gadget, &scaledValue);
+                                Printf("[EVENT] IDCMP_IDCMPUPDATE: horizontal scroll scaledValue=%lu, scrollXShift=%d\n", 
+                                       scaledValue, session->buffer->scrollXShift);
                                 /* Convert scaled value back to unscaled */
                                 newScrollX = scaledValue;
                                 if (session->buffer->scrollXShift > 0) {
                                     newScrollX <<= session->buffer->scrollXShift;
                                 }
+                                Printf("[EVENT] IDCMP_IDCMPUPDATE: horizontal scroll newScrollX=%lu, current scrollX=%lu, maxScrollX=%lu\n",
+                                       newScrollX, session->buffer->scrollX, session->buffer->maxScrollX);
                                 /* Clamp to valid range */
                                 if (newScrollX > session->buffer->maxScrollX) {
                                     newScrollX = session->buffer->maxScrollX;
                                 }
                                 if (newScrollX != session->buffer->scrollX) {
                                     session->buffer->scrollX = newScrollX;
+                                    Printf("[EVENT] IDCMP_IDCMPUPDATE: horizontal scroll updated to %lu\n", newScrollX);
                                     /* Recalculate max scroll in case it changed */
                                     CalculateMaxScroll(session->buffer, session->window);
                                     RenderText(session->window, session->buffer);
                                     UpdateCursor(session->window, session->buffer);
+                                } else {
+                                    Printf("[EVENT] IDCMP_IDCMPUPDATE: horizontal scroll no change needed\n");
                                 }
+                            } else {
+                                Printf("[EVENT] IDCMP_IDCMPUPDATE: horizontal scroll FAIL (gadget=%lx, buffer=%lx)\n",
+                                       (ULONG)gadget, (ULONG)(session ? session->buffer : NULL));
                             }
                             result = TRUE;
+                        } else {
+                            Printf("[EVENT] IDCMP_IDCMPUPDATE: unknown gadgetID=%lu\n", gadgetID);
                         }
                     }
                     break;

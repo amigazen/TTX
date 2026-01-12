@@ -627,6 +627,11 @@ BOOL CreateSuperBitMap(struct TextBuffer *buffer, struct Window *window)
     struct BitMap *displayBitMap = NULL;
     ULONG depth = 0;
     ULONG flags = 0;
+    ULONG windowWidth = 0;
+    ULONG windowHeight = 0;
+    ULONG tryWidth = 0;
+    ULONG tryHeight = 0;
+    ULONG multiplier = 0;
     
     if (!buffer || !window) {
         return FALSE;
@@ -656,36 +661,81 @@ BOOL CreateSuperBitMap(struct TextBuffer *buffer, struct Window *window)
         depth = 4; /* Default to 16 colors if we can't determine */
     }
     
-    /* Calculate super bitmap size - make it larger than window for scrolling */
-    /* Super bitmap should be at least 2x window size for smooth scrolling */
-    buffer->superWidth = window->Width * 2;
-    buffer->superHeight = window->Height * 2;
+    /* Get window dimensions */
+    windowWidth = window->Width;
+    windowHeight = window->Height;
     
-    /* Ensure minimum size */
-    if (buffer->superWidth < 640) {
-        buffer->superWidth = 640;
+    /* Progressive allocation strategy: try multiple sizes and memory types */
+    /* Strategy 1: Try 1.5x window size with graphics board memory (BMF_DISPLAYABLE) */
+    /* Strategy 2: Try 1.5x window size with chip RAM (no BMF_DISPLAYABLE) */
+    /* Strategy 3: Try 1.25x window size with chip RAM */
+    /* Strategy 4: Try window size + 50% padding with chip RAM */
+    /* Strategy 5: Try just window size with chip RAM */
+    
+    multiplier = 150; /* Start with 1.5x (150%) */
+    flags = BMF_DISPLAYABLE; /* Try graphics board first */
+    
+    while (multiplier >= 100) {
+        /* Calculate size based on multiplier (percentage) */
+        tryWidth = (windowWidth * multiplier) / 100;
+        tryHeight = (windowHeight * multiplier) / 100;
+        
+        /* Ensure we have at least window size */
+        if (tryWidth < windowWidth) {
+            tryWidth = windowWidth;
+        }
+        if (tryHeight < windowHeight) {
+            tryHeight = windowHeight;
+        }
+        
+        /* Try allocation */
+        buffer->superBitMap = AllocBitMap(tryWidth, tryHeight, depth, flags, displayBitMap);
+        
+        if (buffer->superBitMap) {
+            /* Success! */
+            buffer->superWidth = tryWidth;
+            buffer->superHeight = tryHeight;
+            Printf("[GFX] CreateSuperBitMap: SUCCESS (w=%lu, h=%lu, d=%lu, multiplier=%lu%%, flags=0x%08lx, bitmap=%lx)\n",
+                   buffer->superWidth, buffer->superHeight, depth, multiplier, flags, (ULONG)buffer->superBitMap);
+            buffer->needsFullRedraw = TRUE;
+            return TRUE;
+        }
+        
+        /* If BMF_DISPLAYABLE failed, try without it (chip RAM) */
+        if (flags & BMF_DISPLAYABLE) {
+            flags = 0; /* Try chip RAM instead */
+            /* Retry same size with chip RAM */
+            buffer->superBitMap = AllocBitMap(tryWidth, tryHeight, depth, flags, displayBitMap);
+            if (buffer->superBitMap) {
+                buffer->superWidth = tryWidth;
+                buffer->superHeight = tryHeight;
+                Printf("[GFX] CreateSuperBitMap: SUCCESS (w=%lu, h=%lu, d=%lu, multiplier=%lu%%, chip RAM, bitmap=%lx)\n",
+                       buffer->superWidth, buffer->superHeight, depth, multiplier, (ULONG)buffer->superBitMap);
+                buffer->needsFullRedraw = TRUE;
+                return TRUE;
+            }
+            /* Reset flags for next iteration */
+            flags = BMF_DISPLAYABLE;
+        }
+        
+        /* Reduce multiplier and try again */
+        if (multiplier == 150) {
+            multiplier = 125; /* Try 1.25x */
+        } else if (multiplier == 125) {
+            multiplier = 110; /* Try 1.1x (window + 10%) */
+        } else if (multiplier == 110) {
+            multiplier = 100; /* Try 1.0x (just window size) */
+        } else {
+            break; /* Tried all sizes */
+        }
     }
-    if (buffer->superHeight < 512) {
-        buffer->superHeight = 512;
-    }
     
-    /* Allocate super bitmap as friend of display bitmap with BMF_DISPLAYABLE for graphics board support */
-    flags = BMF_DISPLAYABLE; /* Use graphics board memory if available */
-    buffer->superBitMap = AllocBitMap(buffer->superWidth, buffer->superHeight, depth, flags, displayBitMap);
-    
-    if (!buffer->superBitMap) {
-        Printf("[GFX] CreateSuperBitMap: AllocBitMap failed (w=%lu, h=%lu, d=%lu)\n", 
-               buffer->superWidth, buffer->superHeight, depth);
-        buffer->superWidth = 0;
-        buffer->superHeight = 0;
-        return FALSE;
-    }
-    
-    Printf("[GFX] CreateSuperBitMap: SUCCESS (w=%lu, h=%lu, d=%lu, bitmap=%lx)\n",
-           buffer->superWidth, buffer->superHeight, depth, (ULONG)buffer->superBitMap);
-    
-    buffer->needsFullRedraw = TRUE;
-    return TRUE;
+    /* All allocation attempts failed */
+    Printf("[GFX] CreateSuperBitMap: AllocBitMap failed for all sizes (window=%lux%lu, depth=%lu)\n", 
+           windowWidth, windowHeight, depth);
+    buffer->superWidth = 0;
+    buffer->superHeight = 0;
+    return FALSE;
 }
 
 /* Free super bitmap */
@@ -740,53 +790,23 @@ VOID RenderText(struct Window *window, struct TextBuffer *buffer)
         return;
     }
     
-    /* Check if we can use ScrollLayer (Graphics v39+ with super bitmap) */
-    /* GfxBase is a struct GfxBase * which starts with struct Library */
-    if (GfxBase && ((struct Library *)GfxBase)->lib_Version >= 39 && buffer->superBitMap && rp->Layer) {
-        /* Calculate scroll deltas */
-        scrollDeltaX = (LONG)buffer->scrollX - (LONG)buffer->lastScrollX;
-        scrollDeltaY = (LONG)buffer->scrollY - (LONG)buffer->lastScrollY;
-        
-        /* Use ScrollLayer if we have a super bitmap and scroll delta is small */
-        /* For large scrolls or full redraws, we'll do a full render instead */
-        if (!buffer->needsFullRedraw && 
-            scrollDeltaX >= -100 && scrollDeltaX <= 100 &&
-            scrollDeltaY >= -50 && scrollDeltaY <= 50) {
-            useScrollLayer = TRUE;
-        }
-    }
+    /* Disable ScrollLayer for now - it causes display corruption */
+    /* TODO: Properly implement ScrollLayer with correct clipping and exposed area rendering */
+    useScrollLayer = FALSE;
     
     lineHeight = GetLineHeight(rp);
     charWidth = GetCharWidth(rp, 'M');
     
-    /* If using ScrollLayer, scroll first then render only newly exposed areas */
-    if (useScrollLayer && (scrollDeltaX != 0 || scrollDeltaY != 0)) {
-        /* Scroll the layer using hardware acceleration */
-        /* Note: ScrollLayer scrolls in pixels, so we need to convert character/line scroll to pixels */
-        LONG pixelDeltaX = scrollDeltaX * charWidth;
-        LONG pixelDeltaY = scrollDeltaY * lineHeight;
-        
-        if (pixelDeltaX != 0 || pixelDeltaY != 0) {
-            /* ScrollLayer is in layers.library - call via function pointer or direct call */
-            /* Signature: ScrollLayer(dummy, layer, dx, dy) where dummy can be 0 */
-            /* Note: This requires linking against layers.library or amiga.lib */
-            ScrollLayer(0L, rp->Layer, pixelDeltaX, pixelDeltaY);
-        }
-        
-        /* Update last scroll position */
-        buffer->lastScrollX = buffer->scrollX;
-        buffer->lastScrollY = buffer->scrollY;
-        
-        /* TODO: Render only newly exposed areas after scrolling */
-        /* For now, we'll still do a full render but ScrollLayer handles the scrolling */
-        /* This is still faster than full redraw because ScrollLayer uses hardware blitter */
-    }
-    
-    /* Calculate text area boundaries (Annotate-style) */
+    /* Calculate text area boundaries  */
     textStartX = window->BorderLeft + buffer->leftMargin + 1;
     textEndX = window->Width - (window->BorderRight + 1);
     
-    /* Calculate maximum characters per line (PageW) - Annotate style */
+    /* Calculate maximum Y coordinate for text rendering - must stop before horizontal scroll bar */
+    /* The horizontal scroll bar is positioned at the bottom border */
+    /* maxY is the maximum Y coordinate where text can be rendered (exclusive) */
+    maxY = window->Height - window->BorderBottom;  /* Maximum Y coordinate for text (before scroll bar) */
+    
+    /* Calculate maximum characters per line (PageW) */
     /* PageW = (Width - BorderRight - (BorderLeft + leftMargin + 1)) / FontX - 1 */
     if (charWidth > 0) {
         ULONG textWidth = 0;
@@ -796,19 +816,22 @@ VOID RenderText(struct Window *window, struct TextBuffer *buffer)
         } else {
             textWidth = 0;
         }
-        /* Convert to characters, subtract 1 for safety (Annotate does -1) */
+        /* Convert to characters, subtract 1 for safety */
         maxChars = textWidth / charWidth;
         if (maxChars > 0) {
-            maxChars--;  /* -1 for safety margin (like Annotate) */
+            maxChars--; 
         }
         buffer->pageW = maxChars;
     } else {
         buffer->pageW = 0;
     }
     
-    /* Calculate visible lines - ensure we don't render into bottom border */
-    /* Text area height = window height - top border - bottom border */
-    textAreaHeight = window->Height - window->BorderTop - window->BorderBottom;
+    /* Calculate visible lines - ensure we don't render into bottom border or scroll bar */
+    /* Text area height = maxY - top border */
+    textAreaHeight = maxY - window->BorderTop;  /* Actual text area height */
+    if (textAreaHeight < 0) {
+        textAreaHeight = 0;
+    }
     visibleLines = textAreaHeight / lineHeight;
     if (visibleLines == 0 && textAreaHeight > 0) {
         visibleLines = 1;  /* At least show one line if there's any space */
@@ -816,9 +839,6 @@ VOID RenderText(struct Window *window, struct TextBuffer *buffer)
 
     startY = buffer->scrollY;
     endY = startY + visibleLines;
-    if (endY > buffer->lineCount) {
-        endY = buffer->lineCount;
-    }
     if (endY > buffer->lineCount) {
         endY = buffer->lineCount;
     }
@@ -831,29 +851,29 @@ VOID RenderText(struct Window *window, struct TextBuffer *buffer)
     
     /* Clear window background with pen 2 (grey background) */
     /* On Workbench screen: pen 1 = black, pen 2 = grey */
-    /* Clear entire text area first (Annotate clears after, but we clear before for simplicity) */
+    /* Important: Stop before bottom border to avoid painting over horizontal scroll bar */
+    /* maxY was already calculated above */
     SetBPen(rp, 2);  /* Background pen (grey) */
     SetAPen(rp, 2);  /* Also set A pen for compatibility */
     SetDrMd(rp, JAM2);  /* Fill mode - use background pen */
-    /* Clear text area - stop before bottom border to avoid painting over scroll bar */
-    RectFill(rp, textStartX - 1, window->BorderTop,
-             textEndX,
-             window->Height - window->BorderBottom);
+    /* Clear text area - use maxY to ensure we don't paint over scroll bar */
+    if (maxY > window->BorderTop) {
+        RectFill(rp, textStartX - 1, window->BorderTop,
+                 textEndX, maxY - 1);
+    }
     SetDrMd(rp, JAM1);  /* Restore normal text mode */
     SetAPen(rp, 1);  /* Set text pen for rendering */
     
     /* Render visible lines with pen 1 (black text) */
-    /* Annotate-style: track character position and clip to PageW */
     /* Stop rendering before bottom border to avoid painting over scroll bar */
+    /* maxY was already calculated above */
     SetAPen(rp, 1);
     y = window->BorderTop;
-    maxY = window->Height - window->BorderBottom;  /* Maximum Y coordinate for text */
     for (i = startY; i < endY && y < maxY; i++) {
         if (i < buffer->lineCount) {
             lineText = buffer->lines[i].text;
             lineLen = buffer->lines[i].length;
             
-            /* Annotate-style: Calculate maximum visible character index */
             /* ScollX_PageW = ScrollX + PageW + 1 (maximum character index that should be visible) */
             maxVisibleChar = 0;
             if (buffer->pageW > 0 && buffer->scrollX + buffer->pageW + 1 < lineLen) {
@@ -863,7 +883,25 @@ VOID RenderText(struct Window *window, struct TextBuffer *buffer)
             }
             
             /* Calculate starting X position (text starts at BorderLeft + leftMargin + 1) */
-            textX = textStartX;
+            /* Calculate pixel offset for horizontal scroll */
+            {
+                ULONG scrollXPixels = 0;
+                ULONG charIdx = 0;
+                
+                /* Measure pixel width of scrolled characters */
+                for (charIdx = 0; charIdx < buffer->scrollX && charIdx < lineLen; charIdx++) {
+                    scrollXPixels += GetCharWidth(rp, (UBYTE)lineText[charIdx]);
+                }
+                
+                /* Start text rendering at textStartX minus the scroll offset */
+                /* This allows horizontal scrolling by pixel offset */
+                if (scrollXPixels < textStartX) {
+                    textX = textStartX - scrollXPixels;
+                } else {
+                    /* Scrolled too far - text starts off-screen */
+                    textX = textStartX;
+                }
+            }
             
             /* Calculate how many characters to render */
             renderStart = buffer->scrollX;
@@ -871,7 +909,7 @@ VOID RenderText(struct Window *window, struct TextBuffer *buffer)
                 renderStart = lineLen;
             }
             
-            /* Clip to maximum visible character (Annotate checks: if(BCxSL >= ScollX_PageW) stop) */
+            /* Clip to maximum visible character */
             if (renderStart >= maxVisibleChar) {
                 /* All text is to the right of visible area - clear entire line */
                 charsToRender = 0;
@@ -883,15 +921,8 @@ VOID RenderText(struct Window *window, struct TextBuffer *buffer)
                     charsToRender = maxVisibleChar - renderStart;
                 }
                 
-                /* Calculate pixel position of start by measuring scrolled characters */
-                if (renderStart > 0 && renderStart <= lineLen) {
-                    for (j = 0; j < renderStart && j < lineLen; j++) {
-                        textX += GetCharWidth(rp, (UBYTE)lineText[j]);
-                    }
-                }
-                
                 /* Render line text, clipping to boundary */
-                /* Annotate-style: render text up to PageW, then clear remaining area */
+                /* Render text up to PageW, then clear remaining area */
                 if (lineText && charsToRender > 0 && renderStart < lineLen) {
                     /* Calculate actual characters to render by measuring pixel width */
                     /* We need to ensure text never exceeds textEndX */
@@ -924,7 +955,7 @@ VOID RenderText(struct Window *window, struct TextBuffer *buffer)
                 }
             }
             
-            /* Clear remaining area after text to exact boundary (Annotate-style) */
+            /* Clear remaining area after text to exact boundary */
             /* Only clear if we haven't reached the right boundary */
             if (textEndPixel <= textEndX) {
                 SetBPen(rp, 2);  /* Background pen (grey) */
@@ -939,19 +970,21 @@ VOID RenderText(struct Window *window, struct TextBuffer *buffer)
         y += lineHeight;
     }
     
-    /* Clear remaining area below all rendered lines (Annotate-style) */
-    /* Annotate clears from count2*FontY to bottom after all lines are rendered */
+    /* Clear remaining area below all rendered lines */
+    /* Important: Stop before bottom border to avoid painting over horizontal scroll bar */
     {
         linesRendered = endY - startY;
-        if (linesRendered > 0 && y < (window->Height - window->BorderBottom)) {
-            SetBPen(rp, 2);
-            SetAPen(rp, 2);
-            SetDrMd(rp, JAM2);
-            RectFill(rp, textStartX - 1, y,
-                     textEndX,
-                     window->Height - 1 - window->BorderBottom);
-            SetDrMd(rp, JAM1);
-            SetAPen(rp, 1);
+        if (linesRendered > 0 && y < maxY) {
+            ULONG clearBottom = maxY - 1;  /* Stop before scroll bar */
+            if (clearBottom >= y) {
+                SetBPen(rp, 2);
+                SetAPen(rp, 2);
+                SetDrMd(rp, JAM2);
+                RectFill(rp, textStartX - 1, y,
+                         textEndX, clearBottom);
+                SetDrMd(rp, JAM1);
+                SetAPen(rp, 1);
+            }
         }
     }
     
