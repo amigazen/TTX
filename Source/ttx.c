@@ -7,6 +7,9 @@
 
 #include "ttx.h"
 
+static const char *verstag = "$VER: TTX 3.0 (12/1/2026)\n";
+static const char *stack_cookie = "$STACK: 4096\n";
+
 /* Forward declaration for cleanup stack access */
 static struct CleanupStack *g_ttxStack = NULL;
 

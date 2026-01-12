@@ -62,10 +62,6 @@ extern struct Library *CxBase;
 extern struct Library *KeymapBase;
 extern struct Library *AslBase;
 
-/* Version string */
-static const char *verstag = "$VER: TTX 3.0 (11/1/2026)\n";
-static const char *stack_cookie = "$STACK: 4096\n";
-
 /* Message port name for single-instance communication */
 #define TTX_MESSAGE_PORT_NAME "TTX.1"
 
