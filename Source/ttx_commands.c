@@ -394,6 +394,164 @@ BOOL TTX_HandleCommand(struct TTXApplication *app, struct Session *session, STRP
 }
 
 /* Handle menu pick - convert menu/item numbers to command */
+/* Helper function to get command from menu/item number using UserData */
+/* UserData format: (menuNumber << 8) | itemNumber */
+static BOOL GetCommandFromMenuPick(ULONG menuNumber, ULONG itemNumber, STRPTR *outCommand, STRPTR *outArgs, ULONG *outArgCount)
+{
+    ULONG userData = (menuNumber << 8) | itemNumber;
+    ULONG extractedMenu = (userData >> 8) & 0xFF;
+    ULONG extractedItem = userData & 0xFF;
+    
+    if (!outCommand) {
+        return FALSE;
+    }
+    
+    *outCommand = NULL;
+    if (outArgs) {
+        outArgs[0] = NULL;
+    }
+    if (outArgCount) {
+        *outArgCount = 0;
+    }
+    
+    /* Map menu/item numbers to commands based on hardcoded menu structure */
+    /* Menu 0: Project */
+    if (extractedMenu == 0) {
+        switch (extractedItem) {
+            case 0: *outCommand = "OpenFile"; break;
+            case 1: *outCommand = "OpenDoc"; if (outArgs && outArgCount) { outArgs[0] = "FileReq"; *outArgCount = 1; } break;
+            case 2: *outCommand = "InsertFile"; break;
+            case 4: *outCommand = "SaveFile"; break;
+            case 5: *outCommand = "SaveFileAs"; break;
+            case 7: *outCommand = "ClearFile"; break;
+            case 8: *outCommand = "PrintFile"; break;
+            case 9: *outCommand = "OpenRequester"; if (outArgs && outArgCount) { outArgs[0] = "Info"; *outArgCount = 1; } break;
+            case 11: *outCommand = "SetReadOnly"; if (outArgs && outArgCount) { outArgs[0] = "Toggle"; *outArgCount = 1; } break;
+            case 12: *outCommand = "CloseDoc"; break;
+            default: return FALSE; /* Bar or unknown item */
+        }
+        return TRUE;
+    }
+    /* Menu 1: Windows */
+    else if (extractedMenu == 1) {
+        switch (extractedItem) {
+            case 0: *outCommand = "OpenDoc"; break;
+            case 2: *outCommand = "ActivateNextDoc"; break;
+            case 3: *outCommand = "ActivatePrevDoc"; break;
+            case 5: *outCommand = "SizeWindow"; if (outArgs && outArgCount) { outArgs[0] = "10000"; outArgs[1] = "10000"; *outArgCount = 2; } break;
+            case 6: *outCommand = "SizeWindow"; if (outArgs && outArgCount) { outArgs[0] = "-10000"; outArgs[1] = "-10000"; *outArgCount = 2; } break;
+            case 8: *outCommand = "IconifyWindow"; if (outArgs && outArgCount) { outArgs[0] = "Toggle"; *outArgCount = 1; } break;
+            case 16: *outCommand = "SplitView"; if (outArgs && outArgCount) { outArgs[0] = "Toggle"; *outArgCount = 1; } break;
+            case 17: *outCommand = "SwitchView"; break;
+            case 18: *outCommand = "SwapViews"; break;
+            case 19: *outCommand = "SizeView"; if (outArgs && outArgCount) { outArgs[0] = "1"; *outArgCount = 1; } break;
+            case 20: *outCommand = "SizeView"; if (outArgs && outArgCount) { outArgs[0] = "-1"; *outArgCount = 1; } break;
+            case 21: *outCommand = "CenterView"; break;
+            default: return FALSE;
+        }
+        return TRUE;
+    }
+    /* Menu 2: Edit */
+    else if (extractedMenu == 2) {
+        switch (extractedItem) {
+            case 0: *outCommand = "MarkBlk"; break;
+            case 1: *outCommand = "CutBlk"; break;
+            case 2: *outCommand = "CopyBlk"; break;
+            case 3: *outCommand = "PasteClip"; break;
+            case 4: *outCommand = "DeleteBlk"; break;
+            case 6: *outCommand = "MarkBlk"; if (outArgs && outArgCount) { outArgs[0] = "Vertical"; *outArgCount = 1; } break;
+            case 7: *outCommand = "PasteClip"; if (outArgs && outArgCount) { outArgs[0] = "Vertical"; *outArgCount = 1; } break;
+            default: return FALSE;
+        }
+        return TRUE;
+    }
+    /* Menu 3: Search */
+    else if (extractedMenu == 3) {
+        switch (extractedItem) {
+            case 0: *outCommand = "OpenRequester"; if (outArgs && outArgCount) { outArgs[0] = "Find"; *outArgCount = 1; } break;
+            case 1: *outCommand = "Find"; break;
+            case 2: *outCommand = "OpenRequester"; if (outArgs && outArgCount) { outArgs[0] = "FindChange"; *outArgCount = 1; } break;
+            case 4: *outCommand = "Move"; break;
+            case 5: *outCommand = "MoveChar"; break;
+            case 6: *outCommand = "MoveLastChange"; break;
+            case 7: *outCommand = "MoveAutomark"; break;
+            case 8: *outCommand = "MoveMatchBkt"; break;
+            case 11: case 12: case 13: case 14: case 15: case 16: case 17: case 18: case 19: case 20:
+                *outCommand = "SetBookmark"; 
+                if (outArgs && outArgCount) {
+                    ULONG bookmarkNum = extractedItem - 10; /* Convert 11-20 to 1-10 */
+                    STRPTR numStr = (STRPTR)allocVec(16, MEMF_CLEAR);
+                    if (numStr) {
+                        /* Convert number to string manually (C89 compatible) */
+                        ULONG num = bookmarkNum;
+                        ULONG pos = 0;
+                        UBYTE digits[16];
+                        ULONG i;
+                        if (num == 0) {
+                            digits[0] = '0';
+                            pos = 1;
+                        } else {
+                            while (num > 0 && pos < 15) {
+                                digits[pos++] = '0' + (num % 10);
+                                num = num / 10;
+                            }
+                        }
+                        digits[pos] = '\0';
+                        /* Reverse the string */
+                        for (i = 0; i < pos / 2; i++) {
+                            UBYTE temp = digits[i];
+                            digits[i] = digits[pos - 1 - i];
+                            digits[pos - 1 - i] = temp;
+                        }
+                        CopyMem(digits, numStr, pos + 1);
+                        outArgs[0] = numStr;
+                        *outArgCount = 1;
+                    }
+                }
+                break;
+            case 22: case 23: case 24: case 25: case 26: case 27: case 28: case 29: case 30: case 31:
+                *outCommand = "MoveBookmark";
+                if (outArgs && outArgCount) {
+                    ULONG bookmarkNum = extractedItem - 21; /* Convert 22-31 to 1-10 */
+                    STRPTR numStr = (STRPTR)allocVec(16, MEMF_CLEAR);
+                    if (numStr) {
+                        /* Convert number to string manually (C89 compatible) */
+                        ULONG num = bookmarkNum;
+                        ULONG pos = 0;
+                        UBYTE digits[16];
+                        ULONG i;
+                        if (num == 0) {
+                            digits[0] = '0';
+                            pos = 1;
+                        } else {
+                            while (num > 0 && pos < 15) {
+                                digits[pos++] = '0' + (num % 10);
+                                num = num / 10;
+                            }
+                        }
+                        digits[pos] = '\0';
+                        /* Reverse the string */
+                        for (i = 0; i < pos / 2; i++) {
+                            UBYTE temp = digits[i];
+                            digits[i] = digits[pos - 1 - i];
+                            digits[pos - 1 - i] = temp;
+                        }
+                        CopyMem(digits, numStr, pos + 1);
+                        outArgs[0] = numStr;
+                        *outArgCount = 1;
+                    }
+                }
+                break;
+            default: return FALSE;
+        }
+        return TRUE;
+    }
+    /* Menu 4: Macros, Menu 5: Folds, Menu 6: Extras, Menu 7: Prefs - TODO */
+    else {
+        return FALSE;
+    }
+}
+
 BOOL TTX_HandleMenuPick(struct TTXApplication *app, struct Session *session, ULONG menuNumber, ULONG itemNumber)
 {
     STRPTR command = NULL;
@@ -412,74 +570,39 @@ BOOL TTX_HandleMenuPick(struct TTXApplication *app, struct Session *session, ULO
         return TRUE;  /* MENUNULL - no action needed */
     }
     
-    /* Menu 0 = Project menu */
-    /* Note: In gadtools, menu items are numbered sequentially including bars */
-    /* Menu structure: 0=Title, 1=Open, 2=OpenNew, 3=Insert, 4=Bar, 5=Save, 6=SaveAs, 7=Bar, 8=Clear, 9=Print, 10=Info, 11=Bar, 12=ReadOnly, 13=Bar, 14=Iconify, 15=Bar, 16=Close, 17=Quit */
-    if (menuNumber == 0) {
-        switch (itemNumber) {
-            case 0:  /* Open... */
-                command = "OpenFile";
-                break;
-            case 1:  /* Open... */
-                command = "OpenFile";
-                break;
-            case 2:  /* Insert... */
-                command = "InsertFile";
-                break;
-            case 3:  /* Bar - skip */
-                Printf("[MENU] Bar item selected (ignored)\n");
-                return TRUE;
-            case 4:  /* Save */
-                command = "SaveFile";
-                break;
-            case 5:  /* Save As... */
-                command = "SaveFileAs";
-                break;
-            case 6:  /* Bar - skip */
-                Printf("[MENU] Bar item selected (ignored)\n");
-                return TRUE;
-            case 7:  /* Clear */
-                command = "ClearFile";
-                break;
-            case 8:  /* Print... */
-                command = "PrintFile";
-                break;
-            case 9:  /* Info... */
-                /* TODO: OpenRequester Info */
-                Printf("[MENU] Info requester not yet implemented\n");
-                return TRUE;
-            case 10: /* Bar - skip */
-                Printf("[MENU] Bar item selected (ignored)\n");
-                return TRUE;
-            case 11: /* Read-Only */
-                command = "SetReadOnly";
-                if (argCount < 10) {
-                    args[argCount++] = "Toggle";
-                }
-                break;
-            case 12: /* Iconify */
-                command = "Iconify";
-                break;
-            case 13: /* Bar - skip */
-                Printf("[MENU] Bar item selected (ignored)\n");
-                return TRUE;
-            case 14: /* Close Window */
-                command = "CloseDoc";
-                break;
-            case 15: /* Quit */
-                command = "Quit";
-                break;
-            default:
-                Printf("[MENU] Unknown menu item: menu=%lu, item=%lu\n", menuNumber, itemNumber);
-                return FALSE;
-        }
-    } else {
-        Printf("[MENU] Other menus not yet implemented (menu=%lu, item=%lu)\n", menuNumber, itemNumber);
+    /* Get command from menu/item number */
+    /* Note: The UserData is stored in the NewMenu structure and accessed via GTMENUITEM_USERDATA */
+    /* The menuCode from IDCMP_MENUPICK is used in ttx.c to extract UserData */
+    /* Here we use menuNumber/itemNumber directly to map to commands */
+    if (!GetCommandFromMenuPick(menuNumber, itemNumber, &command, args, &argCount)) {
+        Printf("[MENU] TTX_HandleMenuPick: no command found for menu=%lu, item=%lu\n", menuNumber, itemNumber);
         return FALSE;
     }
     
     if (command) {
         result = TTX_HandleCommand(app, session, command, args, argCount);
+        /* Free allocated argument strings */
+        if (args[0] && argCount > 0) {
+            ULONG i;
+            for (i = 0; i < argCount; i++) {
+                if (args[i]) {
+                    /* Only free if it's not a constant string literal */
+                    /* Check if it's an allocated string by comparing pointers */
+                    BOOL isConstant = FALSE;
+                    if (Stricmp(args[i], "Toggle") == 0 || 
+                        Stricmp(args[i], "FileReq") == 0 ||
+                        Stricmp(args[i], "Info") == 0 ||
+                        Stricmp(args[i], "Find") == 0 ||
+                        Stricmp(args[i], "FindChange") == 0 ||
+                        Stricmp(args[i], "Vertical") == 0) {
+                        isConstant = TRUE;
+                    }
+                    if (!isConstant) {
+                        freeVec(args[i]);
+                    }
+                }
+            }
+        }
     }
     
     return result;
@@ -490,32 +613,174 @@ BOOL TTX_CreateMenuStrip(struct Session *session)
 {
     /* Store menu/item numbers in UserData for easy lookup */
     /* Format: (menuNumber << 8) | itemNumber */
+    /* This hardcoded menu matches TTX_BuiltIn.dfn exactly */
     struct NewMenu newMenu[] = {
-        /* Project menu */
+        /* Menu 0: Project */
         {NM_TITLE, "Project", NULL, 0, 0, NULL},
-        {NM_ITEM, "Open...", "O", 0, 0, (APTR)((0UL << 8) | 0UL)},  /* menu 0, item 0 */
-        {NM_ITEM, "Open...", "Y", 0, 0, (APTR)((0UL << 8) | 1UL)},  /* menu 0, item 1 */
-        {NM_ITEM, "Insert...", NULL, 0, 0, (APTR)((0UL << 8) | 2UL)},  /* menu 0, item 2 */
+        {NM_ITEM, "Open...", "O", 0, 0, (APTR)((0UL << 8) | 0UL)},
+        {NM_ITEM, "Open New...", "Y", 0, 0, (APTR)((0UL << 8) | 1UL)},
+        {NM_ITEM, "Insert...", NULL, 0, 0, (APTR)((0UL << 8) | 2UL)},
         {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Save", "S", 0, 0, (APTR)((0UL << 8) | 4UL)},  /* menu 0, item 4 */
-        {NM_ITEM, "Save As...", "A", 0, 0, (APTR)((0UL << 8) | 5UL)},  /* menu 0, item 5 */
+        {NM_ITEM, "Save", "S", 0, 0, (APTR)((0UL << 8) | 4UL)},
+        {NM_ITEM, "Save As...", "A", 0, 0, (APTR)((0UL << 8) | 5UL)},
         {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Clear", "K", 0, 0, (APTR)((0UL << 8) | 7UL)},  /* menu 0, item 7 */
-        {NM_ITEM, "Print...", "P", 0, 0, (APTR)((0UL << 8) | 8UL)},  /* menu 0, item 8 */
-        {NM_ITEM, "Info...", "?", 0, 0, (APTR)((0UL << 8) | 9UL)},  /* menu 0, item 9 */
+        {NM_ITEM, "Clear", "K", 0, 0, (APTR)((0UL << 8) | 7UL)},
+        {NM_ITEM, "Print...", "P", 0, 0, (APTR)((0UL << 8) | 8UL)},
+        {NM_ITEM, "Info...", "?", 0, 0, (APTR)((0UL << 8) | 9UL)},
         {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Read-Only", NULL, 0, CHECKIT, (APTR)((0UL << 8) | 11UL)},  /* menu 0, item 11 */
+        {NM_ITEM, "Read-Only", NULL, 0, CHECKIT, (APTR)((0UL << 8) | 11UL)},
         {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Iconify", "I", 0, 0, (APTR)((0UL << 8) | 12UL)},  /* menu 0, item 12 */
+        {NM_ITEM, "Close Window", "Q", 0, 0, (APTR)((0UL << 8) | 12UL)},
+        
+        /* Menu 1: Windows */
+        {NM_TITLE, "Windows", NULL, 0, 0, NULL},
+        {NM_ITEM, "New", "W", 0, 0, (APTR)((1UL << 8) | 0UL)},
+        {NM_SUB, "Activate", NULL, 0, 0, NULL},
+        {NM_ITEM, "Next Document", "0", 0, 0, (APTR)((1UL << 8) | 2UL)},
+        {NM_ITEM, "Previous Document", "1", 0, 0, (APTR)((1UL << 8) | 3UL)},
+        {NM_SUB, "Resize", NULL, 0, 0, NULL},
+        {NM_ITEM, "To Maximum", NULL, 0, 0, (APTR)((1UL << 8) | 5UL)},
+        {NM_ITEM, "To Minimum", NULL, 0, 0, (APTR)((1UL << 8) | 6UL)},
         {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Close Window", "Q", 0, 0, (APTR)((0UL << 8) | 13UL)},  /* menu 0, item 13 */
-        {NM_ITEM, "Quit", NULL, 0, 0, (APTR)((0UL << 8) | 14UL)},  /* menu 0, item 14 */
+        {NM_ITEM, "Iconify", NULL, 0, 0, (APTR)((1UL << 8) | 8UL)},
+        {NM_SUB, "Organize Windows", NULL, 0, 0, NULL},
+        {NM_ITEM, "Stack", NULL, 0, 0, (APTR)((1UL << 8) | 10UL)},
+        {NM_ITEM, "Tile", NULL, 0, 0, (APTR)((1UL << 8) | 11UL)},
+        {NM_ITEM, "Cascade", NULL, 0, 0, (APTR)((1UL << 8) | 12UL)},
+        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
+        {NM_ITEM, "Iconify All", NULL, 0, 0, (APTR)((1UL << 8) | 14UL)},
+        {NM_SUB, "Views", NULL, 0, 0, NULL},
+        {NM_ITEM, "Split", "\\", 0, 0, (APTR)((1UL << 8) | 16UL)},
+        {NM_ITEM, "Toggle", "T", 0, 0, (APTR)((1UL << 8) | 17UL)},
+        {NM_ITEM, "Swap", NULL, 0, 0, (APTR)((1UL << 8) | 18UL)},
+        {NM_ITEM, "Expand", ";", 0, 0, (APTR)((1UL << 8) | 19UL)},
+        {NM_ITEM, "Shrink", ":", 0, 0, (APTR)((1UL << 8) | 20UL)},
+        {NM_ITEM, "Center", "'", 0, 0, (APTR)((1UL << 8) | 21UL)},
+        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
+        {NM_ITEM, "Open Hex View...", "$", 0, 0, (APTR)((1UL << 8) | 23UL)},
+        {NM_ITEM, "Open Calculator...", "#", 0, 0, (APTR)((1UL << 8) | 24UL)},
+        {NM_ITEM, "Open TTX Shell...", ".", 0, 0, (APTR)((1UL << 8) | 25UL)},
+        {NM_ITEM, "Open DOS Shell...", NULL, 0, 0, (APTR)((1UL << 8) | 26UL)},
+        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
+        {NM_ITEM, "Help...", NULL, 0, 0, (APTR)((1UL << 8) | 28UL)},
+        {NM_ITEM, "User's Manual...", NULL, 0, 0, (APTR)((1UL << 8) | 29UL)},
+        
+        /* Menu 2: Edit */
+        {NM_TITLE, "Edit", NULL, 0, 0, NULL},
+        {NM_ITEM, "Mark", "B", 0, 0, (APTR)((2UL << 8) | 0UL)},
+        {NM_ITEM, "Cut", "X", 0, 0, (APTR)((2UL << 8) | 1UL)},
+        {NM_ITEM, "Copy", "C", 0, 0, (APTR)((2UL << 8) | 2UL)},
+        {NM_ITEM, "Paste", "V", 0, 0, (APTR)((2UL << 8) | 3UL)},
+        {NM_ITEM, "Erase", "E", 0, 0, (APTR)((2UL << 8) | 4UL)},
+        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
+        {NM_ITEM, "Mark Vertical", "<", 0, 0, (APTR)((2UL << 8) | 6UL)},
+        {NM_ITEM, "Paste Vertical", ">", 0, 0, (APTR)((2UL << 8) | 7UL)},
+        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
+        {NM_ITEM, "Open Clip...", "!", 0, 0, (APTR)((2UL << 8) | 9UL)},
+        {NM_ITEM, "Save Clip As...", "@", 0, 0, (APTR)((2UL << 8) | 10UL)},
+        {NM_ITEM, "Print Clip...", "&", 0, 0, (APTR)((2UL << 8) | 11UL)},
+        
+        /* Menu 3: Search */
+        {NM_TITLE, "Search", NULL, 0, 0, NULL},
+        {NM_ITEM, "Find...", "F", 0, 0, (APTR)((3UL << 8) | 0UL)},
+        {NM_ITEM, "Find Next", "N", 0, 0, (APTR)((3UL << 8) | 1UL)},
+        {NM_ITEM, "Find & Change...", "/", 0, 0, (APTR)((3UL << 8) | 2UL)},
+        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
+        {NM_ITEM, "Go To Line #...", "J", 0, 0, (APTR)((3UL << 8) | 4UL)},
+        {NM_ITEM, "Go To Char #...", NULL, 0, 0, (APTR)((3UL << 8) | 5UL)},
+        {NM_ITEM, "Go To Last Change", "G", 0, 0, (APTR)((3UL << 8) | 6UL)},
+        {NM_ITEM, "Go To Auto-Bookmark", ",", 0, 0, (APTR)((3UL << 8) | 7UL)},
+        {NM_ITEM, "Match Bracket", "[", 0, 0, (APTR)((3UL << 8) | 8UL)},
+        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
+        {NM_SUB, "Set Bookmark", NULL, 0, 0, NULL},
+        {NM_ITEM, "#1", NULL, 0, 0, (APTR)((3UL << 8) | 11UL)},
+        {NM_ITEM, "#2", NULL, 0, 0, (APTR)((3UL << 8) | 12UL)},
+        {NM_ITEM, "#3", NULL, 0, 0, (APTR)((3UL << 8) | 13UL)},
+        {NM_ITEM, "#4", NULL, 0, 0, (APTR)((3UL << 8) | 14UL)},
+        {NM_ITEM, "#5", NULL, 0, 0, (APTR)((3UL << 8) | 15UL)},
+        {NM_ITEM, "#6", NULL, 0, 0, (APTR)((3UL << 8) | 16UL)},
+        {NM_ITEM, "#7", NULL, 0, 0, (APTR)((3UL << 8) | 17UL)},
+        {NM_ITEM, "#8", NULL, 0, 0, (APTR)((3UL << 8) | 18UL)},
+        {NM_ITEM, "#9", NULL, 0, 0, (APTR)((3UL << 8) | 19UL)},
+        {NM_ITEM, "#10", NULL, 0, 0, (APTR)((3UL << 8) | 20UL)},
+        {NM_SUB, "Go To Bookmark", NULL, 0, 0, NULL},
+        {NM_ITEM, "#1", NULL, 0, 0, (APTR)((3UL << 8) | 22UL)},
+        {NM_ITEM, "#2", NULL, 0, 0, (APTR)((3UL << 8) | 23UL)},
+        {NM_ITEM, "#3", NULL, 0, 0, (APTR)((3UL << 8) | 24UL)},
+        {NM_ITEM, "#4", NULL, 0, 0, (APTR)((3UL << 8) | 25UL)},
+        {NM_ITEM, "#5", NULL, 0, 0, (APTR)((3UL << 8) | 26UL)},
+        {NM_ITEM, "#6", NULL, 0, 0, (APTR)((3UL << 8) | 27UL)},
+        {NM_ITEM, "#7", NULL, 0, 0, (APTR)((3UL << 8) | 28UL)},
+        {NM_ITEM, "#8", NULL, 0, 0, (APTR)((3UL << 8) | 29UL)},
+        {NM_ITEM, "#9", NULL, 0, 0, (APTR)((3UL << 8) | 30UL)},
+        {NM_ITEM, "#10", NULL, 0, 0, (APTR)((3UL << 8) | 31UL)},
+        
+        /* Menu 4: Macros */
+        {NM_TITLE, "Macros", NULL, 0, 0, NULL},
+        {NM_ITEM, "Record Macro", "R", 0, 0, (APTR)((4UL << 8) | 0UL)},
+        {NM_ITEM, "Stop Recording", "H", 0, 0, (APTR)((4UL << 8) | 1UL)},
+        {NM_ITEM, "Play Macro", "M", 0, 0, (APTR)((4UL << 8) | 2UL)},
+        {NM_ITEM, "Play Many...", "I", 0, 0, (APTR)((4UL << 8) | 3UL)},
+        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
+        {NM_ITEM, "Open Macro...", "2", 0, 0, (APTR)((4UL << 8) | 5UL)},
+        {NM_ITEM, "Save Macro As...", NULL, 0, 0, (APTR)((4UL << 8) | 6UL)},
+        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
+        {NM_ITEM, "Execute ARexx...", "3", 0, 0, (APTR)((4UL << 8) | 8UL)},
+        
+        /* Menu 5: Folds */
+        {NM_TITLE, "Folds", NULL, 0, 0, NULL},
+        {NM_ITEM, "Make Fold", "(", 0, 0, (APTR)((5UL << 8) | 0UL)},
+        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
+        {NM_SUB, "Show", NULL, 0, 0, NULL},
+        {NM_ITEM, "Single", "+", 0, 0, (APTR)((5UL << 8) | 3UL)},
+        {NM_ITEM, "Nested", NULL, 0, 0, (APTR)((5UL << 8) | 4UL)},
+        {NM_ITEM, "All", NULL, 0, 0, (APTR)((5UL << 8) | 5UL)},
+        {NM_SUB, "Hide", NULL, 0, 0, NULL},
+        {NM_ITEM, "Single", "-", 0, 0, (APTR)((5UL << 8) | 7UL)},
+        {NM_ITEM, "Nested", NULL, 0, 0, (APTR)((5UL << 8) | 8UL)},
+        {NM_ITEM, "All", NULL, 0, 0, (APTR)((5UL << 8) | 9UL)},
+        {NM_SUB, "Unmake", NULL, 0, 0, NULL},
+        {NM_ITEM, "Single", ")", 0, 0, (APTR)((5UL << 8) | 11UL)},
+        {NM_ITEM, "Nested", NULL, 0, 0, (APTR)((5UL << 8) | 12UL)},
+        {NM_ITEM, "All", NULL, 0, 0, (APTR)((5UL << 8) | 13UL)},
+        
+        /* Menu 6: Extras */
+        {NM_TITLE, "Extras", NULL, 0, 0, NULL},
+        {NM_ITEM, "Undelete Line", "D", 0, 0, (APTR)((6UL << 8) | 0UL)},
+        {NM_ITEM, "Undo Line", "Z", 0, 0, (APTR)((6UL << 8) | 1UL)},
+        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
+        {NM_ITEM, "Center", "^", 0, 0, (APTR)((6UL << 8) | 3UL)},
+        {NM_ITEM, "Justify", "=", 0, 0, (APTR)((6UL << 8) | 4UL)},
+        {NM_ITEM, "Format Paragraph", "]", 0, 0, (APTR)((6UL << 8) | 5UL)},
+        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
+        {NM_ITEM, "Convert To Upper Case", "U", 0, 0, (APTR)((6UL << 8) | 7UL)},
+        {NM_ITEM, "Convert To Lower Case", "L", 0, 0, (APTR)((6UL << 8) | 8UL)},
+        {NM_ITEM, "Convert Tabs To Spaces", NULL, 0, 0, (APTR)((6UL << 8) | 9UL)},
+        
+        /* Menu 7: Prefs */
+        {NM_TITLE, "Prefs", NULL, 0, 0, NULL},
+        {NM_ITEM, "Change...", "4", 0, 0, (APTR)((7UL << 8) | 0UL)},
+        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
+        {NM_ITEM, "Open Prefs...", NULL, 0, 0, (APTR)((7UL << 8) | 2UL)},
+        {NM_ITEM, "Save Prefs As...", NULL, 0, 0, (APTR)((7UL << 8) | 3UL)},
+        {NM_ITEM, "Save As Defaults", NULL, 0, 0, (APTR)((7UL << 8) | 4UL)},
+        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
+        {NM_ITEM, "Open Definitions...", NULL, 0, 0, (APTR)((7UL << 8) | 6UL)},
         
         /* End marker */
         {NM_END, NULL, NULL, 0, 0, NULL}
     };
     struct Menu *menuStrip = NULL;
     struct VisualInfo *visInfo = NULL;
+    struct DFNFile *dfn = NULL;
+    struct NewMenu *dfnMenu = NULL;
+    ULONG dfnMenuCount = 0;
+    STRPTR dfnPaths[] = {
+        "PROGDIR:Support/TTX_BuiltIn.dfn",
+        NULL
+    };
+    ULONG i;
+    BOOL useDFN = FALSE;
     
     if (!session || !session->window) {
         return FALSE;
@@ -523,11 +788,44 @@ BOOL TTX_CreateMenuStrip(struct Session *session)
     
     Printf("[MENU] TTX_CreateMenuStrip: START\n");
     
-    /* Create menu strip */
-    menuStrip = CreateMenus(newMenu, TAG_DONE);
-    if (!menuStrip) {
-        Printf("[MENU] TTX_CreateMenuStrip: FAIL (CreateMenus failed)\n");
-        return FALSE;
+    /* Try to load .dfn file from various locations */
+    for (i = 0; dfnPaths[i] != NULL; i++) {
+        dfn = ParseDFNFile(dfnPaths[i], session->cleanupStack);
+        if (dfn) {
+            Printf("[MENU] TTX_CreateMenuStrip: loaded DFN from '%s'\n", dfnPaths[i]);
+            useDFN = TRUE;
+            break;
+        }
+    }
+    
+    if (useDFN && dfn) {
+        /* Convert DFN to NewMenu array */
+        dfnMenu = ConvertDFNToNewMenu(dfn, &dfnMenuCount);
+        if (dfnMenu) {
+            Printf("[MENU] TTX_CreateMenuStrip: converted %lu menu entries from DFN\n", dfnMenuCount);
+            /* Create menu strip from DFN */
+            menuStrip = CreateMenus(dfnMenu, TAG_DONE);
+            if (!menuStrip) {
+                Printf("[MENU] TTX_CreateMenuStrip: FAIL (CreateMenus from DFN failed)\n");
+                freeVec(dfnMenu);
+                FreeDFNFile(dfn);
+                useDFN = FALSE; /* Fall back to hardcoded menu */
+            }
+        } else {
+            Printf("[MENU] TTX_CreateMenuStrip: WARN (failed to convert DFN to NewMenu)\n");
+            FreeDFNFile(dfn);
+            useDFN = FALSE; /* Fall back to hardcoded menu */
+        }
+    }
+    
+    if (!useDFN) {
+        /* Fall back to hardcoded menu */
+        Printf("[MENU] TTX_CreateMenuStrip: using hardcoded menu\n");
+        menuStrip = CreateMenus(newMenu, TAG_DONE);
+        if (!menuStrip) {
+            Printf("[MENU] TTX_CreateMenuStrip: FAIL (CreateMenus failed)\n");
+            return FALSE;
+        }
     }
     
     /* Get visual info for layout */
@@ -574,6 +872,16 @@ BOOL TTX_CreateMenuStrip(struct Session *session)
     
     /* Free visual info (no longer needed after LayoutMenus) */
     FreeVisualInfo(visInfo);
+    
+    /* Free DFN data if we used it */
+    if (useDFN) {
+        if (dfnMenu) {
+            freeVec(dfnMenu);
+        }
+        if (dfn) {
+            FreeDFNFile(dfn);
+        }
+    }
     
     Printf("[MENU] TTX_CreateMenuStrip: SUCCESS\n");
     return TRUE;
@@ -1413,9 +1721,87 @@ BOOL TTX_Cmd_PrintFile(struct TTXApplication *app, struct Session *session, STRP
     return FALSE;
 }
 
+/* Prompt user before closing if document is modified */
+static BOOL PromptSaveBeforeClose(struct TTXApplication *app, struct Session *session)
+{
+    struct IntuiText bodyText;
+    struct IntuiText posText;
+    struct IntuiText negText;
+    BOOL result = FALSE;
+    STRPTR bodyStr = "Document has been modified.\nSave before closing?";
+    STRPTR posStr = "Save";
+    STRPTR negStr = "Cancel";
+    
+    if (!session || !session->window || !session->buffer) {
+        return FALSE;
+    }
+    
+    /* Only prompt if document is modified */
+    if (!session->docState.modified) {
+        return TRUE; /* Not modified - OK to close */
+    }
+    
+    /* Set up IntuiText structures */
+    bodyText.FrontPen = 0;
+    bodyText.BackPen = 1;
+    bodyText.DrawMode = JAM2;
+    bodyText.LeftEdge = 0;
+    bodyText.TopEdge = 0;
+    bodyText.ITextFont = NULL; /* Use default font */
+    bodyText.IText = bodyStr;
+    bodyText.NextText = NULL;
+    
+    posText.FrontPen = 0;
+    posText.BackPen = 1;
+    posText.DrawMode = JAM2;
+    posText.LeftEdge = 0;
+    posText.TopEdge = 0;
+    posText.ITextFont = NULL;
+    posText.IText = posStr;
+    posText.NextText = NULL;
+    
+    negText.FrontPen = 0;
+    negText.BackPen = 1;
+    negText.DrawMode = JAM2;
+    negText.LeftEdge = 0;
+    negText.TopEdge = 0;
+    negText.ITextFont = NULL;
+    negText.IText = negStr;
+    negText.NextText = NULL;
+    
+    /* Show AutoRequest dialog */
+    result = AutoRequest(session->window, &bodyText, &posText, &negText, 0, 0, 320, 100);
+    
+    if (result) {
+        /* User chose "Save" - save the file */
+        if (session->docState.fileName) {
+            /* Save to existing filename */
+            TTX_Cmd_SaveFile(app, session, NULL, 0);
+        } else {
+            /* No filename - use Save As */
+            TTX_Cmd_SaveFileAs(app, session, NULL, 0);
+        }
+        /* If save was cancelled, don't close */
+        if (session->docState.modified) {
+            return FALSE; /* Save was cancelled */
+        }
+    } else {
+        /* User chose "Cancel" - don't close */
+        return FALSE;
+    }
+    
+    return TRUE; /* OK to close */
+}
+
 BOOL TTX_Cmd_CloseDoc(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
     if (!app || !session) {
+        return FALSE;
+    }
+    
+    /* Prompt user if document is modified */
+    if (!PromptSaveBeforeClose(app, session)) {
+        Printf("[CMD] TTX_Cmd_CloseDoc: user cancelled close\n");
         return FALSE;
     }
     
@@ -1492,12 +1878,83 @@ BOOL TTX_Cmd_Quit(struct TTXApplication *app, struct Session *session, STRPTR *a
 {
     struct Session *currentSession = NULL;
     struct Session *nextSession = NULL;
+    BOOL hasModified = FALSE;
+    struct IntuiText bodyText;
+    struct IntuiText posText;
+    struct IntuiText negText;
+    STRPTR bodyStr = "One or more documents have been modified.\nSave before quitting?";
+    STRPTR posStr = "Save All";
+    STRPTR negStr = "Cancel";
+    BOOL userChoice = FALSE;
     
     if (!app) {
         return FALSE;
     }
     
     Printf("[CMD] TTX_Cmd_Quit: START (sessionCount=%lu)\n", app->sessionCount);
+    
+    /* Check if any session has modified documents */
+    currentSession = app->sessions;
+    while (currentSession) {
+        if (currentSession->docState.modified) {
+            hasModified = TRUE;
+            break;
+        }
+        currentSession = currentSession->next;
+    }
+    
+    /* Prompt user if any document is modified */
+    if (hasModified && session && session->window) {
+        /* Set up IntuiText structures */
+        bodyText.FrontPen = 0;
+        bodyText.BackPen = 1;
+        bodyText.DrawMode = JAM2;
+        bodyText.LeftEdge = 0;
+        bodyText.TopEdge = 0;
+        bodyText.ITextFont = NULL;
+        bodyText.IText = bodyStr;
+        bodyText.NextText = NULL;
+        
+        posText.FrontPen = 0;
+        posText.BackPen = 1;
+        posText.DrawMode = JAM2;
+        posText.LeftEdge = 0;
+        posText.TopEdge = 0;
+        posText.ITextFont = NULL;
+        posText.IText = posStr;
+        posText.NextText = NULL;
+        
+        negText.FrontPen = 0;
+        negText.BackPen = 1;
+        negText.DrawMode = JAM2;
+        negText.LeftEdge = 0;
+        negText.TopEdge = 0;
+        negText.ITextFont = NULL;
+        negText.IText = negStr;
+        negText.NextText = NULL;
+        
+        /* Show AutoRequest dialog */
+        userChoice = AutoRequest(session->window, &bodyText, &posText, &negText, 0, 0, 320, 100);
+        
+        if (!userChoice) {
+            /* User chose "Cancel" - don't quit */
+            Printf("[CMD] TTX_Cmd_Quit: user cancelled quit\n");
+            return FALSE;
+        }
+        
+        /* User chose "Save All" - save all modified documents */
+        currentSession = app->sessions;
+        while (currentSession) {
+            if (currentSession->docState.modified) {
+                if (currentSession->docState.fileName) {
+                    TTX_Cmd_SaveFile(app, currentSession, NULL, 0);
+                } else {
+                    TTX_Cmd_SaveFileAs(app, currentSession, NULL, 0);
+                }
+            }
+            currentSession = currentSession->next;
+        }
+    }
     
     /* Close all sessions (windows) */
     /* Note: We iterate through all sessions and destroy them */
@@ -1764,9 +2221,6 @@ BOOL TTX_Cmd_MoveSizeWindow(struct TTXApplication *app, struct Session *session,
 
 BOOL TTX_Cmd_MoveWindow(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    LONG leftEdge = 0;
-    LONG topEdge = 0;
-    
     if (!session || !session->window) {
         return FALSE;
     }

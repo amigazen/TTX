@@ -1,0 +1,696 @@
+##prototype #include <dos.h>\nSTRPTR __asm GetString(register __a0 struct LocaleInfo *li, register __d0 ULONG id);
+;
+##ifdef TURBOTEXT_LIBRARY
+MSG_Insert (//)
+Insert
+;
+MSG_InsertFile (//)
+Select File to Insert
+;
+MSG_Open (//)
+Open
+;
+MSG_OpenFile (//)
+Select File to Open
+;
+MSG_OpenClip (//)
+Select File to Open as Clip
+;
+MSG_OpenMacro (//)
+Select File to Open as Macro
+;
+MSG_OpenPrefs (//)
+Select File to Open as Prefs
+;
+MSG_OpenDefs (//)
+Select File to Open as Definitions
+;
+MSG_Save (//)
+Save
+;
+MSG_SaveFile (//)
+Select File to Save
+;
+MSG_SaveClip (//)
+Select File to Save as Clip
+;
+MSG_SaveMacro (//)
+Select File to Save as Macro
+;
+MSG_SavePrefs (//)
+Select File to Save as Prefs
+;
+MSG_Exec (//)
+Execute
+;
+MSG_ExecMacro (//)
+Select File to Execute as ARexx Macro
+;
+MSG_ExecTool (//)
+Select File to Execute as External Tool
+;
+MSG_GoToLine (//)
+Go To Line (1..%lu) ?
+;
+MSG_GoToChar (//)
+Go To Char (1..%lu) ?
+;
+MSG_ExecMultiple (//)
+Play How Many?
+;
+MSG_Print (//)
+Printing...
+;
+MSG_Hex (//)
+Hex View
+;
+MSG_OKCancel (//)
+OK|Cancel
+;
+MSG_OpenCancel (//)
+Open|Save Then Open|Cancel
+;
+MSG_QuitCancel (//)
+Close|Save Then Close|Cancel
+;
+MSG_ClearCancel (//)
+Clear|Save Then Clear|Cancel
+;
+MSG_SaveAnywayCancel (//)
+Save Anyway|Cancel
+;
+MSG_SaveCancel (//)
+Save|Cancel
+;
+MSG_ContinueAbort (//)
+Continue|Abort
+;
+MSG_OverwriteCancel (//)
+Overwrite|Cancel
+;
+MSG_DoubleLoad (//)
+Activate Existing|Load Again|Cancel
+;
+MSG_OpenInsert (//)
+Open|Insert At Cursor|Cancel
+;
+MSG_PrintCancel (//)
+Print|Cancel
+;
+MSG_OK (//)
+OK
+;
+MSG_Clip (//)
+the current clip
+;
+MSG_Confirmation (//)
+TurboText Query
+;
+MSG_ReallyOpen (//)
+Open without saving changes?
+;
+MSG_ReallyClear (//)
+Clear without saving changes?
+;
+MSG_ReallyQuit (//)
+Close without saving changes?
+;
+MSG_ReallyPrint (//)
+Do you want to print\n%s?
+;
+MSG_FailedBackup (//)
+Attempt to create backup file as\n%s\nfailed. Save anyway?
+;
+MSG_AutoSavePrompt (//)
+Auto-save request for\n%s\nSave this file?
+;
+MSG_OverwritePrompt (//)
+File\n%s\nalready exists. Overwrite it?
+;
+MSG_DoubleLoadPrompt (//)
+The requested document\n(%s)\nis already loaded in TurboText.
+;
+MSG_IconDropPrompt (//)
+What should be done with\n%s?
+;
+MSG_IncorrectDef1 (//)
+Incorrect Definition File Format!
+;
+MSG_IncorrectDef2 (//)
+%s\non line #%lu in file\n%s
+;
+MSG_MemoryPanic (//)
+TurboText Memory Panic!
+;
+MSG_NoMemory (//)
+No memory for requested operation!
+;
+MSG_IncorrectCmd (//)
+Invalid command specification
+;
+MSG_IncorrectSeq (//)
+Invalid keyboard sequence
+;
+MSG_IncorrectMouse (//)
+Invalid mouse sequence
+;
+MSG_UnknownMenu (//)
+Unknown MENUS directive
+;
+MSG_IncorrectMenu (//)
+Incorrect MENU specification
+;
+MSG_IncorrectItem (//)
+Incorrect ITEM specification
+;
+MSG_IncorrectSub (//)
+Incorrect SUB specification
+;
+MSG_IncorrectHot (//)
+Invalid Hot Key command
+;
+MSG_BadTemplate (//)
+Templates must start with a letter
+;
+MSG_Replaced (//)
+Replaced \0
+;
+MSG_Error1 (//)
+Not enough memory!
+;
+MSG_Error2 (//)
+Hit document boundary!
+;
+MSG_Error3 (//)
+Not found!
+;
+MSG_Error4 (//)
+Not on {,[,(,<,�,},],),> or � !
+;
+MSG_Error5 (//)
+More '?' in 'Change' than in 'Find'!
+;
+MSG_Error6 (//)
+User requested abort!
+;
+MSG_Error7 (//)
+Not allowed in read-only mode!
+;
+MSG_Error8 (//)
+Not currently recording!
+;
+MSG_Error9 (//)
+No block marked!
+;
+MSG_Error10 (//)
+Clipboard device not found!
+;
+MSG_Error11 (//)
+Clipboard is empty!
+;
+MSG_Error12 (//)
+Clipboard does not contain text!
+;
+MSG_Error13 (//)
+Clipboard I/O error!
+;
+MSG_Error14 (//)
+ARexx process or library not found!
+;
+MSG_Error15 (//)
+Bookmark not set!
+;
+MSG_Error16 (//)
+Bookmark not found!
+;
+MSG_Error17 (//)
+No fold on current line!
+;
+MSG_Error18 (//)
+Already a fold on current line!
+;
+MSG_Error19 (//)
+No macro to play!
+;
+MSG_Error20 (//)
+Template or word not found!
+;
+MSG_Error21 (//)
+Not enough characters for Comp.Temp.!
+;
+MSG_Error22 (//)
+Too many characters!
+;
+MSG_Error23 (//)
+Illegal while recording!
+;
+MSG_Error24 (//)
+Illegal command or arguments!
+;
+MSG_Error25 (//)
+Command only allowed in ARexx macros!
+;
+MSG_Error26 (//)
+Loading...
+;
+MSG_Error27 (//)
+Saving...
+;
+MSG_Error28 (//)
+Printing...
+;
+MSG_Error29 (//)
+Searching...
+;
+MSG_Error30 (//)
+Working...
+;
+MSG_Error31 (//)
+Bookmark set
+;
+MSG_Error32 (//)
+Couldn't execute tool!
+;
+MSG_Error33 (//)
+ARexx error
+;
+MSG_Error34 (//)
+Load error
+;
+MSG_Error35 (//)
+Save error
+;
+MSG_Error36 (//)
+Print error
+;
+MSG_Error37 (//)
+Backup error
+;
+MSG_Error38 (//)
+- not saved!
+;
+MSG_Error39 (//)
+AmigaGuide error
+;
+MSG_Error40 (//)
+Couldn't open ARexx console
+;
+MSG_Error41 (//)
+Command requires a window!
+;
+MSG_Error42 (//)
+AmigaGuide library not found!
+;
+MSG_Status (//)
+fFiImMoOrRwW
+##endif
+;
+;-----------------------------------------------------------------------------
+;
+##ifdef TTX
+TTX_NO_TURBOTEXT_LIB (1000//)
+Could not load 'TurboText:Libs/turbotext.library'
+;
+TTX_NO_TTXSUPPORT_LIB (//)
+Could not load 'TurboText:Libs/ttxsupport.library'
+;
+TTX_NO_TURBOTEXT_PROC (//)
+Could not start TurboText
+;
+TTX_SHELL_ERROR (//)
+ERROR: \0
+;
+TTX_WB_ERROR (//)
+TTX Error
+;
+TTX_WB_OK_GAD (//)
+OK
+##endif
+;
+;-----------------------------------------------------------------------------
+;
+##ifdef TTXREQS_LIBRARY
+MSG_NOTHING (3000//)
+
+;
+MSG_USE (//)
+Use
+;
+MSG_CANCEL (//)
+Cancel
+;
+MSG_PREFS_TITLE (//)
+TurboText Preferences
+;
+MSG_PAGETYPE_1 (//)
+Automatic Saving
+;
+MSG_PAGETYPE_2 (//)
+Backup Creation
+;
+MSG_PAGETYPE_3 (//)
+Colors
+;
+MSG_PAGETYPE_4 (//)
+Editing
+;
+MSG_PAGETYPE_5 (//)
+End Of Lines
+;
+MSG_PAGETYPE_6 (//)
+Folds
+;
+MSG_PAGETYPE_7 (//)
+Fonts
+;
+MSG_PAGETYPE_8 (//)
+Icons
+;
+MSG_PAGETYPE_9 (//)
+Miscellaneous
+;
+MSG_PAGETYPE_10 (//)
+Special Marks
+;
+MSG_PAGETYPE_11 (//)
+Tabs
+;
+MSG_PAGETYPE_12 (//)
+Window And Screen
+;
+MSG_AUTOMATIC_SAVING (//)
+Automatic Saving
+;
+MSG_AUTOSAVE (//)
+Auto-Save Documents
+;
+MSG_CONFIRM_AUTOSAVE (//)
+Ask Before Auto-Saving
+;
+MSG_AUTOSAVE_INTERVAL (//)
+Minutes Between Auto-Saves:
+;
+MSG_BACKUP_CREATION (//)
+Backup Creation
+;
+MSG_MAKE_BACKUPS (//)
+Create Backups When Saving
+;
+MSG_CONFIRM_CANT_BACKUP (//)
+Report When Backups Fail
+;
+MSG_BACKUP_TEMPLATE (//)
+Backup Template
+;
+MSG_MAX_BACKUP_VERSION (//)
+Maximum Backup Version:
+;
+MSG_SCREEN_COLORS (//)
+Screen Colors
+;
+MSG_RED (//)
+Red:
+;
+MSG_GREEN (//)
+Green:
+;
+MSG_BLUE (//)
+Blue:
+;
+MSG_DRAWING_PENS (//)
+Drawing Colors
+;
+MSG_TEXT_COLOR (//)
+Text Color
+;
+MSG_BACKGROUND_COLOR (//)
+Background Color
+;
+MSG_AUTO_CORRECT (//)
+Auto-Correct Word Case
+;
+MSG_AUTO_ERASE_BLOCKS (//)
+Auto-Erase Selected Blocks
+;
+MSG_AUTO_INDENT (//)
+Auto-Indent New Lines
+;
+MSG_SELECT_WHEN_DRAGGING (//)
+Select When Dragging
+;
+MSG_FREE_FORM (//)
+Free Form
+;
+MSG_LINE_WRAP (//)
+Line Wrap
+;
+MSG_OVERSTRIKE (//)
+Overstrike
+;
+MSG_WORD_WRAP (//)
+Word Wrap
+;
+MSG_RIGHT_MARGIN (//)
+Right Margin
+;
+MSG_DYNAMIC_MARGIN (//)
+Track Window Size
+;
+MSG_EOL_CONVERSIONS (//)
+Conversions
+;
+MSG_STRIP_TRAILING_SPACES (//)
+Remove Trailing Spaces When Saving
+;
+MSG_TRANSLATE_EOLS (//)
+Convert CR+LF/CR To LF When Loading
+;
+MSG_SAVE_EOLS_AS (//)
+Save End Of Lines As
+;
+MSG_SAVE_EOLS_AS_RADIO_1 (//)
+LF
+;
+MSG_SAVE_EOLS_AS_RADIO_2 (//)
+CR
+;
+MSG_SAVE_EOLS_AS_RADIO_3 (//)
+CR+LF
+;
+MSG_SAVE_EOLS_AS_RADIO_4 (//)
+Loaded
+;
+MSG_FOLD_SPACING (//)
+Fold Spacing
+;
+MSG_FOLD_SPACING_RADIO_1 (//)
+Dynamic
+;
+MSG_FOLD_SPACING_RADIO_2 (//)
+None
+;
+MSG_FOLD_SPACING_RADIO_3 (//)
+1 character
+;
+MSG_FOLD_SPACING_RADIO_4 (//)
+2 characters
+;
+MSG_FOLD_SPACING_RADIO_5 (//)
+3 characters
+;
+MSG_FOLD_SPACING_RADIO_6 (//)
+4 characters
+;
+MSG_FOLD_SPACING_RADIO_7 (//)
+5 characters
+;
+MSG_FONTS (//)
+Fonts
+;
+MSG_FONT_TEXT (//)
+Text Font
+;
+MSG_FONT_GADGETS (//)
+Gadget Font
+;
+MSG_ICONS (//)
+Icons
+;
+MSG_LOADSAVE_ICONS (//)
+Load And Save Project Icons
+;
+MSG_ICON_TOOL (//)
+Default Tool For New Icons
+;
+MSG_MISCELLANEOUS (//)
+Miscellaneous
+;
+MSG_MOUSE_BLANKER (//)
+Blank Mouse When Entering Text
+;
+MSG_CONFIRM_LOAD_TWICE (//)
+Ask Before Loading A File Twice
+;
+MSG_CONFIRM_OVERWRITE (//)
+Ask Before Overwriting A File
+;
+MSG_AUTO_DETECT_BIN_FILES (//)
+Auto-Detect Binary Files
+;
+MSG_CHUNKY_MODE (//)
+Chunky Pixel Mode
+;
+MSG_PRINT_DEVICE (//)
+Print Device
+;
+MSG_AREXX_CONSOLE (//)
+ARexx Console
+;
+MSG_SPECIAL_MARKS (//)
+Special Marks
+;
+MSG_SHOW_SPACES (//)
+Show Spaces As �
+;
+MSG_SHOW_TABS (//)
+Show Tabs As �
+;
+MSG_SHOW_EOLS (//)
+Show End Of Lines As �
+;
+MSG_SHOW_EOF (//)
+Show End Of Document As \x7F
+;
+MSG_TAB_GIVES_SPACES (//)
+Insert Spaces Instead Of Tabs
+;
+MSG_TAB_WIDTH_EDIT (//)
+Tab Width For Editing:
+;
+MSG_TAB_WIDTH_FILE (//)
+Tab Width For Files:
+;
+MSG_TAB_CONVERSIONS (//)
+Conversions
+;
+MSG_TAB_CONVERSION_LOAD (//)
+Conversion When Loading
+;
+MSG_TAB_CONVERSION_SAVE (//)
+Conversion When Saving
+;
+MSG_TAB_CONVERSION_PRINT (//)
+Conversion When Printing
+;
+MSG_TAB_CONVERSION_CYCLE_1 (//)
+None
+;
+MSG_TAB_CONVERSION_CYCLE_2 (//)
+Tabs To Spaces
+;
+MSG_TAB_CONVERSION_CYCLE_3 (//)
+Spaces To Tabs
+;
+MSG_SCREEN (//)
+Screen
+;
+MSG_AUTO_DEICONIFY (//)
+Deiconify Documents When Activated
+;
+MSG_AUTO_WINDOW2FRONT (//)
+Bring Documents To Front When Activated
+;
+MSG_BUFFERED (//)
+Buffer Window Contents When Hidden
+;
+MSG_TRACK_CURSOR (//)
+Scroll Screen To Keep Cursor Visible
+;
+MSG_ZOOM_GADGET (//)
+Zoom Gadget
+;
+MSG_ZOOM_GADGET_RADIO_1 (//)
+Iconifies
+;
+MSG_ZOOM_GADGET_RADIO_2 (//)
+Resizes
+;
+MSG_SCROLL_GADGET (//)
+Scroll Gadget
+;
+MSG_SCROLL_GADGET_RADIO_1 (//)
+On The Right
+;
+MSG_SCROLL_GADGET_RADIO_2 (//)
+On The Left
+;
+MSG_SCROLL_GADGET_RADIO_3 (//)
+Invisible
+;
+MSG_INFO_TITLE (//)
+TurboText Information
+;
+MSG_AREXX_PORT (//)
+ARexx port name: \0
+;
+MSG_VISIBLE_LINES (//)
+Visible lines: \0
+;
+MSG_FOLDED_LINES (//)
+Folded lines: \0
+;
+MSG_TOTAL_LINES (//)
+Total lines: \0
+;
+MSG_CHARS (//)
+Characters: \0
+;
+MSG_AVERAGE_CHARS (//)
+Average characters/line: \0
+;
+MSG_AVAIL_MEM (//)
+Available memory: \0
+;
+MSG_DATE (//)
+Date: \0
+;
+MSG_TIME (//)
+Time: \0
+;
+MSG_FIND_TITLE (//)
+Find
+;
+MSG_FIND_CHANGE_TITLE (//)
+Find & Change
+;
+MSG_FIND_STR (//)
+_Find
+;
+MSG_CHANGE_STR (//)
+_Change
+;
+MSG_FIND_NEXT (//)
+Find _Next
+;
+MSG_CHANGE (//)
+C_hange
+;
+MSG_CHANGE_ALL (//)
+Change _All
+;
+MSG_DO_PATTERNS (//)
+Do _Patterns
+;
+MSG_IGNORE_ACCENTS (//)
+_Ignore Accents
+;
+MSG_IGNORE_LETTER_CASE (//)
+I_gnore Letter Case
+;
+MSG_ONLY_WHOLE_WORDS (//)
+_Only Whole Words
+;
+MSG_SCAN_BACKWARDS (//)
+_Scan Backwards
+;
+##endif

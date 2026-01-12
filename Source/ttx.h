@@ -487,4 +487,10 @@ BOOL ShiftRight(struct TextBuffer *buffer, struct CleanupStack *stack);
 BOOL ConvertTabsToSpaces(struct TextBuffer *buffer, struct CleanupStack *stack);
 BOOL ConvertSpacesToTabs(struct TextBuffer *buffer, struct CleanupStack *stack);
 
+/* Definition file parser */
+struct DFNFile;
+struct DFNFile *ParseDFNFile(STRPTR fileName, struct CleanupStack *stack);
+VOID FreeDFNFile(struct DFNFile *dfn);
+struct NewMenu *ConvertDFNToNewMenu(struct DFNFile *dfn, ULONG *outCount);
+
 #endif /* TTX_H */
