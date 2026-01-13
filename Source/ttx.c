@@ -1236,7 +1236,7 @@ BOOL TTX_CreateSession(struct TTXApplication *app, STRPTR fileName)
     session->windowState.topEdge = 50;
     session->windowState.innerWidth = 600;  /* Default size */
     session->windowState.innerHeight = 400;
-    session->windowState.flags = WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_SIZEGADGET | WFLG_CLOSEGADGET | WFLG_ACTIVATE | WFLG_SMART_REFRESH | WFLG_NEWLOOKMENUS | WFLG_REPORTMOUSE;
+    session->windowState.flags = WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_SIZEGADGET | WFLG_SIZEBRIGHT | WFLG_SIZEBBOTTOM | WFLG_CLOSEGADGET | WFLG_ACTIVATE | WFLG_SMART_REFRESH | WFLG_NEWLOOKMENUS | WFLG_REPORTMOUSE;
     session->windowState.idcmpFlags = IDCMP_CLOSEWINDOW | IDCMP_VANILLAKEY | IDCMP_RAWKEY | IDCMP_REFRESHWINDOW | IDCMP_NEWSIZE | IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE | IDCMP_MENUPICK | IDCMP_IDCMPUPDATE;
     session->windowState.title = NULL;
     session->windowState.screenTitle = NULL;
