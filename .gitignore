@@ -1,0 +1,8 @@
+*.o
+*.uaem
+*.map
+output.txt
+*.lnk
+*.info
+seiso.*
+*.debug

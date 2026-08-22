@@ -1,0 +1,37 @@
+#
+# TurboText libraries - master build (asyncio.library layout)
+#
+# Builds three resident LVO shared libraries:
+#   turbotext/turbotext.library   - engine (document, editing, TurboTextRun)
+#   support/ttxsupport.library    - buffered I/O, memory pools
+#   reqs/ttxreqs.library          - BOOPSI requesters (prefs, find, hex)
+#
+# TTX driver loads libraries from Libs/ beside the executable (not LIBS:).
+#
+# Amiga smake: each recipe line runs in a new shell. Chain cd + smake on one
+# line with ';' (not POSIX &&). Parent directory is '//' (not ../).
+#
+
+LIBSDIR = //Libs
+
+all: turbotext support reqs
+
+turbotext:
+	cd turbotext ; smake
+
+support:
+	cd support ; smake
+
+reqs:
+	cd reqs ; smake
+
+install: all
+	makedir $(LIBSDIR)
+	copy turbotext/turbotext.library to $(LIBSDIR)/turbotext.library clone
+	copy support/ttxsupport.library to $(LIBSDIR)/ttxsupport.library clone
+	copy reqs/ttxreqs.library to $(LIBSDIR)/ttxreqs.library clone
+
+clean:
+	cd turbotext ; smake clean
+	cd support ; smake clean
+	cd reqs ; smake clean

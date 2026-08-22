@@ -1,0 +1,9 @@
+==id $VER: ttxsupport_lib.sfd 3.1 (21.8.2026)
+*"ttxsupport.library"
+==base _TTXSupportBase
+==basetype struct Library *
+==libname ttxsupport.library
+==include <libraries/ttxsupport.h>
+==bias 30
+==public
+==end

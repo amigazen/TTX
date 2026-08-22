@@ -1,0 +1,9 @@
+#ifndef TTXREQS_PRIVATE_TR_BUILD_H
+#define TTXREQS_PRIVATE_TR_BUILD_H
+
+#include "Rev.h"
+
+#define TR_LIB_VERSION   VERNUM
+#define TR_LIB_REVISION  REVNUM
+
+#endif /* TTXREQS_PRIVATE_TR_BUILD_H */

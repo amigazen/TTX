@@ -1,0 +1,9 @@
+==id $VER: ttxreqs_lib.sfd 3.1 (21.8.2026)
+*"ttxreqs.library"
+==base _TTXReqsBase
+==basetype struct Library *
+==libname ttxreqs.library
+==include <libraries/ttxreqs.h>
+==bias 30
+==public
+==end

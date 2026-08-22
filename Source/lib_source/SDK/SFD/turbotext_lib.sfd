@@ -1,0 +1,15 @@
+==id $VER: turbotext_lib.sfd 3.1 (21.8.2026)
+*"turbotext.library"
+==base _TurboTextBase
+==basetype struct Library *
+==libname turbotext.library
+==include <libraries/turbotext.h>
+==bias 30
+==public
+LONG TurboTextRun(STRPTR cmdLine, struct TTUIHooks * hooks, APTR appCtx) (a0,a1,a2)
+struct TTDocument * TT_OpenDocument(STRPTR fileName) (a0)
+BOOL TT_CloseDocument(struct TTDocument * doc) (a0)
+BOOL TT_DoCommand(struct TTDocument * doc, struct TTView * view, STRPTR command, STRPTR * args, ULONG argCount) (a0,a1,a2,a3,d0)
+struct TTView * TT_GetActiveView(struct TTDocument * doc) (a0)
+ULONG TT_GetLastError() ()
+==end

@@ -1,0 +1,33 @@
+#
+# ttxsupport.library - LVO shared library (asyncio pattern)
+#
+
+NAME = ttxsupport.library
+
+OPTIMIZE = optimize opttime
+DEBUG = symbolflush noopt
+
+CFLAGS = resopt idlen=64 comnest streq strmerge nostkchk \
+	includedir=include includedir=/SDK/Include_h includedir=include: \
+	$(OPTIMIZE) debug=$(DEBUG) \
+	params=register strsect=code mccons smallcode smalldata \
+	unsignedchars nomultipleincludes structureequivalence \
+	optimizescheduler noversion noicons memorysize=huge \
+	stringsconst nostartup
+LFLAGS = addsym smallcode smalldata noicons batch stripdebug
+
+OBJS = StartUp.o LibInit.o
+
+all: $(NAME)
+
+$(NAME): $(OBJS)
+	Sc $(LFLAGS) NOSTARTUP LINK TO $@ $(OBJS)
+
+clean:
+	delete $(NAME) $(NAME).debug $(NAME).map $(OBJS)
+
+LibInit.o: LibInit.c compiler.h private/ts_build.h Rev.h
+	Sc $(CFLAGS) DEF TS_SHARED_LIB UTILLIB OBJNAME $@ LibInit.c
+
+StartUp.o: StartUp.c compiler.h private/ts_build.h
+	Sc $(CFLAGS) DEF TS_SHARED_LIB UTILLIB OBJNAME $@ StartUp.c

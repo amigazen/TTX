@@ -8,8 +8,7 @@
  * and other configuration data.
  */
 
-#include "ttx.h"
-#include "seiso.h"
+#include "ttx_driver.h"
 
 /* Menu entry types */
 #define DFN_ENTRY_MENU  1
@@ -47,10 +46,10 @@ struct DFNFile {
 static VOID FreeDFNMenuEntry(struct DFNMenuEntry *entry);
 static VOID FreeDFNMenu(struct DFNMenu *menu);
 static STRPTR SkipWhitespace(STRPTR line);
-static STRPTR ExtractQuotedString(STRPTR line, STRPTR *outStr, struct CleanupStack *stack);
-static STRPTR ExtractToken(STRPTR line, STRPTR *outStr, struct CleanupStack *stack);
-static BOOL ParseMenuLine(STRPTR line, struct DFNMenuEntry *entry, struct CleanupStack *stack);
-static BOOL ParseDFNMenus(BPTR fileHandle, struct DFNFile *dfn, struct CleanupStack *stack);
+static STRPTR ExtractQuotedString(STRPTR line, STRPTR *outStr);
+static STRPTR ExtractToken(STRPTR line, STRPTR *outStr);
+static BOOL ParseMenuLine(STRPTR line, struct DFNMenuEntry *entry);
+static BOOL ParseDFNMenus(BPTR fileHandle, struct DFNFile *dfn);
 
 /* Free a menu entry and its allocated strings */
 static VOID FreeDFNMenuEntry(struct DFNMenuEntry *entry)
@@ -62,23 +61,23 @@ static VOID FreeDFNMenuEntry(struct DFNMenuEntry *entry)
     }
     
     if (entry->name) {
-        freeVec(entry->name);
+        TTX_Free(entry->name);
     }
     if (entry->shortcut) {
-        freeVec(entry->shortcut);
+        TTX_Free(entry->shortcut);
     }
     if (entry->command) {
-        freeVec(entry->command);
+        TTX_Free(entry->command);
     }
     if (entry->args) {
         for (i = 0; i < entry->argCount; i++) {
             if (entry->args[i]) {
-                freeVec(entry->args[i]);
+                TTX_Free(entry->args[i]);
             }
         }
-        freeVec(entry->args);
+        TTX_Free(entry->args);
     }
-    freeVec(entry);
+    TTX_Free(entry);
 }
 
 /* Free a menu and all its entries */
@@ -92,10 +91,10 @@ static VOID FreeDFNMenu(struct DFNMenu *menu)
     }
     
     if (menu->name) {
-        freeVec(menu->name);
+        TTX_Free(menu->name);
     }
     if (menu->helpNode) {
-        freeVec(menu->helpNode);
+        TTX_Free(menu->helpNode);
     }
     
     entry = menu->entries;
@@ -105,7 +104,7 @@ static VOID FreeDFNMenu(struct DFNMenu *menu)
         entry = nextEntry;
     }
     
-    freeVec(menu);
+    TTX_Free(menu);
 }
 
 /* Skip whitespace at the start of a line */
@@ -123,7 +122,7 @@ static STRPTR SkipWhitespace(STRPTR line)
 }
 
 /* Extract a quoted string from a line, returning pointer to after the string */
-static STRPTR ExtractQuotedString(STRPTR line, STRPTR *outStr, struct CleanupStack *stack)
+static STRPTR ExtractQuotedString(STRPTR line, STRPTR *outStr)
 {
     STRPTR start;
     STRPTR end;
@@ -159,7 +158,7 @@ static STRPTR ExtractQuotedString(STRPTR line, STRPTR *outStr, struct CleanupSta
     len = end - start;
     
     /* Allocate and copy string */
-    result = (STRPTR)allocVec(len + 1, MEMF_CLEAR);
+    result = (STRPTR)TTX_Alloc(len + 1, MEMF_CLEAR);
     if (!result) {
         return NULL;
     }
@@ -173,7 +172,7 @@ static STRPTR ExtractQuotedString(STRPTR line, STRPTR *outStr, struct CleanupSta
 }
 
 /* Extract a token (non-quoted string) from a line */
-static STRPTR ExtractToken(STRPTR line, STRPTR *outStr, struct CleanupStack *stack)
+static STRPTR ExtractToken(STRPTR line, STRPTR *outStr)
 {
     STRPTR start;
     STRPTR end;
@@ -207,7 +206,7 @@ static STRPTR ExtractToken(STRPTR line, STRPTR *outStr, struct CleanupStack *sta
     }
     
     /* Allocate and copy string */
-    result = (STRPTR)allocVec(len + 1, MEMF_CLEAR);
+    result = (STRPTR)TTX_Alloc(len + 1, MEMF_CLEAR);
     if (!result) {
         return NULL;
     }
@@ -220,11 +219,32 @@ static STRPTR ExtractToken(STRPTR line, STRPTR *outStr, struct CleanupStack *sta
     return end;
 }
 
+/* Case-insensitive ASCII keyword match at start of line */
+static BOOL DFN_IsKeyword(STRPTR p, STRPTR word, ULONG wordLen)
+{
+    ULONG i;
+    UBYTE a;
+    UBYTE b;
+
+    for (i = 0; i < wordLen; i++) {
+        if (p[i] == '\0')
+            return FALSE;
+        a = (UBYTE)p[i];
+        b = (UBYTE)word[i];
+        if (a >= 'a' && a <= 'z')
+            a = (UBYTE)(a - ('a' - 'A'));
+        if (b >= 'a' && b <= 'z')
+            b = (UBYTE)(b - ('a' - 'A'));
+        if (a != b)
+            return FALSE;
+    }
+    return TRUE;
+}
+
 /* Parse a single menu line (MENU, ITEM, SUB, BAR, SBAR) */
-static BOOL ParseMenuLine(STRPTR line, struct DFNMenuEntry *entry, struct CleanupStack *stack)
+static BOOL ParseMenuLine(STRPTR line, struct DFNMenuEntry *entry)
 {
     STRPTR p;
-    STRPTR token;
     ULONG argIdx;
     STRPTR *newArgs;
     
@@ -250,19 +270,19 @@ static BOOL ParseMenuLine(STRPTR line, struct DFNMenuEntry *entry, struct Cleanu
     /* Determine entry type */
     /* Use StrnCmp from locale.library for string comparison */
     /* SC_ASCII (0) provides case-insensitive ASCII comparison */
-    if (StrnCmp(NULL, p, "MENU", 4, 0) == 0 && (p[4] == ' ' || p[4] == '\t' || p[4] == '\0')) {
+    if (DFN_IsKeyword(p, "MENU", 4) && (p[4] == ' ' || p[4] == '\t' || p[4] == '\0')) {
         entry->type = DFN_ENTRY_MENU;
         p += 4;
-    } else if (StrnCmp(NULL, p, "ITEM", 4, 0) == 0 && (p[4] == ' ' || p[4] == '\t' || p[4] == '\0')) {
+    } else if (DFN_IsKeyword(p, "ITEM", 4) && (p[4] == ' ' || p[4] == '\t' || p[4] == '\0')) {
         entry->type = DFN_ENTRY_ITEM;
         p += 4;
-    } else if (StrnCmp(NULL, p, "SUB", 3, 0) == 0 && (p[3] == ' ' || p[3] == '\t' || p[3] == '\0')) {
+    } else if (DFN_IsKeyword(p, "SUB", 3) && (p[3] == ' ' || p[3] == '\t' || p[3] == '\0')) {
         entry->type = DFN_ENTRY_SUB;
         p += 3;
-    } else if (StrnCmp(NULL, p, "BAR", 3, 0) == 0 && (p[3] == ' ' || p[3] == '\t' || p[3] == '\0' || p[3] == '\n' || p[3] == '\r')) {
+    } else if (DFN_IsKeyword(p, "BAR", 3) && (p[3] == ' ' || p[3] == '\t' || p[3] == '\0' || p[3] == '\n' || p[3] == '\r')) {
         entry->type = DFN_ENTRY_BAR;
         return TRUE; /* BAR has no additional fields */
-    } else if (StrnCmp(NULL, p, "SBAR", 4, 0) == 0 && (p[4] == ' ' || p[4] == '\t' || p[4] == '\0' || p[4] == '\n' || p[4] == '\r')) {
+    } else if (DFN_IsKeyword(p, "SBAR", 4) && (p[4] == ' ' || p[4] == '\t' || p[4] == '\0' || p[4] == '\n' || p[4] == '\r')) {
         entry->type = DFN_ENTRY_SBAR;
         return TRUE; /* SBAR has no additional fields */
     } else {
@@ -274,13 +294,13 @@ static BOOL ParseMenuLine(STRPTR line, struct DFNMenuEntry *entry, struct Cleanu
         /* Extract name (quoted string) */
         p = SkipWhitespace(p);
         if (*p == '"') {
-            p = ExtractQuotedString(p, &entry->name, stack);
+            p = ExtractQuotedString(p, &entry->name);
             if (!entry->name) {
                 return FALSE;
             }
         } else {
             /* Name not quoted - extract as token */
-            p = ExtractToken(p, &entry->name, stack);
+            p = ExtractToken(p, &entry->name);
             if (!entry->name) {
                 return FALSE;
             }
@@ -290,7 +310,7 @@ static BOOL ParseMenuLine(STRPTR line, struct DFNMenuEntry *entry, struct Cleanu
         if (entry->type == DFN_ENTRY_MENU) {
             p = SkipWhitespace(p);
             if (*p == '"') {
-                p = ExtractQuotedString(p, &entry->shortcut, stack);
+                p = ExtractQuotedString(p, &entry->shortcut);
                 /* shortcut holds help node for MENU entries */
             }
             /* MENU entries don't have command or args */
@@ -301,17 +321,17 @@ static BOOL ParseMenuLine(STRPTR line, struct DFNMenuEntry *entry, struct Cleanu
         /* Extract shortcut (quoted string, may be empty) */
         p = SkipWhitespace(p);
         if (*p == '"') {
-            p = ExtractQuotedString(p, &entry->shortcut, stack);
+            p = ExtractQuotedString(p, &entry->shortcut);
             /* shortcut may be NULL if empty string */
         } else if (*p && *p != '\n' && *p != '\r') {
             /* No quotes - extract as token */
-            p = ExtractToken(p, &entry->shortcut, stack);
+            p = ExtractToken(p, &entry->shortcut);
         }
         
         /* Extract command (token) */
         p = SkipWhitespace(p);
         if (*p && *p != '\n' && *p != '\r') {
-            p = ExtractToken(p, &entry->command, stack);
+            p = ExtractToken(p, &entry->command);
             /* command may be NULL if not present */
         }
         
@@ -324,7 +344,7 @@ static BOOL ParseMenuLine(STRPTR line, struct DFNMenuEntry *entry, struct Cleanu
             }
             
             /* Expand args array */
-            newArgs = (STRPTR *)allocVec((entry->argCount + 1) * sizeof(STRPTR), MEMF_CLEAR);
+            newArgs = (STRPTR *)TTX_Alloc((entry->argCount + 1) * sizeof(STRPTR), MEMF_CLEAR);
             if (!newArgs) {
                 return FALSE;
             }
@@ -332,13 +352,13 @@ static BOOL ParseMenuLine(STRPTR line, struct DFNMenuEntry *entry, struct Cleanu
             /* Copy existing args */
             if (entry->args) {
                 CopyMem(entry->args, newArgs, entry->argCount * sizeof(STRPTR));
-                freeVec(entry->args);
+                TTX_Free(entry->args);
             }
             
             entry->args = newArgs;
             
             /* Extract next argument */
-            p = ExtractToken(p, &entry->args[argIdx], stack);
+            p = ExtractToken(p, &entry->args[argIdx]);
             if (!entry->args[argIdx]) {
                 break;
             }
@@ -352,7 +372,7 @@ static BOOL ParseMenuLine(STRPTR line, struct DFNMenuEntry *entry, struct Cleanu
 }
 
 /* Parse MENUS section from a .dfn file */
-static BOOL ParseDFNMenus(BPTR fileHandle, struct DFNFile *dfn, struct CleanupStack *stack)
+static BOOL ParseDFNMenus(BPTR fileHandle, struct DFNFile *dfn)
 {
     UBYTE lineBuffer[512];
     STRPTR line;
@@ -396,18 +416,17 @@ static BOOL ParseDFNMenus(BPTR fileHandle, struct DFNFile *dfn, struct CleanupSt
         p = SkipWhitespace(line);
         /* Use StrnCmp from locale.library for string comparison */
         /* SC_ASCII (0) provides case-insensitive ASCII comparison */
-        if (StrnCmp(NULL, p, "MENUS:", 6, 0) == 0) {
+        if (DFN_IsKeyword(p, "MENUS:", 6)) {
             inMenusSection = TRUE;
             continue;
         } else if (*p == '#' && inMenusSection) {
-            /* End of MENUS section */
             break;
-        } else if (StrnCmp(NULL, p, "KEYBOARD:", 9, 0) == 0 || 
-                   StrnCmp(NULL, p, "HOT_KEYS:", 9, 0) == 0 ||
-                   StrnCmp(NULL, p, "MOUSE_BUTTONS:", 14, 0) == 0 ||
-                   StrnCmp(NULL, p, "DICTIONARY:", 11, 0) == 0 ||
-                   StrnCmp(NULL, p, "TEMPLATES:", 10, 0) == 0 ||
-                   StrnCmp(NULL, p, "LINKS:", 6, 0) == 0) {
+        } else if (DFN_IsKeyword(p, "KEYBOARD:", 9) ||
+                   DFN_IsKeyword(p, "HOT_KEYS:", 9) ||
+                   DFN_IsKeyword(p, "MOUSE_BUTTONS:", 14) ||
+                   DFN_IsKeyword(p, "DICTIONARY:", 11) ||
+                   DFN_IsKeyword(p, "TEMPLATES:", 10) ||
+                   DFN_IsKeyword(p, "LINKS:", 6)) {
             /* Another section starts - end MENUS section */
             if (inMenusSection) {
                 break;
@@ -420,19 +439,19 @@ static BOOL ParseDFNMenus(BPTR fileHandle, struct DFNFile *dfn, struct CleanupSt
         }
         
         /* Parse menu line */
-        newEntry = (struct DFNMenuEntry *)allocVec(sizeof(struct DFNMenuEntry), MEMF_CLEAR);
+        newEntry = (struct DFNMenuEntry *)TTX_Alloc(sizeof(struct DFNMenuEntry), MEMF_CLEAR);
         if (!newEntry) {
             return FALSE;
         }
         
-        if (!ParseMenuLine(line, newEntry, stack)) {
-            freeVec(newEntry);
+        if (!ParseMenuLine(line, newEntry)) {
+            TTX_Free(newEntry);
             continue; /* Skip invalid lines */
         }
         
         /* Handle MENU entry - start new menu */
         if (newEntry->type == DFN_ENTRY_MENU) {
-            currentMenu = (struct DFNMenu *)allocVec(sizeof(struct DFNMenu), MEMF_CLEAR);
+            currentMenu = (struct DFNMenu *)TTX_Alloc(sizeof(struct DFNMenu), MEMF_CLEAR);
             if (!currentMenu) {
                 FreeDFNMenuEntry(newEntry);
                 return FALSE;
@@ -476,7 +495,7 @@ static BOOL ParseDFNMenus(BPTR fileHandle, struct DFNFile *dfn, struct CleanupSt
 }
 
 /* Parse a .dfn file and return a DFNFile structure */
-struct DFNFile *ParseDFNFile(STRPTR fileName, struct CleanupStack *stack)
+struct DFNFile *ParseDFNFile(STRPTR fileName)
 {
     BPTR fileHandle;
     struct DFNFile *dfn;
@@ -493,14 +512,14 @@ struct DFNFile *ParseDFNFile(STRPTR fileName, struct CleanupStack *stack)
     }
     
     /* Allocate DFN structure */
-    dfn = (struct DFNFile *)allocVec(sizeof(struct DFNFile), MEMF_CLEAR);
+    dfn = (struct DFNFile *)TTX_Alloc(sizeof(struct DFNFile), MEMF_CLEAR);
     if (!dfn) {
         Close(fileHandle);
         return NULL;
     }
     
     /* Parse MENUS section */
-    if (!ParseDFNMenus(fileHandle, dfn, stack)) {
+    if (!ParseDFNMenus(fileHandle, dfn)) {
         Printf("[DFN] ParseDFNFile: failed to parse MENUS section\n");
         FreeDFNFile(dfn);
         Close(fileHandle);
@@ -530,7 +549,7 @@ VOID FreeDFNFile(struct DFNFile *dfn)
         menu = nextMenu;
     }
     
-    freeVec(dfn);
+    TTX_Free(dfn);
 }
 
 /* Count total number of NewMenu entries needed for a DFN menu structure */
@@ -582,7 +601,7 @@ struct NewMenu *ConvertDFNToNewMenu(struct DFNFile *dfn, ULONG *outCount)
     }
     
     count = CountNewMenuEntries(dfn);
-    newMenu = (struct NewMenu *)allocVec(count * sizeof(struct NewMenu), MEMF_CLEAR);
+    newMenu = (struct NewMenu *)TTX_Alloc(count * sizeof(struct NewMenu), MEMF_CLEAR);
     if (!newMenu) {
         return NULL;
     }

@@ -1,63 +1,74 @@
-# SMakefile for TTX
-# 
-# TTX - Text Editor for AmigaOS
-# A clean-room reimplementation of TurboText 2.0
+# SMakefile for TTX driver
+#
+# Lightweight launcher/orchestrator - loads turbotext.library at runtime
+# (asyncio.library / AsyncTest pattern: no static link of the .library file).
+#
+# Amiga smake: chain cd + smake on one line with ';' (not POSIX &&).
 #
 
-# Program name
 PROGRAM = TTX
+LIBDIR = lib_source
+TURBOTEXTDIR = lib_source/turbotext
+LIBSDIR = Libs
 
-# Source files
-SRCS = ttx.c ttx_text.c ttx_commands.c ttx_block.c ttx_dfn.c
+SRCS = ttx.c ttx_commands.c ttx_dfn.c ttx_render.c ttx_lib.c ttx_boopsi.c ttx_intui.c ttx_texteditor.c ttx_block.c ttx_buffer.c ttx_mem.c
+OBJS = ttx.o ttx_commands.o ttx_dfn.o ttx_render.o ttx_lib.o ttx_boopsi.o ttx_intui.o ttx_texteditor.o ttx_block.o ttx_buffer.o ttx_mem.o
 
-# Object files
-OBJS = ttx.o ttx_text.o ttx_commands.o ttx_block.o ttx_dfn.o
-
-# Compiler and linker
 CC = sc
 LINK = slink
 
-# Default target
-all: $(PROGRAM)
+all: installlib $(PROGRAM)
 
-# Create the TTX executable
-$(PROGRAM): $(OBJS)
-	$(LINK) FROM sc:lib/c.o $(OBJS) TO $(PROGRAM) STRIPDEBUG NODEBUG LIB lib:small.lib sc:lib/sc.lib lib/seiso.lib lib:amiga.lib BATCH
+lib:
+	cd $(LIBDIR) ; smake all
 
-# Compile the source files
+installlib: lib
+	cd $(LIBDIR) ; smake install
+
+$(PROGRAM): $(OBJS) lib
+	$(LINK) FROM sc:lib/c.o $(OBJS) TO $(PROGRAM) STRIPDEBUG NODEBUG \
+		LIB sc:lib/sc.lib lib:amiga.lib BATCH
+
 .c.o:
-	$(CC) $*.c OBJNAME=$*.o IDIR=include: 
+	$(CC) $*.c OBJNAME=$*.o IDIR=$(TURBOTEXTDIR)/include IDIR=include:
 
-# Compile TTX main file
-ttx.o: ttx.c ttx.h
-	$(CC) ttx.c OBJNAME=ttx.o IDIR=include: 
+ttx.o: ttx.c ttx_driver.h
+	$(CC) ttx.c OBJNAME=ttx.o IDIR=$(TURBOTEXTDIR)/include IDIR=include:
 
-# Compile TTX text functions
-ttx_text.o: ttx_text.c ttx.h
-	$(CC) ttx_text.c OBJNAME=ttx_text.o IDIR=include: 
+ttx_commands.o: ttx_commands.c ttx_driver.h
+	$(CC) ttx_commands.c OBJNAME=ttx_commands.o IDIR=$(TURBOTEXTDIR)/include IDIR=include:
 
-# Compile TTX command functions
-ttx_commands.o: ttx_commands.c ttx.h
-	$(CC) ttx_commands.c OBJNAME=ttx_commands.o IDIR=include: 
+ttx_dfn.o: ttx_dfn.c ttx_driver.h
+	$(CC) ttx_dfn.c OBJNAME=ttx_dfn.o IDIR=$(TURBOTEXTDIR)/include IDIR=include:
 
-# Compile TTX block operations
+ttx_render.o: ttx_render.c ttx_driver.h
+	$(CC) ttx_render.c OBJNAME=ttx_render.o IDIR=$(TURBOTEXTDIR)/include IDIR=include:
+
+ttx_lib.o: ttx_lib.c ttx_driver.h
+	$(CC) ttx_lib.c OBJNAME=ttx_lib.o IDIR=$(TURBOTEXTDIR)/include IDIR=include:
+
+ttx_boopsi.o: ttx_boopsi.c ttx_boopsi.h ttx_driver.h
+	$(CC) ttx_boopsi.c OBJNAME=ttx_boopsi.o IDIR=$(TURBOTEXTDIR)/include IDIR=include:
+
+ttx_intui.o: ttx_intui.c ttx_intui.h ttx_driver.h
+	$(CC) ttx_intui.c OBJNAME=ttx_intui.o IDIR=$(TURBOTEXTDIR)/include IDIR=include:
+
+ttx_texteditor.o: ttx_texteditor.c ttx_texteditor.h ttx_driver.h
+	$(CC) ttx_texteditor.c OBJNAME=ttx_texteditor.o IDIR=$(TURBOTEXTDIR)/include IDIR=include:
+
 ttx_block.o: ttx_block.c ttx.h
-	$(CC) ttx_block.c OBJNAME=ttx_block.o IDIR=include: 
+	$(CC) ttx_block.c OBJNAME=ttx_block.o IDIR=$(TURBOTEXTDIR)/include IDIR=include:
 
-# Compile TTX definition file parser
-ttx_dfn.o: ttx_dfn.c ttx.h
-	$(CC) ttx_dfn.c OBJNAME=ttx_dfn.o IDIR=include: 
+ttx_buffer.o: ttx_buffer.c ttx_driver.h
+	$(CC) ttx_buffer.c OBJNAME=ttx_buffer.o IDIR=$(TURBOTEXTDIR)/include IDIR=include:
 
-# Clean target
+ttx_mem.o: ttx_mem.c ttx_mem.h
+	$(CC) ttx_mem.c OBJNAME=ttx_mem.o IDIR=include:
+
 clean:
-	Delete $(OBJS) $(PROGRAM) ttx.o ttx_text.o ttx_commands.o ttx_block.o ttx_dfn.o
+	Delete $(OBJS) $(PROGRAM)
+	cd $(LIBDIR) ; smake clean
 
-# Install target
-install:
-	@echo "Installing TTX to /SDK/Tools/TTX/"
+install: installlib $(PROGRAM)
+	@echo "Installing TTX to SDK Tools"
 	@copy $(PROGRAM) to /SDK/Tools/TTX/$(PROGRAM) CLONE
-
-# Dependencies
-ttx.o: ttx.c ttx.h
-ttx_text.o: ttx_text.c ttx.h
-

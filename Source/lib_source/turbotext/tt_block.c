@@ -1,34 +1,25 @@
 /*
- * TTX - Block Operations and Word Navigation
+ * turbotext.library - block selection and word navigation
  *
  * Copyright (c) 2025 amigazen project
  * Licensed under BSD 2-Clause License
  */
 
-#include "ttx.h"
+#include "private/tt_internal.h"
 
-/* Forward declarations */
-static BOOL IsWordSeparator(UBYTE c);
-static VOID NormalizeMarking(struct TTTextMarking *marking);
-
-/* Check if character is a word separator */
 /* Word separators: space, tab, newline, and punctuation */
 static BOOL IsWordSeparator(UBYTE c)
 {
-    if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
-        return TRUE;
-    }
-    /* Check for punctuation */
-    if ((c >= '!' && c <= '/') || 
-        (c >= ':' && c <= '@') || 
-        (c >= '[' && c <= '`') || 
-        (c >= '{' && c <= '~')) {
-        return TRUE;
-    }
-    return FALSE;
+	if (c == ' ' || c == '\t' || c == '\n' || c == '\r')
+		return TRUE;
+	if ((c >= '!' && c <= '/') ||
+	    (c >= ':' && c <= '@') ||
+	    (c >= '[' && c <= '`') ||
+	    (c >= '{' && c <= '~'))
+		return TRUE;
+	return FALSE;
 }
 
-/* Normalize marking so start is before stop */
 static VOID NormalizeMarking(struct TTTextMarking *marking)
 {
     ULONG tempY = 0;
@@ -50,12 +41,7 @@ static VOID NormalizeMarking(struct TTTextMarking *marking)
     }
 }
 
-/* ============================================================================
- * Block Operations
- * ============================================================================ */
-
-/* Get selected text block */
-STRPTR GetBlock(struct TTTextBuffer *buffer)
+STRPTR TT_GetBlock(struct TTTextBuffer *buffer)
 {
     ULONG startY = 0;
     ULONG startX = 0;
@@ -118,7 +104,7 @@ STRPTR GetBlock(struct TTTextBuffer *buffer)
     }
     
     /* Allocate memory for result (add 1 for null terminator) */
-    result = (STRPTR)TTX_Alloc(totalLen + 1, MEMF_CLEAR);
+    result = (STRPTR)TT_Alloc(totalLen + 1, MEMF_CLEAR);
     if (!result) {
         return NULL;
     }
@@ -174,8 +160,7 @@ STRPTR GetBlock(struct TTTextBuffer *buffer)
     return result;
 }
 
-/* Delete selected block */
-BOOL DeleteBlock(struct TTTextBuffer *buffer)
+BOOL TT_DeleteBlock(struct TTTextBuffer *buffer)
 {
     ULONG startY = 0;
     ULONG startX = 0;
@@ -217,7 +202,7 @@ BOOL DeleteBlock(struct TTTextBuffer *buffer)
         newLen = startX + (lineLen - stopX);
         
         /* Allocate new text */
-        newText = (STRPTR)TTX_Alloc(newLen + 1, MEMF_CLEAR);
+        newText = (STRPTR)TT_Alloc(newLen + 1, MEMF_CLEAR);
         if (!newText) {
             return FALSE;
         }
@@ -233,7 +218,7 @@ BOOL DeleteBlock(struct TTTextBuffer *buffer)
         }
         
         /* Replace line text */
-        TTX_Free(buffer->lines[startY].text);
+        TT_Free(buffer->lines[startY].text);
         buffer->lines[startY].text = newText;
         buffer->lines[startY].length = newLen;
         buffer->lines[startY].allocated = newLen + 1;
@@ -247,12 +232,12 @@ BOOL DeleteBlock(struct TTTextBuffer *buffer)
         lineLen = buffer->lines[startY].length;
         if (startX < lineLen) {
             newLen = startX;
-            newText = (STRPTR)TTX_Alloc(newLen + 1, MEMF_CLEAR);
+            newText = (STRPTR)TT_Alloc(newLen + 1, MEMF_CLEAR);
             if (newText) {
                 if (startX > 0) {
                     CopyMem(buffer->lines[startY].text, newText, startX);
                 }
-                TTX_Free(buffer->lines[startY].text);
+                TT_Free(buffer->lines[startY].text);
                 buffer->lines[startY].text = newText;
                 buffer->lines[startY].length = newLen;
                 buffer->lines[startY].allocated = newLen + 1;
@@ -270,13 +255,13 @@ BOOL DeleteBlock(struct TTTextBuffer *buffer)
             if (appendLen > 0) {
                 ULONG newTotalLen;
                 newTotalLen = lineLen + appendLen;
-                newText = (STRPTR)TTX_Alloc(newTotalLen + 1, MEMF_CLEAR);
+                newText = (STRPTR)TT_Alloc(newTotalLen + 1, MEMF_CLEAR);
                 if (newText) {
                     if (lineLen > 0) {
                         CopyMem(buffer->lines[startY].text, newText, lineLen);
                     }
                     CopyMem(buffer->lines[stopY].text, &newText[lineLen], appendLen);
-                    TTX_Free(buffer->lines[startY].text);
+                    TT_Free(buffer->lines[startY].text);
                     buffer->lines[startY].text = newText;
                     buffer->lines[startY].length = newTotalLen;
                     buffer->lines[startY].allocated = newTotalLen + 1;
@@ -287,7 +272,7 @@ BOOL DeleteBlock(struct TTTextBuffer *buffer)
         /* Delete middle lines */
         for (i = startY + 1; i <= stopY && i < buffer->lineCount; i++) {
             if (buffer->lines[i].text) {
-                TTX_Free(buffer->lines[i].text);
+                TT_Free(buffer->lines[i].text);
                 buffer->lines[i].text = NULL;
                 buffer->lines[i].length = 0;
             }
@@ -313,8 +298,7 @@ BOOL DeleteBlock(struct TTTextBuffer *buffer)
     return TRUE;
 }
 
-/* Mark all text */
-VOID MarkAllBlock(struct TTTextBuffer *buffer)
+VOID TT_MarkAllBlock(struct TTTextBuffer *buffer)
 {
     if (!buffer) {
         return;
@@ -332,8 +316,7 @@ VOID MarkAllBlock(struct TTTextBuffer *buffer)
     }
 }
 
-/* Set marking from cursor positions */
-VOID SetMarking(struct TTTextBuffer *buffer, ULONG startY, ULONG startX, ULONG stopY, ULONG stopX)
+VOID TT_SetMarking(struct TTTextBuffer *buffer, ULONG startY, ULONG startX, ULONG stopY, ULONG stopX)
 {
     if (!buffer) {
         return;
@@ -346,8 +329,7 @@ VOID SetMarking(struct TTTextBuffer *buffer, ULONG startY, ULONG startX, ULONG s
     buffer->marking.stopX = stopX;
 }
 
-/* Clear marking */
-VOID ClearMarking(struct TTTextBuffer *buffer)
+VOID TT_ClearMarking(struct TTTextBuffer *buffer)
 {
     if (!buffer) {
         return;
@@ -356,12 +338,7 @@ VOID ClearMarking(struct TTTextBuffer *buffer)
     buffer->marking.enabled = FALSE;
 }
 
-/* ============================================================================
- * Word Navigation
- * ============================================================================ */
-
-/* Move to next word */
-BOOL MoveNextWord(struct TTTextBuffer *buffer)
+BOOL TT_MoveNextWord(struct TTTextBuffer *buffer)
 {
     ULONG lineLen = 0;
     
@@ -403,8 +380,7 @@ BOOL MoveNextWord(struct TTTextBuffer *buffer)
     return TRUE;
 }
 
-/* Move to previous word */
-BOOL MovePrevWord(struct TTTextBuffer *buffer)
+BOOL TT_MovePrevWord(struct TTTextBuffer *buffer)
 {
     ULONG lineLen = 0;
     BOOL moved = FALSE;
@@ -466,8 +442,7 @@ BOOL MovePrevWord(struct TTTextBuffer *buffer)
     return TRUE;
 }
 
-/* Move to end of line */
-BOOL MoveEndOfLine(struct TTTextBuffer *buffer)
+BOOL TT_MoveEndOfLine(struct TTTextBuffer *buffer)
 {
     if (!buffer || buffer->cursorY >= buffer->lineCount) {
         return FALSE;
@@ -477,8 +452,7 @@ BOOL MoveEndOfLine(struct TTTextBuffer *buffer)
     return TRUE;
 }
 
-/* Move to start of line */
-BOOL MoveStartOfLine(struct TTTextBuffer *buffer)
+BOOL TT_MoveStartOfLine(struct TTTextBuffer *buffer)
 {
     if (!buffer || buffer->cursorY >= buffer->lineCount) {
         return FALSE;
@@ -488,8 +462,7 @@ BOOL MoveStartOfLine(struct TTTextBuffer *buffer)
     return TRUE;
 }
 
-/* Move to end of word */
-BOOL MoveEndOfWord(struct TTTextBuffer *buffer)
+BOOL TT_MoveEndOfWord(struct TTTextBuffer *buffer)
 {
     ULONG lineLen = 0;
     
@@ -521,8 +494,7 @@ BOOL MoveEndOfWord(struct TTTextBuffer *buffer)
     return TRUE;
 }
 
-/* Move to start of word */
-BOOL MoveStartOfWord(struct TTTextBuffer *buffer)
+BOOL TT_MoveStartOfWord(struct TTTextBuffer *buffer)
 {
     ULONG lineLen = 0;
     
@@ -557,3 +529,4 @@ BOOL MoveStartOfWord(struct TTTextBuffer *buffer)
     
     return TRUE;
 }
+

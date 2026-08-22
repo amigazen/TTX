@@ -1,0 +1,93 @@
+#
+# turbotext.library - LVO shared library (asyncio.library pattern)
+#
+# FuncTab[] LVOs: one source file each, compiled DEF TT_SHARED_LIB UTILLIB.
+# Engine internals (tt_*.c): same flags, normal C calling convention.
+# Link: Sc NOSTARTUP LINK TO turbotext.library — not OBJLIB / not slink LIB.
+#
+
+NAME = turbotext.library
+
+OPTIMIZE = optimize opttime
+DEBUG = symbolflush noopt
+
+CFLAGS = resopt idlen=64 comnest streq strmerge nostkchk \
+	includedir=include includedir=/SDK/Include_h includedir=include: \
+	$(OPTIMIZE) debug=$(DEBUG) \
+	params=register strsect=code mccons smallcode smalldata \
+	unsignedchars nomultipleincludes structureequivalence \
+	optimizescheduler noversion noicons memorysize=huge \
+	stringsconst nostartup
+LFLAGS = addsym smallcode smalldata noicons batch stripdebug
+
+# StartUp + LibInit + one .o per public LVO (matches SFD) + engine internals
+OBJS = \
+	StartUp.o \
+	LibInit.o \
+	TurboTextRun.o \
+	TT_OpenDocument.o \
+	TT_CloseDocument.o \
+	TT_DoCommand.o \
+	TT_GetActiveView.o \
+	TT_GetLastError.o \
+	tt_mem.o \
+	tt_document.o \
+	tt_run.o \
+	tt_commands.o \
+	tt_text.o \
+	tt_block.o
+
+all: $(NAME)
+
+$(NAME): $(OBJS)
+	Sc $(LFLAGS) NOSTARTUP LINK TO $@ $(OBJS)
+
+clean:
+	delete $(NAME) $(NAME).debug $(NAME).map $(OBJS)
+
+release:
+	copy $(NAME) to /SDK/libs/$(NAME) clone
+
+LibInit.o: LibInit.c compiler.h private/tt_build.h Rev.h
+	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ LibInit.c
+
+StartUp.o: StartUp.c compiler.h private/tt_build.h tt_funcs.h
+	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ StartUp.c
+
+TurboTextRun.o: TurboTextRun.c tt_funcs.h
+	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ TurboTextRun.c
+
+TT_OpenDocument.o: TT_OpenDocument.c tt_funcs.h
+	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ TT_OpenDocument.c
+
+TT_CloseDocument.o: TT_CloseDocument.c tt_funcs.h
+	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ TT_CloseDocument.c
+
+TT_DoCommand.o: TT_DoCommand.c tt_funcs.h
+	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ TT_DoCommand.c
+
+TT_GetActiveView.o: TT_GetActiveView.c tt_funcs.h
+	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ TT_GetActiveView.c
+
+TT_GetLastError.o: TT_GetLastError.c tt_funcs.h
+	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ TT_GetLastError.c
+
+tt_mem.o: tt_mem.c include/private/tt_internal.h
+	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ tt_mem.c
+
+tt_document.o: tt_document.c include/private/tt_internal.h
+	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ tt_document.c
+
+tt_run.o: tt_run.c include/private/tt_internal.h
+	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ tt_run.c
+
+tt_commands.o: tt_commands.c include/private/tt_internal.h
+	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ tt_commands.c
+
+tt_text.o: tt_text.c include/private/tt_internal.h
+	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ tt_text.c
+
+tt_block.o: tt_block.c include/private/tt_internal.h
+	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ tt_block.c
+
+$(OBJS): compiler.h tt_funcs.h include/private/tt_internal.h
