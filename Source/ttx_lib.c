@@ -302,10 +302,14 @@ LONG
 TTX_RunWithArgs(struct TTXApplication *app, struct TTXArgs *args)
 {
 	STRPTR *files = NULL;
-	TEXT cmdBuf[512];
+	STRPTR cmdBuf = NULL;
 	LONG result = 0;
 
 	if (!app || !TurboTextBase)
+		return -1;
+
+	cmdBuf = TTX_AllocPathBuf();
+	if (!cmdBuf)
 		return -1;
 
 	if (args && args->files)
@@ -313,18 +317,21 @@ TTX_RunWithArgs(struct TTXApplication *app, struct TTXArgs *args)
 		files = args->files;
 		while (*files)
 		{
-			TTX_BuildOpenDocCmd(cmdBuf, sizeof(cmdBuf), *files, args);
+			TTX_BuildOpenDocCmd(cmdBuf, TTX_PATH_BUF_LEN, *files, args);
 			result = TurboTextRun(cmdBuf, &TTX_UIHooksTable, (APTR)app);
-			if (result < 0)
+			if (result < 0) {
+				TTX_Free(cmdBuf);
 				return result;
+			}
 			files++;
 		}
 	}
 	else if (!args || !args->noWindow)
 	{
-		TTX_BuildOpenDocCmd(cmdBuf, sizeof(cmdBuf), NULL, args);
+		TTX_BuildOpenDocCmd(cmdBuf, TTX_PATH_BUF_LEN, NULL, args);
 		result = TurboTextRun(cmdBuf, &TTX_UIHooksTable, (APTR)app);
 	}
 
+	TTX_Free(cmdBuf);
 	return result;
 }

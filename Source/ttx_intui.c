@@ -13,9 +13,9 @@
 #include "ttx_intui.h"
 #include "ttx_boopsi.h"
 #include "ttx_texteditor.h"
+#include "ttx_input.h"
 
 #include <devices/inputevent.h>
-#include <proto/keymap.h>
 
 /****************************************************************************/
 
@@ -44,66 +44,6 @@ TTX_IntuiDecodeMenuItem(struct MenuItem *item, ULONG *outMenu, ULONG *outItem)
 	if (userData != 0) {
 		*outMenu = (userData >> 8) & 0xFF;
 		*outItem = userData & 0xFF;
-		return TRUE;
-	}
-
-	return FALSE;
-}
-
-/****************************************************************************/
-
-static BOOL
-TTX_IntuiMapKey(struct IntuiMessage *imsg, UBYTE *outChar)
-{
-	UWORD rawCode;
-	ULONG qual;
-	struct InputEvent ievent;
-	UBYTE charBuffer[10];
-	WORD chars;
-	struct KeyMap *keymap;
-
-	if (!imsg || !outChar)
-		return FALSE;
-
-	*outChar = 0;
-
-	/* Direct ASCII in Code (normal VANILLAKEY) */
-	if (imsg->Code >= 32 && imsg->Code <= 126) {
-		*outChar = (UBYTE)imsg->Code;
-		return TRUE;
-	}
-
-	/*
-	 * This host puts raw scan codes in Qualifier when Code is 0.
-	 * Map via keymap.library (same approach as test.c RAWKEY path).
-	 */
-	rawCode = imsg->Code;
-	if (rawCode == 0)
-		rawCode = imsg->Qualifier;
-	if (rawCode & IECODE_UP_PREFIX)
-		return FALSE;
-
-	if (!KeymapBase)
-		return FALSE;
-
-	keymap = (struct KeyMap *)KeymapBase;
-	qual = (ULONG)imsg->Qualifier;
-	ievent.ie_Class = IECLASS_RAWKEY;
-	ievent.ie_Code = rawCode;
-	ievent.ie_Qualifier = (UWORD)qual;
-	ievent.ie_SubClass = 0;
-	ievent.ie_X = 0;
-	ievent.ie_Y = 0;
-	ievent.ie_NextEvent = NULL;
-	ievent.ie_TimeStamp.tv_secs = 0;
-	ievent.ie_TimeStamp.tv_micro = 0;
-	ievent.ie_EventAddress = NULL;
-	if (imsg->IAddress)
-		ievent.ie_EventAddress = (APTR)(*((ULONG *)imsg->IAddress));
-
-	chars = MapRawKey(&ievent, charBuffer, 9, keymap);
-	if (chars > 0 && charBuffer[0] >= 32) {
-		*outChar = charBuffer[0];
 		return TRUE;
 	}
 
@@ -189,136 +129,6 @@ TTX_IntuiRefreshSession(struct Session *session)
 	UpdateScrollBars(session);
 	RenderText(session->window, session);
 	UpdateCursor(session->window, session);
-}
-
-/****************************************************************************/
-
-static VOID
-TTX_IntuiHandleKey(struct TTXApplication *app, struct Session *session,
-	struct IntuiMessage *imsg)
-{
-	ULONG key;
-	ULONG qual;
-	STRPTR insArgs[1];
-	TEXT chBuf[2];
-	BOOL processed;
-	UBYTE rawCode;
-	struct InputEvent ievent;
-	UBYTE charBuffer[10];
-	WORD chars;
-	struct KeyMap *keymap;
-
-	if (!app || !session || !imsg || !TT_SessionBuffer(session))
-		return;
-	if (session->document->state.readOnly)
-		return;
-
-	key = 0;
-	processed = FALSE;
-	qual = (ULONG)imsg->Qualifier;
-
-	if (imsg->Class == IDCMP_VANILLAKEY) {
-		if (imsg->Code == 0x08) {
-			TTX_DoEngineCommand(app, session, "Delete", NULL, 0);
-			processed = TRUE;
-		} else if (imsg->Code == 0x7F) {
-			TTX_DoEngineCommand(app, session, "DeleteForward", NULL, 0);
-			processed = TRUE;
-		} else if (imsg->Code == 0x0A || imsg->Code == 0x0D) {
-			TTX_DoEngineCommand(app, session, "InsertLine", NULL, 0);
-			processed = TRUE;
-		} else if (imsg->Code == 0x1B) {
-			TTX_RequestDestroySession(app, session);
-			return;
-		} else if (imsg->Code == 0x45 && (qual & IEQUALIFIER_CONTROL)) {
-			TTX_HandleCommand(app, session, "SaveFile", NULL, 0);
-			processed = TRUE;
-		} else if (TTX_IntuiMapKey(imsg, (UBYTE *)&key)) {
-			chBuf[0] = (TEXT)key;
-			chBuf[1] = '\0';
-			insArgs[0] = chBuf;
-			TTX_DoEngineCommand(app, session, "Insert", insArgs, 1);
-			processed = TRUE;
-		}
-	} else if (imsg->Class == IDCMP_RAWKEY) {
-		rawCode = (UBYTE)imsg->Code;
-		if (rawCode == 0)
-			rawCode = (UBYTE)((UWORD)imsg->Qualifier & 0xFF);
-		if (rawCode & 0x80)
-			return;
-
-		if (rawCode == 0x41) {
-			TTX_DoEngineCommand(app, session, "Delete", NULL, 0);
-			processed = TRUE;
-		} else if (rawCode == 0x42) {
-			TTX_DoEngineCommand(app, session, "DeleteForward", NULL, 0);
-			processed = TRUE;
-		} else if (rawCode == 0x43) {
-			TTX_DoEngineCommand(app, session, "InsertLine", NULL, 0);
-			processed = TRUE;
-		} else if (rawCode == 0x4F) {
-			if (TT_SessionBuffer(session)->cursorX > 0)
-				TT_SessionBuffer(session)->cursorX--;
-			else if (TT_SessionBuffer(session)->cursorY > 0) {
-				TT_SessionBuffer(session)->cursorY--;
-				TT_SessionBuffer(session)->cursorX =
-					TT_SessionBuffer(session)->lines[
-						TT_SessionBuffer(session)->cursorY].length;
-			}
-			processed = TRUE;
-		} else if (rawCode == 0x4E) {
-			if (TT_SessionBuffer(session)->cursorX <
-			    TT_SessionBuffer(session)->lines[
-				    TT_SessionBuffer(session)->cursorY].length)
-				TT_SessionBuffer(session)->cursorX++;
-			else if (TT_SessionBuffer(session)->cursorY <
-				 TT_SessionBuffer(session)->lineCount - 1) {
-				TT_SessionBuffer(session)->cursorY++;
-				TT_SessionBuffer(session)->cursorX = 0;
-			}
-			processed = TRUE;
-		} else if (rawCode == 0x4C) {
-			if (TT_SessionBuffer(session)->cursorY > 0)
-				TT_SessionBuffer(session)->cursorY--;
-			processed = TRUE;
-		} else if (rawCode == 0x4D) {
-			if (TT_SessionBuffer(session)->cursorY <
-			    TT_SessionBuffer(session)->lineCount - 1)
-				TT_SessionBuffer(session)->cursorY++;
-			processed = TRUE;
-		} else if (KeymapBase) {
-			keymap = (struct KeyMap *)KeymapBase;
-			ievent.ie_Class = IECLASS_RAWKEY;
-			ievent.ie_Code = rawCode;
-			ievent.ie_Qualifier = (UWORD)qual;
-			ievent.ie_SubClass = 0;
-			ievent.ie_X = 0;
-			ievent.ie_Y = 0;
-			ievent.ie_NextEvent = NULL;
-			ievent.ie_TimeStamp.tv_secs = 0;
-			ievent.ie_TimeStamp.tv_micro = 0;
-			ievent.ie_EventAddress = NULL;
-			if (imsg->IAddress)
-				ievent.ie_EventAddress = (APTR)(*((ULONG *)imsg->IAddress));
-			chars = MapRawKey(&ievent, charBuffer, 9, keymap);
-			if (chars > 0 && charBuffer[0] >= 32) {
-				chBuf[0] = (TEXT)charBuffer[0];
-				chBuf[1] = '\0';
-				insArgs[0] = chBuf;
-				TTX_DoEngineCommand(app, session, "Insert", insArgs, 1);
-				processed = TRUE;
-			}
-		}
-	}
-
-	Printf("[INTUI] KEY class=%08lx code=%02x qual=%04x -> processed=%s\n",
-		(ULONG)imsg->Class, (unsigned int)imsg->Code,
-		(unsigned int)imsg->Qualifier, processed ? "YES" : "NO");
-
-	if (processed) {
-		session->document->state.modified = TT_SessionBuffer(session)->modified;
-		TTX_IntuiRefreshSession(session);
-	}
 }
 
 /****************************************************************************/
@@ -542,7 +352,7 @@ TTX_IntuiHandleMessage(struct TTXApplication *app, struct Session *portSession,
 	case IDCMP_RAWKEY:
 		/* Window-level fallback when the text editor gadget is absent. */
 		if (!session->textEditorGadget)
-			TTX_IntuiHandleKey(app, session, imsg);
+			TTX_InputFromIntuiMessage(app, session, imsg);
 		result = TRUE;
 		break;
 

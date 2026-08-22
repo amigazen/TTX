@@ -11,8 +11,8 @@ LIBDIR = lib_source
 TURBOTEXTDIR = lib_source/turbotext
 LIBSDIR = Libs
 
-SRCS = ttx.c ttx_commands.c ttx_dfn.c ttx_render.c ttx_lib.c ttx_boopsi.c ttx_intui.c ttx_texteditor.c ttx_block.c ttx_buffer.c ttx_mem.c
-OBJS = ttx.o ttx_commands.o ttx_dfn.o ttx_render.o ttx_lib.o ttx_boopsi.o ttx_intui.o ttx_texteditor.o ttx_block.o ttx_buffer.o ttx_mem.o
+SRCS = ttx.c ttx_commands.c ttx_dfn.c ttx_render.c ttx_lib.c ttx_boopsi.c ttx_intui.c ttx_input.c ttx_texteditor.c ttx_menu_builtin.c ttx_block.c ttx_buffer.c ttx_mem.c
+OBJS = ttx.o ttx_commands.o ttx_dfn.o ttx_render.o ttx_lib.o ttx_boopsi.o ttx_intui.o ttx_input.o ttx_texteditor.o ttx_menu_builtin.o ttx_block.o ttx_buffer.o ttx_mem.o
 
 CC = sc
 LINK = slink
@@ -35,7 +35,7 @@ $(PROGRAM): $(OBJS) lib
 ttx.o: ttx.c ttx_driver.h
 	$(CC) ttx.c OBJNAME=ttx.o IDIR=$(TURBOTEXTDIR)/include IDIR=include:
 
-ttx_commands.o: ttx_commands.c ttx_driver.h
+ttx_commands.o: ttx_commands.c ttx_driver.h ttx_menu_builtin.h
 	$(CC) ttx_commands.c OBJNAME=ttx_commands.o IDIR=$(TURBOTEXTDIR)/include IDIR=include:
 
 ttx_dfn.o: ttx_dfn.c ttx_driver.h
@@ -53,8 +53,14 @@ ttx_boopsi.o: ttx_boopsi.c ttx_boopsi.h ttx_driver.h
 ttx_intui.o: ttx_intui.c ttx_intui.h ttx_driver.h
 	$(CC) ttx_intui.c OBJNAME=ttx_intui.o IDIR=$(TURBOTEXTDIR)/include IDIR=include:
 
+ttx_input.o: ttx_input.c ttx_input.h ttx_driver.h
+	$(CC) ttx_input.c OBJNAME=ttx_input.o IDIR=$(TURBOTEXTDIR)/include IDIR=include:
+
 ttx_texteditor.o: ttx_texteditor.c ttx_texteditor.h ttx_driver.h
 	$(CC) ttx_texteditor.c OBJNAME=ttx_texteditor.o IDIR=$(TURBOTEXTDIR)/include IDIR=include:
+
+ttx_menu_builtin.o: ttx_menu_builtin.c ttx_menu_builtin.h ttx_driver.h
+	$(CC) ttx_menu_builtin.c OBJNAME=ttx_menu_builtin.o IDIR=$(TURBOTEXTDIR)/include IDIR=include:
 
 ttx_block.o: ttx_block.c ttx.h
 	$(CC) ttx_block.c OBJNAME=ttx_block.o IDIR=$(TURBOTEXTDIR)/include IDIR=include:

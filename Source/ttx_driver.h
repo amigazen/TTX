@@ -173,7 +173,7 @@ struct TTXApplication {
 	ULONG deferredAction;
 	struct Session *deferredCloseSession;
 	struct Session *deferredOpenSession;
-	TEXT lastAslDrawer[512];
+	STRPTR lastAslDrawer;
 };
 
 /****************************************************************************/

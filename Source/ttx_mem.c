@@ -24,3 +24,9 @@ TTX_Free(APTR ptr)
 	if (ptr)
 		FreeVec(ptr);
 }
+
+STRPTR
+TTX_AllocPathBuf(VOID)
+{
+	return (STRPTR)TTX_Alloc(TTX_PATH_BUF_LEN, MEMF_CLEAR);
+}

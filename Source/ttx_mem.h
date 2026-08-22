@@ -10,7 +10,11 @@
 
 #include <exec/types.h>
 
+/* Heap buffer for DOS path strings (NameFromLock, AddPart, ASL). */
+#define TTX_PATH_BUF_LEN 512
+
 APTR TTX_Alloc(ULONG size, ULONG flags);
 VOID TTX_Free(APTR ptr);
+STRPTR TTX_AllocPathBuf(VOID);
 
 #endif /* TTX_MEM_H */

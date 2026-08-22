@@ -107,6 +107,10 @@ TTX_BoopsiCreateScrollGadgets(
 			initialTotal = initialVisible;
 		initialTop = TT_SessionBuffer(session)->scrollY;
 	}
+	if (initialVisible < 1)
+		initialVisible = 1;
+	if (initialTotal < 1)
+		initialTotal = 1;
 
 	/*
 	 * In-window relative props (not border gadgets). OpenWindow autodoc:
@@ -155,6 +159,10 @@ TTX_BoopsiCreateScrollGadgets(
 			initialTotal = initialVisible;
 		initialTop = TT_SessionBuffer(session)->scrollX;
 	}
+	if (initialVisible < 1)
+		initialVisible = 1;
+	if (initialTotal < 1)
+		initialTotal = 1;
 
 	session->scroll.horizProp = (struct Gadget *)NewObject(
 		NULL, PROPGCLASS,

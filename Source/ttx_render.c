@@ -747,8 +747,17 @@ VOID CalculateMaxScroll(struct TTTextBuffer *buffer, struct Window *window) {
   ULONG textWidth = 0;
   ULONG maxChars = 0;
   ULONG scrollBarW = 0;
+  ULONG lineLimit = 0;
 
-  if (!buffer || !window || !window->RPort) {
+  if (!buffer) {
+    return;
+  }
+
+  if (!window || !window->RPort) {
+    if (buffer->pageH < 1)
+      buffer->pageH = 1;
+    if (buffer->pageW < 1)
+      buffer->pageW = 1;
     return;
   }
 
@@ -793,7 +802,12 @@ VOID CalculateMaxScroll(struct TTTextBuffer *buffer, struct Window *window) {
 
   maxLineLen = 0;
   if (buffer->lines && buffer->lineCount > 0) {
-    for (i = 0; i < buffer->lineCount; i++) {
+    lineLimit = buffer->lineCount;
+    if (lineLimit > buffer->maxLines)
+      lineLimit = buffer->maxLines;
+    if (lineLimit > TT_MAX_LINES)
+      lineLimit = TT_MAX_LINES;
+    for (i = 0; i < lineLimit; i++) {
       if (buffer->lines[i].length > maxLineLen)
         maxLineLen = buffer->lines[i].length;
     }

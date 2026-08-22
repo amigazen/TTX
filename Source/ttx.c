@@ -12,7 +12,10 @@
 #include "ttx.h"
 
 static const char *verstag = "$VER: TTX 3.0 (12/1/2026)\n";
-static const char *stack_cookie = "$STACK: 32768\n";
+static const char *stack_cookie = "$STACK: 4096\n";
+
+/* Library base for gadtools.lib pragmas (CreateMenus, LayoutMenus, …). */
+struct Library *GadToolsBase = NULL;
 
 /* Initialize required libraries */
 BOOL TTX_InitLibraries(VOID) {
@@ -1421,6 +1424,13 @@ BOOL TTX_CreateSessionForDocument(struct TTXApplication *app, struct TTDocument 
 
   /* Set window limits already done in TTX_IntuiOpenWindow */
 
+  /*
+   * Buffer starts with pageH/pageW = 0. propgclass NewObject() with PGA_Visible
+   * 0 can wedge Intuition; compute page metrics before any BOOPSI props.
+   */
+  if (TT_SessionBuffer(session) && session->window)
+    CalculateMaxScroll(TT_SessionBuffer(session), session->window);
+
   /* Menu strip before scroll gadgets */
   if (!TTX_CreateMenuStrip(session)) {
     Printf("[INIT] TTX_CreateSession: WARN (menu creation failed, continuing "
@@ -1433,9 +1443,6 @@ BOOL TTX_CreateSessionForDocument(struct TTXApplication *app, struct TTDocument 
 
     if (!TTX_TextEditor_CreateGadget(app, session))
       Printf("[INIT] TTX_CreateSession: WARN (text editor gadget failed)\n");
-
-    if (TT_SessionBuffer(session))
-      CalculateMaxScroll(TT_SessionBuffer(session), session->window);
 
     drawInfo = GetScreenDrawInfo(session->window->WScreen);
     if (drawInfo)
@@ -1921,6 +1928,12 @@ BOOL TTX_Init(struct TTXApplication *app) {
     return FALSE;
   }
 
+  app->lastAslDrawer = TTX_AllocPathBuf();
+  if (!app->lastAslDrawer) {
+    Printf("[INIT] TTX_Init: FAIL (lastAslDrawer)\n");
+    return FALSE;
+  }
+
   /* Setup message port */
   if (!TTX_SetupMessagePort(app)) {
     return FALSE;
@@ -1960,6 +1973,11 @@ VOID TTX_Cleanup(struct TTXApplication *app) {
 
   /* Remove app icon before destroying sessions */
   TTX_RemoveAppIcon(app);
+
+  if (app->lastAslDrawer) {
+    TTX_Free(app->lastAslDrawer);
+    app->lastAslDrawer = NULL;
+  }
 
   /* Destroy all sessions */
   Printf("[CLEANUP] TTX_Cleanup: destroying %lu sessions\n", app->sessionCount);
@@ -2109,6 +2127,7 @@ int main(int argc, char *argv[]) {
   struct RDArgs *rda = NULL;
   BOOL parseResult = FALSE;
   LONG result = RETURN_OK;
+  STRPTR fullPath = NULL;
 
   /* Initialize application */
   if (!TTX_Init(&app)) {
@@ -2143,8 +2162,11 @@ int main(int argc, char *argv[]) {
       STRPTR fileName = NULL;
       struct WBArg *wbarg = &wbMsg->sm_ArgList[1];
       ULONG len = 0;
-      char fullPath[512];
 
+      fullPath = TTX_AllocPathBuf();
+      if (!fullPath) {
+        parseResult = FALSE;
+      } else {
       /* Build full path */
       /* Clear IoErr() before dos.library path operations to ensure clean state
        */
@@ -2152,7 +2174,7 @@ int main(int argc, char *argv[]) {
       fullPath[0] = '\0';
       if (wbarg->wa_Lock) {
         /* NameFromLock can fail - check result and clear error on failure */
-        if (!NameFromLock(wbarg->wa_Lock, fullPath, sizeof(fullPath))) {
+        if (!NameFromLock(wbarg->wa_Lock, fullPath, TTX_PATH_BUF_LEN)) {
           /* NameFromLock failed - clear error and use empty path */
           /* This prevents dos.library from being left in undefined state */
           SetIoErr(0);
@@ -2167,7 +2189,7 @@ int main(int argc, char *argv[]) {
       if (fullPath[0] != '\0' || wbarg->wa_Lock == NULL) {
         /* Clear IoErr() before AddPart to ensure clean state */
         SetIoErr(0);
-        if (!AddPart(fullPath, wbarg->wa_Name, sizeof(fullPath))) {
+        if (!AddPart(fullPath, wbarg->wa_Name, TTX_PATH_BUF_LEN)) {
           /* AddPart failed - clear error to prevent dos.library corruption */
           SetIoErr(0);
           fullPath[0] = '\0';
@@ -2178,7 +2200,7 @@ int main(int argc, char *argv[]) {
       }
 
       len = 0;
-      while (fullPath[len] != '\0' && len < sizeof(fullPath) - 1) {
+      while (fullPath[len] != '\0' && len < (TTX_PATH_BUF_LEN - 1)) {
         len++;
       }
       if (len > 0 ) {
@@ -2191,6 +2213,9 @@ int main(int argc, char *argv[]) {
           ttxArgs.files[1] = NULL;
           parseResult = TRUE;
         }
+      }
+      TTX_Free(fullPath);
+      fullPath = NULL;
       }
     } else {
       /* No files, check tooltypes */

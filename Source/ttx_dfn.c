@@ -374,7 +374,7 @@ static BOOL ParseMenuLine(STRPTR line, struct DFNMenuEntry *entry)
 /* Parse MENUS section from a .dfn file */
 static BOOL ParseDFNMenus(BPTR fileHandle, struct DFNFile *dfn)
 {
-    UBYTE lineBuffer[512];
+    STRPTR lineBuffer = NULL;
     STRPTR line;
     ULONG lineLen;
     BOOL inMenusSection = FALSE;
@@ -386,17 +386,21 @@ static BOOL ParseDFNMenus(BPTR fileHandle, struct DFNFile *dfn)
     if (!fileHandle || !dfn) {
         return FALSE;
     }
+
+    lineBuffer = TTX_AllocPathBuf();
+    if (!lineBuffer)
+        return FALSE;
     
     dfn->menus = NULL;
     
     /* Read file line by line */
     SetIoErr(0);
-    while (FGets(fileHandle, lineBuffer, sizeof(lineBuffer) - 1) != NULL) {
+    while (FGets(fileHandle, lineBuffer, TTX_PATH_BUF_LEN - 1) != NULL) {
         line = lineBuffer;
         lineLen = 0;
         
         /* Calculate line length */
-        while (line[lineLen] != '\0' && line[lineLen] != '\n' && line[lineLen] != '\r' && lineLen < sizeof(lineBuffer) - 1) {
+        while (line[lineLen] != '\0' && line[lineLen] != '\n' && line[lineLen] != '\r' && lineLen < (TTX_PATH_BUF_LEN - 1)) {
             lineLen++;
         }
         
@@ -441,6 +445,7 @@ static BOOL ParseDFNMenus(BPTR fileHandle, struct DFNFile *dfn)
         /* Parse menu line */
         newEntry = (struct DFNMenuEntry *)TTX_Alloc(sizeof(struct DFNMenuEntry), MEMF_CLEAR);
         if (!newEntry) {
+            TTX_Free(lineBuffer);
             return FALSE;
         }
         
@@ -454,6 +459,7 @@ static BOOL ParseDFNMenus(BPTR fileHandle, struct DFNFile *dfn)
             currentMenu = (struct DFNMenu *)TTX_Alloc(sizeof(struct DFNMenu), MEMF_CLEAR);
             if (!currentMenu) {
                 FreeDFNMenuEntry(newEntry);
+                TTX_Free(lineBuffer);
                 return FALSE;
             }
             
@@ -491,6 +497,7 @@ static BOOL ParseDFNMenus(BPTR fileHandle, struct DFNFile *dfn)
         }
     }
     
+    TTX_Free(lineBuffer);
     return TRUE;
 }
 
@@ -506,10 +513,8 @@ struct DFNFile *ParseDFNFile(STRPTR fileName)
     
     /* Open file */
     fileHandle = Open(fileName, MODE_OLDFILE);
-    if (!fileHandle) {
-        Printf("[DFN] ParseDFNFile: failed to open '%s'\n", fileName);
+    if (!fileHandle)
         return NULL;
-    }
     
     /* Allocate DFN structure */
     dfn = (struct DFNFile *)TTX_Alloc(sizeof(struct DFNFile), MEMF_CLEAR);

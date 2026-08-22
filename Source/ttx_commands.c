@@ -7,7 +7,20 @@
 
 #include "ttx_driver.h"
 #include "ttx_commands_prot.h"
+#include "ttx_menu_builtin.h"
 #include "ttx.h"
+
+/* Flush menu trace lines before a crash so output.txt shows the last step. */
+static VOID
+TTX_MenuTrace(STRPTR step)
+{
+	BPTR out;
+
+	Printf("[MENU] %s\n", step);
+	out = Output();
+	if (out)
+		Flush(out);
+}
 
 /* Run an engine command and refresh the session view. */
 BOOL
@@ -658,191 +671,38 @@ BOOL TTX_HandleMenuPick(struct TTXApplication *app, struct Session *session, ULO
 /* Create menu strip matching DFN file structure */
 BOOL TTX_CreateMenuStrip(struct Session *session)
 {
-    /* Store menu/item numbers in UserData for easy lookup */
-    /* Format: (menuNumber << 8) | itemNumber */
-    /* This hardcoded menu matches TTX_BuiltIn.dfn exactly */
-    static struct NewMenu newMenu[] = {
-        /* Menu 0: Project */
-        {NM_TITLE, "Project", NULL, 0, 0, NULL},
-        {NM_ITEM, "Open...", "O", 0, 0, (APTR)TTX_MENU_UD_FLAG},
-        {NM_ITEM, "Open New...", "Y", 0, 0, (APTR)((0UL << 8) | 1UL)},
-        {NM_ITEM, "Insert...", NULL, 0, 0, (APTR)((0UL << 8) | 2UL)},
-        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Save", "S", 0, 0, (APTR)((0UL << 8) | 4UL)},
-        {NM_ITEM, "Save As...", "A", 0, 0, (APTR)((0UL << 8) | 5UL)},
-        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Clear", "K", 0, 0, (APTR)((0UL << 8) | 7UL)},
-        {NM_ITEM, "Print...", "P", 0, 0, (APTR)((0UL << 8) | 8UL)},
-        {NM_ITEM, "Info...", "?", 0, 0, (APTR)((0UL << 8) | 9UL)},
-        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Read-Only", NULL, 0, CHECKIT, (APTR)((0UL << 8) | 11UL)},
-        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Close Window", "Q", 0, 0, (APTR)((0UL << 8) | 12UL)},
-        
-        /* Menu 1: Windows */
-        {NM_TITLE, "Windows", NULL, 0, 0, NULL},
-        {NM_ITEM, "New", "W", 0, 0, (APTR)((1UL << 8) | 0UL)},
-        {NM_SUB, "Activate", NULL, 0, 0, NULL},
-        {NM_ITEM, "Next Document", "0", 0, 0, (APTR)((1UL << 8) | 2UL)},
-        {NM_ITEM, "Previous Document", "1", 0, 0, (APTR)((1UL << 8) | 3UL)},
-        {NM_SUB, "Resize", NULL, 0, 0, NULL},
-        {NM_ITEM, "To Maximum", NULL, 0, 0, (APTR)((1UL << 8) | 5UL)},
-        {NM_ITEM, "To Minimum", NULL, 0, 0, (APTR)((1UL << 8) | 6UL)},
-        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Iconify", NULL, 0, 0, (APTR)((1UL << 8) | 8UL)},
-        {NM_SUB, "Organize Windows", NULL, 0, 0, NULL},
-        {NM_ITEM, "Stack", NULL, 0, 0, (APTR)((1UL << 8) | 10UL)},
-        {NM_ITEM, "Tile", NULL, 0, 0, (APTR)((1UL << 8) | 11UL)},
-        {NM_ITEM, "Cascade", NULL, 0, 0, (APTR)((1UL << 8) | 12UL)},
-        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Iconify All", NULL, 0, 0, (APTR)((1UL << 8) | 14UL)},
-        {NM_SUB, "Views", NULL, 0, 0, NULL},
-        {NM_ITEM, "Split", "\\", 0, 0, (APTR)((1UL << 8) | 16UL)},
-        {NM_ITEM, "Toggle", "T", 0, 0, (APTR)((1UL << 8) | 17UL)},
-        {NM_ITEM, "Swap", NULL, 0, 0, (APTR)((1UL << 8) | 18UL)},
-        {NM_ITEM, "Expand", ";", 0, 0, (APTR)((1UL << 8) | 19UL)},
-        {NM_ITEM, "Shrink", ":", 0, 0, (APTR)((1UL << 8) | 20UL)},
-        {NM_ITEM, "Center", "'", 0, 0, (APTR)((1UL << 8) | 21UL)},
-        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Open Hex View...", "$", 0, 0, (APTR)((1UL << 8) | 23UL)},
-        {NM_ITEM, "Open Calculator...", "#", 0, 0, (APTR)((1UL << 8) | 24UL)},
-        {NM_ITEM, "Open TTX Shell...", ".", 0, 0, (APTR)((1UL << 8) | 25UL)},
-        {NM_ITEM, "Open DOS Shell...", NULL, 0, 0, (APTR)((1UL << 8) | 26UL)},
-        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Help...", NULL, 0, 0, (APTR)((1UL << 8) | 28UL)},
-        {NM_ITEM, "User's Manual...", NULL, 0, 0, (APTR)((1UL << 8) | 29UL)},
-        
-        /* Menu 2: Edit */
-        {NM_TITLE, "Edit", NULL, 0, 0, NULL},
-        {NM_ITEM, "Mark", "B", 0, 0, (APTR)((2UL << 8) | 0UL)},
-        {NM_ITEM, "Cut", "X", 0, 0, (APTR)((2UL << 8) | 1UL)},
-        {NM_ITEM, "Copy", "C", 0, 0, (APTR)((2UL << 8) | 2UL)},
-        {NM_ITEM, "Paste", "V", 0, 0, (APTR)((2UL << 8) | 3UL)},
-        {NM_ITEM, "Erase", "E", 0, 0, (APTR)((2UL << 8) | 4UL)},
-        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Mark Vertical", "<", 0, 0, (APTR)((2UL << 8) | 6UL)},
-        {NM_ITEM, "Paste Vertical", ">", 0, 0, (APTR)((2UL << 8) | 7UL)},
-        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Open Clip...", "!", 0, 0, (APTR)((2UL << 8) | 9UL)},
-        {NM_ITEM, "Save Clip As...", "@", 0, 0, (APTR)((2UL << 8) | 10UL)},
-        {NM_ITEM, "Print Clip...", "&", 0, 0, (APTR)((2UL << 8) | 11UL)},
-        
-        /* Menu 3: Search */
-        {NM_TITLE, "Search", NULL, 0, 0, NULL},
-        {NM_ITEM, "Find...", "F", 0, 0, (APTR)((3UL << 8) | 0UL)},
-        {NM_ITEM, "Find Next", "N", 0, 0, (APTR)((3UL << 8) | 1UL)},
-        {NM_ITEM, "Find & Change...", "/", 0, 0, (APTR)((3UL << 8) | 2UL)},
-        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Go To Line #...", "J", 0, 0, (APTR)((3UL << 8) | 4UL)},
-        {NM_ITEM, "Go To Char #...", NULL, 0, 0, (APTR)((3UL << 8) | 5UL)},
-        {NM_ITEM, "Go To Last Change", "G", 0, 0, (APTR)((3UL << 8) | 6UL)},
-        {NM_ITEM, "Go To Auto-Bookmark", ",", 0, 0, (APTR)((3UL << 8) | 7UL)},
-        {NM_ITEM, "Match Bracket", "[", 0, 0, (APTR)((3UL << 8) | 8UL)},
-        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_SUB, "Set Bookmark", NULL, 0, 0, NULL},
-        {NM_ITEM, "#1", NULL, 0, 0, (APTR)((3UL << 8) | 11UL)},
-        {NM_ITEM, "#2", NULL, 0, 0, (APTR)((3UL << 8) | 12UL)},
-        {NM_ITEM, "#3", NULL, 0, 0, (APTR)((3UL << 8) | 13UL)},
-        {NM_ITEM, "#4", NULL, 0, 0, (APTR)((3UL << 8) | 14UL)},
-        {NM_ITEM, "#5", NULL, 0, 0, (APTR)((3UL << 8) | 15UL)},
-        {NM_ITEM, "#6", NULL, 0, 0, (APTR)((3UL << 8) | 16UL)},
-        {NM_ITEM, "#7", NULL, 0, 0, (APTR)((3UL << 8) | 17UL)},
-        {NM_ITEM, "#8", NULL, 0, 0, (APTR)((3UL << 8) | 18UL)},
-        {NM_ITEM, "#9", NULL, 0, 0, (APTR)((3UL << 8) | 19UL)},
-        {NM_ITEM, "#10", NULL, 0, 0, (APTR)((3UL << 8) | 20UL)},
-        {NM_SUB, "Go To Bookmark", NULL, 0, 0, NULL},
-        {NM_ITEM, "#1", NULL, 0, 0, (APTR)((3UL << 8) | 22UL)},
-        {NM_ITEM, "#2", NULL, 0, 0, (APTR)((3UL << 8) | 23UL)},
-        {NM_ITEM, "#3", NULL, 0, 0, (APTR)((3UL << 8) | 24UL)},
-        {NM_ITEM, "#4", NULL, 0, 0, (APTR)((3UL << 8) | 25UL)},
-        {NM_ITEM, "#5", NULL, 0, 0, (APTR)((3UL << 8) | 26UL)},
-        {NM_ITEM, "#6", NULL, 0, 0, (APTR)((3UL << 8) | 27UL)},
-        {NM_ITEM, "#7", NULL, 0, 0, (APTR)((3UL << 8) | 28UL)},
-        {NM_ITEM, "#8", NULL, 0, 0, (APTR)((3UL << 8) | 29UL)},
-        {NM_ITEM, "#9", NULL, 0, 0, (APTR)((3UL << 8) | 30UL)},
-        {NM_ITEM, "#10", NULL, 0, 0, (APTR)((3UL << 8) | 31UL)},
-        
-        /* Menu 4: Macros */
-        {NM_TITLE, "Macros", NULL, 0, 0, NULL},
-        {NM_ITEM, "Record Macro", "R", 0, 0, (APTR)((4UL << 8) | 0UL)},
-        {NM_ITEM, "Stop Recording", "H", 0, 0, (APTR)((4UL << 8) | 1UL)},
-        {NM_ITEM, "Play Macro", "M", 0, 0, (APTR)((4UL << 8) | 2UL)},
-        {NM_ITEM, "Play Many...", "I", 0, 0, (APTR)((4UL << 8) | 3UL)},
-        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Open Macro...", "2", 0, 0, (APTR)((4UL << 8) | 5UL)},
-        {NM_ITEM, "Save Macro As...", NULL, 0, 0, (APTR)((4UL << 8) | 6UL)},
-        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Execute ARexx...", "3", 0, 0, (APTR)((4UL << 8) | 8UL)},
-        
-        /* Menu 5: Folds */
-        {NM_TITLE, "Folds", NULL, 0, 0, NULL},
-        {NM_ITEM, "Make Fold", "(", 0, 0, (APTR)((5UL << 8) | 0UL)},
-        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_SUB, "Show", NULL, 0, 0, NULL},
-        {NM_ITEM, "Single", "+", 0, 0, (APTR)((5UL << 8) | 3UL)},
-        {NM_ITEM, "Nested", NULL, 0, 0, (APTR)((5UL << 8) | 4UL)},
-        {NM_ITEM, "All", NULL, 0, 0, (APTR)((5UL << 8) | 5UL)},
-        {NM_SUB, "Hide", NULL, 0, 0, NULL},
-        {NM_ITEM, "Single", "-", 0, 0, (APTR)((5UL << 8) | 7UL)},
-        {NM_ITEM, "Nested", NULL, 0, 0, (APTR)((5UL << 8) | 8UL)},
-        {NM_ITEM, "All", NULL, 0, 0, (APTR)((5UL << 8) | 9UL)},
-        {NM_SUB, "Unmake", NULL, 0, 0, NULL},
-        {NM_ITEM, "Single", ")", 0, 0, (APTR)((5UL << 8) | 11UL)},
-        {NM_ITEM, "Nested", NULL, 0, 0, (APTR)((5UL << 8) | 12UL)},
-        {NM_ITEM, "All", NULL, 0, 0, (APTR)((5UL << 8) | 13UL)},
-        
-        /* Menu 6: Extras */
-        {NM_TITLE, "Extras", NULL, 0, 0, NULL},
-        {NM_ITEM, "Undelete Line", "D", 0, 0, (APTR)((6UL << 8) | 0UL)},
-        {NM_ITEM, "Undo Line", "Z", 0, 0, (APTR)((6UL << 8) | 1UL)},
-        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Center", "^", 0, 0, (APTR)((6UL << 8) | 3UL)},
-        {NM_ITEM, "Justify", "=", 0, 0, (APTR)((6UL << 8) | 4UL)},
-        {NM_ITEM, "Format Paragraph", "]", 0, 0, (APTR)((6UL << 8) | 5UL)},
-        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Convert To Upper Case", "U", 0, 0, (APTR)((6UL << 8) | 7UL)},
-        {NM_ITEM, "Convert To Lower Case", "L", 0, 0, (APTR)((6UL << 8) | 8UL)},
-        {NM_ITEM, "Convert Tabs To Spaces", NULL, 0, 0, (APTR)((6UL << 8) | 9UL)},
-        
-        /* Menu 7: Prefs */
-        {NM_TITLE, "Prefs", NULL, 0, 0, NULL},
-        {NM_ITEM, "Change...", "4", 0, 0, (APTR)((7UL << 8) | 0UL)},
-        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Open Prefs...", NULL, 0, 0, (APTR)((7UL << 8) | 2UL)},
-        {NM_ITEM, "Save Prefs As...", NULL, 0, 0, (APTR)((7UL << 8) | 3UL)},
-        {NM_ITEM, "Save As Defaults", NULL, 0, 0, (APTR)((7UL << 8) | 4UL)},
-        {NM_ITEM, NM_BARLABEL, NULL, 0, 0, NULL},
-        {NM_ITEM, "Open Definitions...", NULL, 0, 0, (APTR)((7UL << 8) | 6UL)},
-        
-        /* End marker */
-        {NM_END, NULL, NULL, 0, 0, NULL}
-    };
     struct Menu *menuStrip = NULL;
     struct VisualInfo *visInfo = NULL;
     struct DFNFile *dfn = NULL;
     struct NewMenu *dfnMenu = NULL;
     ULONG dfnMenuCount = 0;
-    ULONG secondaryError = 0;
-    STRPTR dfnPaths[] = {
-        "PROGDIR:Support/TTX_BuiltIn.dfn",
-        NULL
-    };
-    ULONG i;
     BOOL useDFN = FALSE;
+    static const STRPTR dfnPath = "PROGDIR:Support/TTX_BuiltIn.dfn";
+    BPTR dfnLock = NULL;
     
     if (!session || !session->window) {
         return FALSE;
     }
     
-    Printf("[MENU] TTX_CreateMenuStrip: START\n");
+    TTX_MenuTrace("TTX_CreateMenuStrip: START");
     
-    /* Try to load .dfn file from various locations */
-    for (i = 0; dfnPaths[i] != NULL; i++) {
-        dfn = ParseDFNFile(dfnPaths[i]);
+    if (!GadToolsBase) {
+        TTX_MenuTrace("TTX_CreateMenuStrip: FAIL (GadToolsBase is NULL)");
+        return FALSE;
+    }
+    
+    /*
+     * Optional DFN menu (not in the default install yet). Probe with Lock so
+     * we never touch dos.library Open/parse when the file is absent.
+     */
+    SetIoErr(0);
+    dfnLock = Lock((STRPTR)dfnPath, ACCESS_READ);
+    if (dfnLock) {
+        UnLock(dfnLock);
+        dfn = ParseDFNFile((STRPTR)dfnPath);
         if (dfn) {
-            Printf("[MENU] TTX_CreateMenuStrip: loaded DFN from '%s'\n", dfnPaths[i]);
+            TTX_MenuTrace("TTX_CreateMenuStrip: loaded DFN");
             useDFN = TRUE;
-            break;
         }
     }
     
@@ -850,60 +710,59 @@ BOOL TTX_CreateMenuStrip(struct Session *session)
         /* Convert DFN to NewMenu array */
         dfnMenu = ConvertDFNToNewMenu(dfn, &dfnMenuCount);
         if (dfnMenu) {
-            Printf("[MENU] TTX_CreateMenuStrip: converted %lu menu entries from DFN\n", dfnMenuCount);
-            /* Create menu strip from DFN */
+            TTX_MenuTrace("TTX_CreateMenuStrip: CreateMenus(DFN)");
+            SetIoErr(0);
             menuStrip = CreateMenus(dfnMenu, TAG_DONE);
             if (!menuStrip) {
-                Printf("[MENU] TTX_CreateMenuStrip: FAIL (CreateMenus from DFN failed)\n");
+                TTX_MenuTrace("TTX_CreateMenuStrip: FAIL (CreateMenus from DFN)");
                 TTX_Free(dfnMenu);
                 FreeDFNFile(dfn);
                 useDFN = FALSE; /* Fall back to hardcoded menu */
+            } else {
+                session->menuNewMenuBacking = dfnMenu;
+                session->menuDFNBacking = dfn;
             }
         } else {
-            Printf("[MENU] TTX_CreateMenuStrip: WARN (failed to convert DFN to NewMenu)\n");
+            TTX_MenuTrace("TTX_CreateMenuStrip: WARN (DFN convert failed)");
             FreeDFNFile(dfn);
             useDFN = FALSE; /* Fall back to hardcoded menu */
         }
     }
     
     if (!useDFN) {
-        /* Fall back to hardcoded menu */
-        Printf("[MENU] TTX_CreateMenuStrip: using hardcoded menu\n");
-        menuStrip = CreateMenus(newMenu,
-                                GTMN_SecondaryError, (ULONG)&secondaryError,
-                                TAG_DONE);
+        TTX_MenuTrace("TTX_CreateMenuStrip: CreateMenus(builtin)");
+        SetIoErr(0);
+        menuStrip = CreateMenus(TTX_BuiltinMenu, TAG_DONE);
         if (!menuStrip) {
-            Printf("[MENU] TTX_CreateMenuStrip: FAIL (CreateMenus failed, secondaryError=0x%lx)\n",
-                   secondaryError);
+            TTX_MenuTrace("TTX_CreateMenuStrip: FAIL (CreateMenus builtin)");
             return FALSE;
-        }
-        if (secondaryError != 0) {
-            Printf("[MENU] TTX_CreateMenuStrip: WARN (CreateMenus secondaryError=0x%lx)\n",
-                   secondaryError);
         }
     }
     
+    TTX_MenuTrace("TTX_CreateMenuStrip: GetVisualInfo");
     /* Get visual info for layout */
     visInfo = GetVisualInfo(session->window->WScreen, TAG_END);
     if (!visInfo) {
-        Printf("[MENU] TTX_CreateMenuStrip: FAIL (GetVisualInfo failed)\n");
+        TTX_MenuTrace("TTX_CreateMenuStrip: FAIL (GetVisualInfo)");
         FreeMenus(menuStrip);
         return FALSE;
     }
     
+    TTX_MenuTrace("TTX_CreateMenuStrip: LayoutMenus");
     /* Layout menus */
     if (!LayoutMenus(menuStrip, visInfo, 
                      GTMN_NewLookMenus, TRUE,
                      TAG_END)) {
-        Printf("[MENU] TTX_CreateMenuStrip: FAIL (LayoutMenus failed)\n");
+        TTX_MenuTrace("TTX_CreateMenuStrip: FAIL (LayoutMenus)");
         FreeVisualInfo(visInfo);
         FreeMenus(menuStrip);
         return FALSE;
     }
     
+    TTX_MenuTrace("TTX_CreateMenuStrip: SetMenuStrip");
     /* Set menu strip on window */
     if (!SetMenuStrip(session->window, menuStrip)) {
-        Printf("[MENU] TTX_CreateMenuStrip: FAIL (SetMenuStrip failed)\n");
+        TTX_MenuTrace("TTX_CreateMenuStrip: FAIL (SetMenuStrip)");
         FreeVisualInfo(visInfo);
         FreeMenus(menuStrip);
         return FALSE;
@@ -913,17 +772,7 @@ BOOL TTX_CreateMenuStrip(struct Session *session)
     session->menuStrip = menuStrip;
     session->menuVisualInfo = visInfo;
     
-    /* Free DFN data if we used it */
-    if (useDFN) {
-        if (dfnMenu) {
-            TTX_Free(dfnMenu);
-        }
-        if (dfn) {
-            FreeDFNFile(dfn);
-        }
-    }
-    
-    Printf("[MENU] TTX_CreateMenuStrip: SUCCESS\n");
+    TTX_MenuTrace("TTX_CreateMenuStrip: SUCCESS");
     return TRUE;
 }
 
@@ -948,6 +797,15 @@ VOID TTX_FreeMenuStrip(struct Session *session)
         FreeVisualInfo(session->menuVisualInfo);
         session->menuVisualInfo = NULL;
     }
+
+    if (session->menuNewMenuBacking) {
+        TTX_Free(session->menuNewMenuBacking);
+        session->menuNewMenuBacking = NULL;
+    }
+    if (session->menuDFNBacking) {
+        FreeDFNFile(session->menuDFNBacking);
+        session->menuDFNBacking = NULL;
+    }
 }
 
 /*
@@ -965,7 +823,7 @@ VOID TTX_ResetMenuStrip(struct Session *session)
     ResetMenuStrip(session->window, session->menuStrip);
 }
 
-#define TTX_ASL_PATH_LEN 512
+#define TTX_ASL_PATH_LEN TTX_PATH_BUF_LEN
 
 static STRPTR
 TTX_AllocPathCopy(STRPTR pathBuf)
@@ -1009,29 +867,38 @@ TTX_SaveAslDrawer(struct TTXApplication *app, STRPTR drawer, STRPTR fullPath)
 {
 	BPTR fileLock = NULL;
 	BPTR parentLock = NULL;
-	TEXT pathBuf[TTX_ASL_PATH_LEN];
+	STRPTR pathBuf = NULL;
 
-	if (!app)
+	if (!app || !app->lastAslDrawer)
 		return;
 
 	if (drawer && drawer[0] != '\0') {
-		TTX_CopyStr(app->lastAslDrawer, (ULONG)TTX_ASL_PATH_LEN, drawer);
+		TTX_CopyStr(app->lastAslDrawer, (ULONG)TTX_PATH_BUF_LEN, drawer);
 		return;
 	}
 
 	if (!fullPath || fullPath[0] == '\0')
 		return;
 
-	fileLock = Lock(fullPath, ACCESS_READ);
-	if (!fileLock)
+	pathBuf = TTX_AllocPathBuf();
+	if (!pathBuf)
 		return;
+
+	fileLock = Lock(fullPath, ACCESS_READ);
+	if (!fileLock) {
+		TTX_Free(pathBuf);
+		return;
+	}
 	parentLock = ParentDir(fileLock);
 	UnLock(fileLock);
-	if (!parentLock)
+	if (!parentLock) {
+		TTX_Free(pathBuf);
 		return;
-	if (NameFromLock(parentLock, pathBuf, (LONG)TTX_ASL_PATH_LEN) > 0)
-		TTX_CopyStr(app->lastAslDrawer, (ULONG)TTX_ASL_PATH_LEN, pathBuf);
+	}
+	if (NameFromLock(parentLock, pathBuf, (LONG)TTX_PATH_BUF_LEN) > 0)
+		TTX_CopyStr(app->lastAslDrawer, (ULONG)TTX_PATH_BUF_LEN, pathBuf);
 	UnLock(parentLock);
+	TTX_Free(pathBuf);
 }
 
 /*
@@ -1041,11 +908,12 @@ TTX_SaveAslDrawer(struct TTXApplication *app, STRPTR drawer, STRPTR fullPath)
 static STRPTR
 TTX_BuildFullPath(STRPTR drawer, STRPTR file, BOOL mustExist)
 {
-	TEXT pathBuf[TTX_ASL_PATH_LEN];
+	STRPTR pathBuf = NULL;
 	BPTR testLock = NULL;
 	BPTR curLock = NULL;
 	ULONG i = 0;
 	BOOL hasVolume = FALSE;
+	STRPTR result = NULL;
 
 	if (!file || file[0] == '\0')
 		return NULL;
@@ -1059,30 +927,42 @@ TTX_BuildFullPath(STRPTR drawer, STRPTR file, BOOL mustExist)
 	if (hasVolume)
 		return TTX_AllocPathCopy(file);
 
+	pathBuf = TTX_AllocPathBuf();
+	if (!pathBuf)
+		return NULL;
+
 	pathBuf[0] = '\0';
 	if (drawer && drawer[0] != '\0')
-		TTX_CopyStr(pathBuf, (ULONG)TTX_ASL_PATH_LEN, drawer);
+		TTX_CopyStr(pathBuf, (ULONG)TTX_PATH_BUF_LEN, drawer);
 
 	if (pathBuf[0] == '\0') {
 		curLock = CurrentDir(NULL);
 		if (curLock)
-			(void)NameFromLock(curLock, pathBuf, (LONG)TTX_ASL_PATH_LEN);
+			(void)NameFromLock(curLock, pathBuf, (LONG)TTX_PATH_BUF_LEN);
 	}
 
-	if (pathBuf[0] == '\0')
+	if (pathBuf[0] == '\0') {
+		TTX_Free(pathBuf);
 		return NULL;
+	}
 
-	if (!AddPart(pathBuf, file, (ULONG)TTX_ASL_PATH_LEN))
+	if (!AddPart(pathBuf, file, (ULONG)TTX_PATH_BUF_LEN)) {
+		TTX_Free(pathBuf);
 		return NULL;
+	}
 
 	if (mustExist) {
 		testLock = Lock(pathBuf, ACCESS_READ);
-		if (!testLock)
+		if (!testLock) {
+			TTX_Free(pathBuf);
 			return NULL;
+		}
 		UnLock(testLock);
 	}
 
-	return TTX_AllocPathCopy(pathBuf);
+	result = TTX_AllocPathCopy(pathBuf);
+	TTX_Free(pathBuf);
+	return result;
 }
 
 static VOID
@@ -1096,7 +976,7 @@ TTX_GetAslInitialDrawer(
 	BPTR progLock = NULL;
 	ULONG i = 0;
 	STRPTR fileName = NULL;
-	TEXT tempPath[TTX_ASL_PATH_LEN];
+	STRPTR tempPath = NULL;
 
 	if (!buf || bufLen < 2)
 		return;
@@ -1108,14 +988,17 @@ TTX_GetAslInitialDrawer(
 		return;
 	}
 
-	if (app && app->lastAslDrawer[0] != '\0') {
+	if (app && app->lastAslDrawer && app->lastAslDrawer[0] != '\0') {
 		TTX_CopyStr(buf, bufLen, app->lastAslDrawer);
 		return;
 	}
 
 	if (session && session->document && session->document->state.fileName) {
+		tempPath = TTX_AllocPathBuf();
+		if (!tempPath)
+			return;
 		fileName = session->document->state.fileName;
-		TTX_CopyStr(tempPath, (ULONG)TTX_ASL_PATH_LEN, fileName);
+		TTX_CopyStr(tempPath, (ULONG)TTX_PATH_BUF_LEN, fileName);
 		i = 0;
 		while (tempPath[i] != '\0')
 			i++;
@@ -1130,10 +1013,11 @@ TTX_GetAslInitialDrawer(
 			}
 			tempPath[i] = '\0';
 		}
-		if (tempPath[0] != '\0') {
+		if (tempPath[0] != '\0')
 			TTX_CopyStr(buf, bufLen, tempPath);
+		TTX_Free(tempPath);
+		if (buf[0] != '\0')
 			return;
-		}
 	}
 
 	progLock = GetProgramDir();
@@ -1149,13 +1033,19 @@ static STRPTR TTX_ShowFileRequester(struct TTXApplication *app, struct Session *
     STRPTR fullPath = NULL;
     struct Window *window = NULL;
     struct TagItem tags[12];
-    TEXT drawerBuf[TTX_ASL_PATH_LEN];
-    TEXT drawerSnap[TTX_ASL_PATH_LEN];
-    TEXT fileSnap[TTX_ASL_PATH_LEN];
+    STRPTR drawerBuf = NULL;
+    STRPTR drawerSnap = NULL;
+    STRPTR fileSnap = NULL;
     ULONG tagIdx = 0;
     
     if (!app || !AslBase) {
         Printf("[ASL] TTX_ShowFileRequester: FAIL (ASL library not available)\n");
+        return NULL;
+    }
+
+    drawerBuf = TTX_AllocPathBuf();
+    if (!drawerBuf) {
+        Printf("[ASL] TTX_ShowFileRequester: FAIL (no memory)\n");
         return NULL;
     }
     
@@ -1164,7 +1054,7 @@ static STRPTR TTX_ShowFileRequester(struct TTXApplication *app, struct Session *
     if (session)
         window = session->window;
 
-    TTX_GetAslInitialDrawer(app, session, drawerBuf, (ULONG)TTX_ASL_PATH_LEN,
+    TTX_GetAslInitialDrawer(app, session, drawerBuf, (ULONG)TTX_PATH_BUF_LEN,
         initialDrawer);
     
     tags[tagIdx].ti_Tag = ASLFR_Window;
@@ -1206,23 +1096,32 @@ static STRPTR TTX_ShowFileRequester(struct TTXApplication *app, struct Session *
     
     if (!fileReq) {
         Printf("[ASL] TTX_ShowFileRequester: FAIL (AllocAslRequest failed)\n");
+        TTX_Free(drawerBuf);
         return NULL;
     }
     
     if (AslRequest(fileReq, NULL)) {
-        TTX_CopyStr(drawerSnap, (ULONG)TTX_ASL_PATH_LEN,
-            fileReq->fr_Drawer ? fileReq->fr_Drawer : (STRPTR)"");
-        TTX_CopyStr(fileSnap, (ULONG)TTX_ASL_PATH_LEN,
-            fileReq->fr_File ? fileReq->fr_File : (STRPTR)"");
-        fullPath = TTX_BuildFullPath(drawerSnap, fileSnap, TRUE);
-        if (fullPath) {
-            TTX_SaveAslDrawer(app, drawerSnap, fullPath);
-            Printf("[ASL] TTX_ShowFileRequester: drawer='%s' file='%s' -> '%s'\n",
-                drawerSnap, fileSnap, fullPath);
-        } else {
-            Printf("[ASL] TTX_ShowFileRequester: WARN path build failed drawer='%s' file='%s'\n",
-                drawerSnap, fileSnap);
+        drawerSnap = TTX_AllocPathBuf();
+        fileSnap = TTX_AllocPathBuf();
+        if (drawerSnap && fileSnap) {
+            TTX_CopyStr(drawerSnap, (ULONG)TTX_PATH_BUF_LEN,
+                fileReq->fr_Drawer ? fileReq->fr_Drawer : (STRPTR)"");
+            TTX_CopyStr(fileSnap, (ULONG)TTX_PATH_BUF_LEN,
+                fileReq->fr_File ? fileReq->fr_File : (STRPTR)"");
+            fullPath = TTX_BuildFullPath(drawerSnap, fileSnap, TRUE);
+            if (fullPath) {
+                TTX_SaveAslDrawer(app, drawerSnap, fullPath);
+                Printf("[ASL] TTX_ShowFileRequester: drawer='%s' file='%s' -> '%s'\n",
+                    drawerSnap, fileSnap, fullPath);
+            } else {
+                Printf("[ASL] TTX_ShowFileRequester: WARN path build failed drawer='%s' file='%s'\n",
+                    drawerSnap, fileSnap);
+            }
         }
+        if (fileSnap)
+            TTX_Free(fileSnap);
+        if (drawerSnap)
+            TTX_Free(drawerSnap);
     } else {
         Printf("[ASL] TTX_ShowFileRequester: user cancelled\n");
     }
@@ -1231,6 +1130,8 @@ static STRPTR TTX_ShowFileRequester(struct TTXApplication *app, struct Session *
         if (AslBase)
             FreeAslRequest(fileReq);
     }
+
+    TTX_Free(drawerBuf);
     
     return fullPath;
 }
@@ -1242,13 +1143,19 @@ static STRPTR TTX_ShowSaveFileRequester(struct TTXApplication *app, struct Sessi
     STRPTR fullPath = NULL;
     struct Window *window = NULL;
     struct TagItem tags[12];
-    TEXT drawerBuf[TTX_ASL_PATH_LEN];
-    TEXT drawerSnap[TTX_ASL_PATH_LEN];
-    TEXT fileSnap[TTX_ASL_PATH_LEN];
+    STRPTR drawerBuf = NULL;
+    STRPTR drawerSnap = NULL;
+    STRPTR fileSnap = NULL;
     ULONG tagIdx = 0;
     
     if (!app || !AslBase) {
         Printf("[ASL] TTX_ShowSaveFileRequester: FAIL (ASL library not available)\n");
+        return NULL;
+    }
+
+    drawerBuf = TTX_AllocPathBuf();
+    if (!drawerBuf) {
+        Printf("[ASL] TTX_ShowSaveFileRequester: FAIL (no memory)\n");
         return NULL;
     }
     
@@ -1257,7 +1164,7 @@ static STRPTR TTX_ShowSaveFileRequester(struct TTXApplication *app, struct Sessi
     if (session)
         window = session->window;
 
-    TTX_GetAslInitialDrawer(app, session, drawerBuf, (ULONG)TTX_ASL_PATH_LEN,
+    TTX_GetAslInitialDrawer(app, session, drawerBuf, (ULONG)TTX_PATH_BUF_LEN,
         initialDrawer);
     
     tags[tagIdx].ti_Tag = ASLFR_Window;
@@ -1299,20 +1206,29 @@ static STRPTR TTX_ShowSaveFileRequester(struct TTXApplication *app, struct Sessi
     
     if (!fileReq) {
         Printf("[ASL] TTX_ShowSaveFileRequester: FAIL (AllocAslRequest failed)\n");
+        TTX_Free(drawerBuf);
         return NULL;
     }
     
     if (AslRequest(fileReq, NULL)) {
-        TTX_CopyStr(drawerSnap, (ULONG)TTX_ASL_PATH_LEN,
-            fileReq->fr_Drawer ? fileReq->fr_Drawer : (STRPTR)"");
-        TTX_CopyStr(fileSnap, (ULONG)TTX_ASL_PATH_LEN,
-            fileReq->fr_File ? fileReq->fr_File : (STRPTR)"");
-        fullPath = TTX_BuildFullPath(drawerSnap, fileSnap, FALSE);
-        if (fullPath) {
-            TTX_SaveAslDrawer(app, drawerSnap, fullPath);
-            Printf("[ASL] TTX_ShowSaveFileRequester: drawer='%s' file='%s' -> '%s'\n",
-                drawerSnap, fileSnap, fullPath);
+        drawerSnap = TTX_AllocPathBuf();
+        fileSnap = TTX_AllocPathBuf();
+        if (drawerSnap && fileSnap) {
+            TTX_CopyStr(drawerSnap, (ULONG)TTX_PATH_BUF_LEN,
+                fileReq->fr_Drawer ? fileReq->fr_Drawer : (STRPTR)"");
+            TTX_CopyStr(fileSnap, (ULONG)TTX_PATH_BUF_LEN,
+                fileReq->fr_File ? fileReq->fr_File : (STRPTR)"");
+            fullPath = TTX_BuildFullPath(drawerSnap, fileSnap, FALSE);
+            if (fullPath) {
+                TTX_SaveAslDrawer(app, drawerSnap, fullPath);
+                Printf("[ASL] TTX_ShowSaveFileRequester: drawer='%s' file='%s' -> '%s'\n",
+                    drawerSnap, fileSnap, fullPath);
+            }
         }
+        if (fileSnap)
+            TTX_Free(fileSnap);
+        if (drawerSnap)
+            TTX_Free(drawerSnap);
     } else {
         Printf("[ASL] TTX_ShowSaveFileRequester: user cancelled\n");
     }
@@ -1321,6 +1237,8 @@ static STRPTR TTX_ShowSaveFileRequester(struct TTXApplication *app, struct Sessi
         if (AslBase)
             FreeAslRequest(fileReq);
     }
+
+    TTX_Free(drawerBuf);
     
     return fullPath;
 }
