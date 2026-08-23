@@ -1,5 +1,5 @@
 /*
- * TTX driver - shared keyboard input (HEAD~1 ttx.c behaviour via engine)
+ * TTX driver - shared keyboard input (HEAD~1 window IDCMP behaviour via engine)
  *
  * Copyright (c) 2025 amigazen project
  * Licensed under BSD 2-Clause License
@@ -14,14 +14,36 @@
 VOID
 TTX_InputRefreshSession(struct Session *session)
 {
+	struct TTTextBuffer *buf;
+	ULONG oldScrollX;
+	ULONG oldScrollY;
+	ULONG oldLineCount;
+	ULONG cursorLine;
+
 	if (!session || !session->window || !TT_SessionBuffer(session))
 		return;
 
-	CalculateMaxScroll(TT_SessionBuffer(session), session->window);
-	ScrollToCursor(TT_SessionBuffer(session), session->window);
-	UpdateScrollBars(session);
-	RenderText(session->window, session);
-	UpdateCursor(session->window, session);
+	buf = TT_SessionBuffer(session);
+	oldScrollX = buf->scrollX;
+	oldScrollY = buf->scrollY;
+	oldLineCount = buf->lineCount;
+	cursorLine = buf->cursorY;
+
+	CalculateMaxScroll(buf, session->window);
+	ScrollToCursor(buf, session->window);
+
+	/*
+	 * Typing one character must not RectFill the whole text area or poke
+	 * prop gadgets every time — that is the flicker. Full redraw only when
+	 * scroll position or line count changes (newline, delete-line, etc.).
+	 */
+	if (buf->scrollX != oldScrollX || buf->scrollY != oldScrollY ||
+	    buf->lineCount != oldLineCount) {
+		UpdateScrollBars(session);
+		TTX_RequestRedraw(session);
+	} else {
+		TTX_RequestLineRedraw(session, cursorLine);
+	}
 }
 
 /****************************************************************************/
@@ -32,13 +54,60 @@ TTX_InputInsertChar(
 	struct Session *session,
 	UBYTE ch)
 {
-	STRPTR insArgs[1];
-	TEXT chBuf[2];
+	struct TTTextBuffer *buf;
+	struct TTTextLine *line;
+	ULONG x;
+	ULONG i;
+	ULONG newAlloc;
+	STRPTR newText;
 
-	chBuf[0] = (TEXT)ch;
-	chBuf[1] = '\0';
-	insArgs[0] = chBuf;
-	return TTX_DoEngineCommand(app, session, "Insert", insArgs, 1);
+	(void)app;
+
+	/*
+	 * Insert directly into the shared TTTextBuffer. Calling library "Insert"
+	 * with a FAR data pointer from a DATA=FAR driver into a smalldata
+	 * turbotext.library was returning TRUE while writing zero characters
+	 * (processed=1, buffer unchanged, cursor flickers, no glyphs).
+	 */
+	buf = TT_SessionBuffer(session);
+	if (!buf || !buf->lines || buf->cursorY >= buf->lineCount)
+		return FALSE;
+
+	line = &buf->lines[buf->cursorY];
+	if (!line->text)
+		return FALSE;
+
+	x = buf->cursorX;
+	if (x > line->length)
+		x = line->length;
+
+	if (line->length + 1 >= line->allocated) {
+		newAlloc = line->allocated * 2;
+		if (newAlloc < 256)
+			newAlloc = 256;
+		newText = (STRPTR)TTX_Alloc(newAlloc, MEMF_CLEAR);
+		if (!newText)
+			return FALSE;
+		if (line->length > 0)
+			CopyMem(line->text, newText, line->length);
+		TTX_Free(line->text);
+		line->text = newText;
+		line->allocated = newAlloc;
+	}
+
+	for (i = line->length; i > x; i--)
+		line->text[i] = line->text[i - 1];
+	line->text[x] = (TEXT)ch;
+	line->length++;
+	line->text[line->length] = '\0';
+	buf->cursorX = x + 1;
+	buf->modified = TRUE;
+	if (session->document)
+		session->document->state.modified = TRUE;
+
+	Printf("[INPUT] Insert ch=%lu len=%lu x=%lu\n",
+		(ULONG)ch, line->length, buf->cursorX);
+	return TRUE;
 }
 
 /****************************************************************************/
@@ -83,20 +152,34 @@ TTX_InputVanillaKey(
 	UBYTE keyCode;
 	BOOL processed;
 
+	(void)iaddr;
+
 	if (!app || !session || !TT_SessionBuffer(session))
 		return FALSE;
-	if (session->document->state.readOnly)
+	if (!session->document || session->document->state.readOnly)
 		return FALSE;
 
+	/*
+	 * HEAD~1 / OS3 VANILLAKEY: Code holds the ASCII character when non-zero.
+	 * Some hosts deliver Code=0 with the character in Qualifier's low byte
+	 * (seen on this target: Class=VANILLAKEY Code=0 Qual='j').
+	 */
 	keyCode = (UBYTE)code;
+	if (keyCode == 0)
+		keyCode = (UBYTE)(qualifier & 0xFF);
+
 	processed = FALSE;
 
 	/* Arrow keys as VANILLAKEY — ignore; expect RAWKEY */
 	if (keyCode == 0x1C || keyCode == 0x1D || keyCode == 0x1E || keyCode == 0x1F)
 		return FALSE;
 
-	if ((keyCode >= 27 && keyCode <= 126) || (keyCode >= 128 && keyCode <= 255)) {
+  if ((keyCode >= 32 && keyCode <= 126) || keyCode >= 128) {
 		if (TTX_InputInsertChar(app, session, keyCode))
+			processed = TRUE;
+	} else if (keyCode == 0x09) {
+		/* Tab: store real tab char; display expands to tab stops. */
+		if (TTX_InputInsertChar(app, session, '\t'))
 			processed = TRUE;
 	} else if (keyCode == 0x08) {
 		if (TTX_DoEngineCommand(app, session, "Delete", NULL, 0))
@@ -110,12 +193,6 @@ TTX_InputVanillaKey(
 	} else if (keyCode == 0x1B) {
 		TTX_RequestDestroySession(app, session);
 		return TRUE;
-	} else if (keyCode == 0x45 && (qualifier & IEQUALIFIER_CONTROL)) {
-		if (TTX_HandleCommand(app, session, "SaveFile", NULL, 0))
-			processed = TRUE;
-	} else if (keyCode == 0 && qualifier != 0) {
-		processed = TTX_InputRawKey(app, session, (UBYTE)qualifier, qualifier,
-			iaddr);
 	}
 
 	if (processed && session->document)
@@ -143,19 +220,13 @@ TTX_InputRawKey(
 
 	if (!app || !session || !TT_SessionBuffer(session))
 		return FALSE;
-	if (session->document->state.readOnly)
+	if (!session->document || session->document->state.readOnly)
 		return FALSE;
 
 	buffer = TT_SessionBuffer(session);
 	processed = FALSE;
 
 	if (rawCode & 0x80)
-		return FALSE;
-
-	if (rawCode >= 0x60 && rawCode <= 0x67)
-		return FALSE;
-
-	if (rawCode >= 0x68 && rawCode <= 0x6A)
 		return FALSE;
 
 	if (rawCode == 0x4F) {
@@ -188,8 +259,14 @@ TTX_InputRawKey(
 				buffer->cursorX = buffer->lines[buffer->cursorY].length;
 		}
 		processed = TRUE;
+	} else if (rawCode == 0x41) {
+		if (TTX_DoEngineCommand(app, session, "Delete", NULL, 0))
+			processed = TRUE;
 	} else if (rawCode == 0x46) {
 		if (TTX_DoEngineCommand(app, session, "DeleteForward", NULL, 0))
+			processed = TRUE;
+	} else if (rawCode == 0x43 || rawCode == 0x44) {
+		if (TTX_DoEngineCommand(app, session, "InsertLine", NULL, 0))
 			processed = TRUE;
 	} else if (KeymapBase) {
 		keymap = AskKeyMapDefault();
@@ -204,10 +281,7 @@ TTX_InputRawKey(
 			ievent.ie_NextEvent = NULL;
 			ievent.ie_TimeStamp.tv_secs = 0;
 			ievent.ie_TimeStamp.tv_micro = 0;
-			if (iaddr)
-				ievent.ie_EventAddress = (APTR)(*((ULONG *)iaddr));
-			else
-				ievent.ie_EventAddress = NULL;
+			ievent.ie_EventAddress = iaddr;
 
 			chars = MapRawKey(&ievent, charBuffer,
 				(WORD)(sizeof(charBuffer) - 1), keymap);
@@ -232,32 +306,56 @@ TTX_InputFromIntuiMessage(
 	struct Session *session,
 	struct IntuiMessage *imsg)
 {
+	UWORD code;
+	ULONG qual;
+	ULONG classId;
 	UBYTE rawCode;
+	UBYTE ch;
 	BOOL processed;
-	APTR iaddr;
+	APTR deadKeyAddr;
 
 	if (!app || !session || !imsg)
 		return FALSE;
 
 	processed = FALSE;
-	iaddr = NULL;
-	if (imsg->IAddress)
-		iaddr = (APTR)(*((ULONG *)imsg->IAddress));
+	classId = imsg->Class;
+	code = imsg->Code;
+	qual = (ULONG)imsg->Qualifier;
+	/*
+	 * Dead-key pointer must be captured by the caller BEFORE ReplyMsg.
+	 * After ReplyMsg, IAddress is no longer safe to dereference.
+	 */
+	deadKeyAddr = imsg->IAddress;
 
-	if (imsg->Class == IDCMP_VANILLAKEY) {
-		processed = TTX_InputVanillaKey(app, session, imsg->Code,
-			(ULONG)imsg->Qualifier, iaddr);
-	} else if (imsg->Class == IDCMP_RAWKEY) {
-		rawCode = (UBYTE)imsg->Code;
-		if (rawCode == 0)
-			rawCode = (UBYTE)((UWORD)imsg->Qualifier & 0xFF);
-		processed = TTX_InputRawKey(app, session, rawCode,
-			(ULONG)imsg->Qualifier, iaddr);
+	/* VANILLAKEY (0x00200000): character already translated by Intuition */
+	if (classId == IDCMP_VANILLAKEY || classId == 0x00200000UL) {
+		ch = (UBYTE)code;
+		if (ch == 0)
+			ch = (UBYTE)(qual & 0xFF);
+		Printf("[INPUT] VANILLA code=%lu qual=%lu ch=%lu\n",
+			(ULONG)code, qual, (ULONG)ch);
+		processed = TTX_InputVanillaKey(app, session, (UWORD)ch, qual,
+			deadKeyAddr);
+	} else if (classId == IDCMP_RAWKEY || classId == 0x00000400UL) {
+		rawCode = (UBYTE)code;
+		if (rawCode == 0) {
+			ch = (UBYTE)(qual & 0xFF);
+			Printf("[INPUT] RAW code0 qual=%lu ch=%lu\n", qual, (ULONG)ch);
+			if (ch >= 32 && ch < 127)
+				processed = TTX_InputVanillaKey(app, session, (UWORD)ch,
+					qual, deadKeyAddr);
+			else
+				processed = TTX_InputRawKey(app, session, ch, qual,
+					deadKeyAddr);
+		} else {
+			Printf("[INPUT] RAW code=%lu qual=%lu\n",
+				(ULONG)rawCode, qual);
+			processed = TTX_InputRawKey(app, session, rawCode, qual,
+				deadKeyAddr);
+		}
 	}
 
-	Printf("[INTUI] KEY class=%08lx code=%02x qual=%04x -> processed=%s\n",
-		(ULONG)imsg->Class, (unsigned int)imsg->Code,
-		(unsigned int)imsg->Qualifier, processed ? "YES" : "NO");
+	Printf("[INPUT] processed=%lu\n", (ULONG)(processed ? 1 : 0));
 
 	if (processed)
 		TTX_InputRefreshSession(session);
@@ -275,6 +373,7 @@ TTX_InputFromInputEvent(
 	APTR iaddr)
 {
 	UBYTE rawCode;
+	UBYTE ascii;
 	BOOL processed;
 
 	if (!app || !session || !ievent)
@@ -284,10 +383,21 @@ TTX_InputFromInputEvent(
 
 	if (ievent->ie_Class == IECLASS_RAWKEY) {
 		rawCode = (UBYTE)ievent->ie_Code;
-		if (rawCode == 0)
-			rawCode = (UBYTE)((UWORD)ievent->ie_Qualifier & 0xFF);
-		processed = TTX_InputRawKey(app, session, rawCode,
-			(ULONG)ievent->ie_Qualifier, iaddr);
+		if (rawCode & IECODE_UP_PREFIX)
+			return FALSE;
+		if (rawCode == 0) {
+			ascii = (UBYTE)((UWORD)ievent->ie_Qualifier & 0xFF);
+			if (ascii >= 32 && ascii < 127) {
+				processed = TTX_InputVanillaKey(app, session, ascii,
+					(ULONG)ievent->ie_Qualifier, iaddr);
+			} else {
+				processed = TTX_InputRawKey(app, session, ascii,
+					(ULONG)ievent->ie_Qualifier, iaddr);
+			}
+		} else {
+			processed = TTX_InputRawKey(app, session, rawCode,
+				(ULONG)ievent->ie_Qualifier, iaddr);
+		}
 	}
 
 	if (processed)

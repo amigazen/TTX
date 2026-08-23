@@ -13,6 +13,9 @@ BOOL TTX_Cmd_SaveFileAs(struct TTXApplication *app, struct Session *session, STR
 BOOL TTX_Cmd_ClearFile(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
 BOOL TTX_Cmd_PrintFile(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
 BOOL TTX_Cmd_CloseDoc(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
+/* Save / Discard / Cancel when buffer is modified. TRUE = OK to close. */
+BOOL TTX_PromptSaveBeforeClose(struct TTXApplication *app, struct Session *session);
+VOID TTX_UpdateSessionWindowTitle(struct Session *session);
 BOOL TTX_Cmd_SetReadOnly(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
 BOOL TTX_Cmd_Iconify(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
 BOOL TTX_Cmd_Quit(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);

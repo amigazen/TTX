@@ -16,6 +16,19 @@
 
 /****************************************************************************/
 
+static VOID
+TTX_BoopsiTrace(STRPTR step)
+{
+	BPTR out;
+
+	Printf("[BOOPSI] %s\n", step);
+	out = Output();
+	if (out)
+		Flush(out);
+}
+
+/****************************************************************************/
+
 /* Map GA_ID into IDCMP_IDCMPUPDATE Code field (TurboText / test.c pattern). */
 static LONG TTX_ScrollIcMap[4] = {
 	GA_ID, ICSPECIAL_CODE,
@@ -88,6 +101,8 @@ TTX_BoopsiCreateScrollGadgets(
 	if (!session || !window)
 		return FALSE;
 
+	TTX_BoopsiTrace("TTX_BoopsiCreateScrollGadgets: START");
+
 	if (session->scroll.gadgetsOnWindow)
 		return TRUE;
 
@@ -112,11 +127,7 @@ TTX_BoopsiCreateScrollGadgets(
 	if (initialTotal < 1)
 		initialTotal = 1;
 
-	/*
-	 * In-window relative props (not border gadgets). OpenWindow autodoc:
-	 * WA_InnerWidth/Height must not use GACT_RIGHTBORDER gadgets that steal
-	 * drag/depth gadget space.
-	 */
+	TTX_BoopsiTrace("TTX_BoopsiCreateScrollGadgets: NewObject vertProp");
 	session->scroll.vertProp = (struct Gadget *)NewObject(
 		NULL, PROPGCLASS,
 		GA_ID, GID_VERT_PROP,
@@ -164,6 +175,7 @@ TTX_BoopsiCreateScrollGadgets(
 	if (initialTotal < 1)
 		initialTotal = 1;
 
+	TTX_BoopsiTrace("TTX_BoopsiCreateScrollGadgets: NewObject horizProp");
 	session->scroll.horizProp = (struct Gadget *)NewObject(
 		NULL, PROPGCLASS,
 		GA_ID, GID_HORIZ_PROP,
@@ -183,25 +195,18 @@ TTX_BoopsiCreateScrollGadgets(
 		GA_Next, (ULONG)gadgetList,
 		TAG_DONE);
 	if (session->scroll.horizProp) {
-		struct Gadget *tail;
-
 		session->scroll.horizProp->Flags |= GFLG_RELBOTTOM | GFLG_RELWIDTH;
 		gadgetList = session->scroll.horizProp;
-
-		if (session->textEditorGadget) {
-			tail = gadgetList;
-			while (tail->NextGadget)
-				tail = tail->NextGadget;
-			tail->NextGadget = session->textEditorGadget;
-			session->textEditorGadget->NextGadget = NULL;
-		}
 	}
 
 	if (gadgetList) {
 		session->scroll.gadgetHead = gadgetList;
+		TTX_BoopsiTrace("TTX_BoopsiCreateScrollGadgets: AddGList");
 		AddGList(window, gadgetList, (UWORD)-1, (WORD)-1, NULL);
+		TTX_BoopsiTrace("TTX_BoopsiCreateScrollGadgets: RefreshGList");
 		RefreshGList(gadgetList, window, NULL, (WORD)-1);
 		session->scroll.gadgetsOnWindow = TRUE;
+		TTX_BoopsiTrace("TTX_BoopsiCreateScrollGadgets: SUCCESS");
 		return TRUE;
 	}
 
@@ -275,13 +280,21 @@ TTX_BoopsiUpdateScrollGadgets(struct Session *session)
 			&scaledTotal, &scaledVisible, &scaledTop, &shift);
 		TT_SessionBuffer(session)->scrollYShift = shift;
 
-		session->scroll.suppressIcmp = TRUE;
-		SetGadgetAttrs(gadget, session->window, NULL,
-			PGA_Total, scaledTotal,
-			PGA_Visible, scaledVisible,
-			PGA_Top, scaledTop,
-			TAG_DONE);
-		session->scroll.suppressIcmp = FALSE;
+		if (!session->scroll.scrollAttrsValid ||
+		    session->scroll.lastVertTotal != scaledTotal ||
+		    session->scroll.lastVertVisible != scaledVisible ||
+		    session->scroll.lastVertTop != scaledTop) {
+			session->scroll.suppressIcmp = TRUE;
+			SetGadgetAttrs(gadget, session->window, NULL,
+				PGA_Total, scaledTotal,
+				PGA_Visible, scaledVisible,
+				PGA_Top, scaledTop,
+				TAG_DONE);
+			session->scroll.suppressIcmp = FALSE;
+			session->scroll.lastVertTotal = scaledTotal;
+			session->scroll.lastVertVisible = scaledVisible;
+			session->scroll.lastVertTop = scaledTop;
+		}
 	}
 
 	gadget = session->scroll.horizProp;
@@ -303,14 +316,24 @@ TTX_BoopsiUpdateScrollGadgets(struct Session *session)
 			&scaledTotal, &scaledVisible, &scaledTop, &shift);
 		TT_SessionBuffer(session)->scrollXShift = shift;
 
-		session->scroll.suppressIcmp = TRUE;
-		SetGadgetAttrs(gadget, session->window, NULL,
-			PGA_Total, scaledTotal,
-			PGA_Visible, scaledVisible,
-			PGA_Top, scaledTop,
-			TAG_DONE);
-		session->scroll.suppressIcmp = FALSE;
+		if (!session->scroll.scrollAttrsValid ||
+		    session->scroll.lastHorizTotal != scaledTotal ||
+		    session->scroll.lastHorizVisible != scaledVisible ||
+		    session->scroll.lastHorizTop != scaledTop) {
+			session->scroll.suppressIcmp = TRUE;
+			SetGadgetAttrs(gadget, session->window, NULL,
+				PGA_Total, scaledTotal,
+				PGA_Visible, scaledVisible,
+				PGA_Top, scaledTop,
+				TAG_DONE);
+			session->scroll.suppressIcmp = FALSE;
+			session->scroll.lastHorizTotal = scaledTotal;
+			session->scroll.lastHorizVisible = scaledVisible;
+			session->scroll.lastHorizTop = scaledTop;
+		}
 	}
+
+	session->scroll.scrollAttrsValid = TRUE;
 }
 
 /****************************************************************************/

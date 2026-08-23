@@ -34,6 +34,8 @@
 
 #define TT_MAX_LINES       10000
 #define TT_MAX_LINE_LENGTH 4096
+/* TurboText default "Tab Width For Editing" (Preferences - Tabs). */
+#define TT_DEFAULT_TAB_WIDTH 8
 
 struct TTTextLine {
 	STRPTR text;

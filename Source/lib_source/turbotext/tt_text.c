@@ -82,179 +82,145 @@ VOID TT_FreeTextBuffer(struct TTTextBuffer *buffer) {
 
 BOOL TT_LoadFile(STRPTR fileName, struct TTTextBuffer *buffer) {
   BPTR fileHandle = NULL;
-  UBYTE lineBuffer[TT_MAX_LINE_LENGTH];
+  UBYTE *lineBuffer = NULL;
+  ULONG lineBufSize = 0;
   ULONG lineLen = 0;
   ULONG i = 0;
   BOOL result = FALSE;
+  LONG nRead = 0;
+  ULONG pos = 0;
+  ULONG cap = 0;
+  UBYTE ch = 0;
+  BOOL sawContent = FALSE;
 
   if (!fileName || !buffer) {
     SetIoErr(ERROR_REQUIRED_ARG_MISSING);
     return FALSE;
   }
 
-  /* Open file for reading using cleanup stack - if file doesn't exist, create
-   * empty buffer */
-  /* Clear IoErr() before file operations to ensure clean state */
+  /* Heap line buffer — never put TT_MAX_LINE_LENGTH on the stack. */
+  lineBufSize = TT_MAX_LINE_LENGTH;
+  lineBuffer = (UBYTE *)TT_Alloc(lineBufSize, MEMF_CLEAR);
+  if (!lineBuffer) {
+    SetIoErr(ERROR_NO_FREE_STORE);
+    return FALSE;
+  }
+
   SetIoErr(0);
   fileHandle = Open(fileName, MODE_OLDFILE);
   if (!fileHandle) {
-    /* File doesn't exist or open failed */
-    LONG errorCode = IoErr();
-    if (errorCode != 0) {
-      SetIoErr(0);
-    }
+    TT_Free(lineBuffer);
     return FALSE;
-  } else {
-    /* File opened successfully - clear any error code that may have been set */
-    SetIoErr(0);
   }
+  SetIoErr(0);
 
-  /* Clear existing buffer */
   TT_FreeTextBuffer(buffer);
   if (!TT_InitTextBuffer(buffer)) {
     Close(fileHandle);
+    TT_Free(lineBuffer);
     return FALSE;
   }
 
-  /* Read file line by line */
-  /* Clear IoErr() before reading to ensure clean state */
-  SetIoErr(0);
-  while (FGets(fileHandle, lineBuffer, sizeof(lineBuffer) - 1) != NULL) {
-    /* Cap line count to prevent overflow and unbounded allocation */
-    if (i >= TT_MAX_LINES) {
-      break;
-    }
+  i = 0;
+  pos = 0;
+  sawContent = FALSE;
 
-    lineLen = 0;
-    while (lineBuffer[lineLen] != '\0' && lineBuffer[lineLen] != '\n' &&
-           lineLen < sizeof(lineBuffer) - 1) {
-      lineLen++;
-    }
-
-    /* Defensive: ensure lineLen is within bounds (FGets already limits input) */
-    if (lineLen > TT_MAX_LINE_LENGTH - 1) {
-      lineLen = TT_MAX_LINE_LENGTH - 1;
-    }
-
-    /* Remove trailing newline if present */
-    if (lineLen > 0 && lineBuffer[lineLen - 1] == '\n') {
-      lineLen--;
-    }
-
-    /* Expand line array if needed (capped at TT_MAX_LINES) */
-    if (i >= buffer->maxLines) {
-      ULONG newMax = 0;
-      ULONG copyIdx = 0;
-      struct TTTextLine *newLines = NULL;
-
-      newMax = buffer->maxLines * 2;
-      if (newMax > TT_MAX_LINES) {
-        newMax = TT_MAX_LINES;
-      }
-      if (newMax <= buffer->maxLines) {
-        /* Already at max - stop loading more lines to prevent overflow */
-        break;
-      }
-      newLines = (struct TTTextLine *)TT_Alloc(newMax * sizeof(struct TTTextLine),
-                                             MEMF_CLEAR);
-      if (!newLines) {
-        TT_FreeTextBuffer(buffer);
-        Close(fileHandle);
-        return FALSE;
-      }
-      for (copyIdx = 0; copyIdx < buffer->lineCount; copyIdx++) {
-        newLines[copyIdx] = buffer->lines[copyIdx];
-      }
-      TT_Free(buffer->lines);
-      buffer->lines = newLines;
-      buffer->maxLines = newMax;
-    }
-
-    /* Allocate line text buffer */
-    /* CRITICAL: If this line already has a pre-allocated text buffer, free it
-     * first */
-    /* This happens when LoadFile pre-allocates the next line's buffer but then
-     * replaces it */
-    if (buffer->lines[i].text) {
-      TT_Free(buffer->lines[i].text);
-      buffer->lines[i].text = NULL;
-    }
-
-    buffer->lines[i].allocated = lineLen + 256;
-    buffer->lines[i].text =
-        (STRPTR)TT_Alloc(buffer->lines[i].allocated, MEMF_CLEAR);
-    if (!buffer->lines[i].text) {
+  for (;;) {
+    nRead = Read(fileHandle, &ch, 1);
+    if (nRead < 0) {
       TT_FreeTextBuffer(buffer);
       Close(fileHandle);
+      TT_Free(lineBuffer);
       return FALSE;
     }
 
-    /* Copy line text */
-    if (lineLen > 0) {
-      CopyMem(lineBuffer, buffer->lines[i].text, lineLen);
-    }
-    buffer->lines[i].text[lineLen] = '\0';
-    buffer->lines[i].length = lineLen;
+    if (nRead == 1)
+      sawContent = TRUE;
 
-    i++;
+    if (nRead == 0 || ch == '\n') {
+      if (nRead == 0 && pos == 0 && i > 0)
+        break;
 
-    /* Stop if we've reached max line count (prevents overflow) */
-    if (i >= buffer->maxLines || i >= TT_MAX_LINES) {
-      break;
+      lineLen = pos;
+      if (lineLen > TT_MAX_LINE_LENGTH - 1)
+        lineLen = TT_MAX_LINE_LENGTH - 1;
+
+      if (i >= TT_MAX_LINES)
+        break;
+
+      if (i >= buffer->maxLines) {
+        ULONG newMax = 0;
+        ULONG copyIdx = 0;
+        struct TTTextLine *newLines = NULL;
+
+        newMax = buffer->maxLines * 2;
+        if (newMax > TT_MAX_LINES)
+          newMax = TT_MAX_LINES;
+        if (newMax <= buffer->maxLines)
+          break;
+        newLines = (struct TTTextLine *)TT_Alloc(
+            newMax * sizeof(struct TTTextLine), MEMF_CLEAR);
+        if (!newLines) {
+          TT_FreeTextBuffer(buffer);
+          Close(fileHandle);
+          TT_Free(lineBuffer);
+          return FALSE;
+        }
+        for (copyIdx = 0; copyIdx < i; copyIdx++)
+          newLines[copyIdx] = buffer->lines[copyIdx];
+        TT_Free(buffer->lines);
+        buffer->lines = newLines;
+        buffer->maxLines = newMax;
+      }
+
+      if (buffer->lines[i].text) {
+        TT_Free(buffer->lines[i].text);
+        buffer->lines[i].text = NULL;
+      }
+
+      cap = lineLen + 256;
+      buffer->lines[i].allocated = cap;
+      buffer->lines[i].text = (STRPTR)TT_Alloc(cap, MEMF_CLEAR);
+      if (!buffer->lines[i].text) {
+        TT_FreeTextBuffer(buffer);
+        Close(fileHandle);
+        TT_Free(lineBuffer);
+        return FALSE;
+      }
+      if (lineLen > 0)
+        CopyMem(lineBuffer, buffer->lines[i].text, lineLen);
+      buffer->lines[i].text[lineLen] = '\0';
+      buffer->lines[i].length = lineLen;
+      i++;
+      pos = 0;
+
+      if (nRead == 0)
+        break;
+      continue;
     }
 
-    /* Pre-allocate next line's text buffer */
-    /* CRITICAL: Check if this line already has a buffer (from previous
-     * iteration) and free it first */
-    if (buffer->lines[i].text) {
-      TT_Free(buffer->lines[i].text);
-      buffer->lines[i].text = NULL;
-    }
+    if (ch == '\r')
+      continue;
 
-    buffer->lines[i].allocated = 256;
-    buffer->lines[i].text =
-        (STRPTR)TT_Alloc(buffer->lines[i].allocated, MEMF_CLEAR);
-    if (!buffer->lines[i].text) {
-      buffer->lineCount = i;
-      break;
+    if (pos + 1 < lineBufSize) {
+      lineBuffer[pos] = ch;
+      pos++;
     }
-    buffer->lines[i].text[0] = '\0';
-    buffer->lines[i].length = 0;
   }
 
-  /* FGets loop ended - clear any error codes to prevent dos.library corruption
-   */
-  /* FGets returns NULL on both EOF and error, so we clear IoErr() regardless */
   SetIoErr(0);
+  Close(fileHandle);
+  SetIoErr(0);
+  TT_Free(lineBuffer);
 
-  /* CRITICAL FIX: Free orphaned pre-allocation for lines[i] if present. */
-  /* The loop pre-allocates lines[i+1].text at the end of each iteration, but */
-  /* when FGets returns NULL (EOF), the pre-alloc for lines[i] is never filled
-   */
-  /* and FreeTextBuffer only frees lines[0]..lines[lineCount-1], missing it. */
-  /* Leaving it tracked causes a double-free when AmigaOS reuses the address. */
-  if (i < buffer->maxLines && buffer->lines[i].text) {
-    TT_Free(buffer->lines[i].text);
-    buffer->lines[i].text = NULL;
-    buffer->lines[i].allocated = 0;
-  }
-
-  buffer->lineCount = i;
-  if (buffer->lineCount == 0) {
+  if (!sawContent || i == 0)
     buffer->lineCount = 1;
-  }
+  else
+    buffer->lineCount = i;
 
   buffer->cursorX = 0;
   buffer->cursorY = 0;
   buffer->modified = FALSE;
-
-  /* Close file using cleanup stack */
-  /* Clear IoErr() before closing to ensure clean state */
-  SetIoErr(0);
-  Close(fileHandle);
-  /* Clear IoErr() after closing to prevent dos.library from being left in
-   * undefined state */
-  SetIoErr(0);
   result = TRUE;
   return result;
 }

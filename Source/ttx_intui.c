@@ -14,6 +14,7 @@
 #include "ttx_boopsi.h"
 #include "ttx_texteditor.h"
 #include "ttx_input.h"
+#include "ttx_commands_prot.h"
 
 #include <devices/inputevent.h>
 
@@ -113,8 +114,7 @@ TTX_IntuiRedrawText(struct Session *session)
 		return;
 
 	CalculateMaxScroll(TT_SessionBuffer(session), session->window);
-	RenderText(session->window, session);
-	UpdateCursor(session->window, session);
+	TTX_RequestRedraw(session);
 }
 
 /****************************************************************************/
@@ -127,8 +127,7 @@ TTX_IntuiRefreshSession(struct Session *session)
 
 	CalculateMaxScroll(TT_SessionBuffer(session), session->window);
 	UpdateScrollBars(session);
-	RenderText(session->window, session);
-	UpdateCursor(session->window, session);
+	TTX_RequestRedraw(session);
 }
 
 /****************************************************************************/
@@ -288,61 +287,9 @@ TTX_IntuiHandleMessage(struct TTXApplication *app, struct Session *portSession,
 		break;
 
 	case IDCMP_CLOSEWINDOW:
-		if (session->document->state.modified) {
-			struct IntuiText bodyText;
-			struct IntuiText posText;
-			struct IntuiText negText;
-			BOOL save;
-			STRPTR bodyStr;
-			STRPTR posStr;
-			STRPTR negStr;
-
-			bodyStr = "Document has been modified.\nSave before closing?";
-			posStr = "Save";
-			negStr = "Cancel";
-
-			bodyText.FrontPen = 0;
-			bodyText.BackPen = 1;
-			bodyText.DrawMode = JAM2;
-			bodyText.LeftEdge = 0;
-			bodyText.TopEdge = 0;
-			bodyText.ITextFont = NULL;
-			bodyText.IText = bodyStr;
-			bodyText.NextText = NULL;
-
-			posText.FrontPen = 0;
-			posText.BackPen = 1;
-			posText.DrawMode = JAM2;
-			posText.LeftEdge = 0;
-			posText.TopEdge = 0;
-			posText.ITextFont = NULL;
-			posText.IText = posStr;
-			posText.NextText = NULL;
-
-			negText.FrontPen = 0;
-			negText.BackPen = 1;
-			negText.DrawMode = JAM2;
-			negText.LeftEdge = 0;
-			negText.TopEdge = 0;
-			negText.ITextFont = NULL;
-			negText.IText = negStr;
-			negText.NextText = NULL;
-
-			save = AutoRequest(session->window, &bodyText, &posText, &negText,
-				0, 0, 320, 100);
-			if (save) {
-				if (session->document->state.fileName)
-					TTX_HandleCommand(app, session, "SaveFile", NULL, 0);
-				else
-					TTX_HandleCommand(app, session, "SaveFileAs", NULL, 0);
-				if (session->document->state.modified) {
-					result = TRUE;
-					break;
-				}
-			} else {
-				result = TRUE;
-				break;
-			}
+		if (!TTX_PromptSaveBeforeClose(app, session)) {
+			result = TRUE;
+			break;
 		}
 		TTX_RequestDestroySession(app, session);
 		result = TRUE;
@@ -350,17 +297,21 @@ TTX_IntuiHandleMessage(struct TTXApplication *app, struct Session *portSession,
 
 	case IDCMP_VANILLAKEY:
 	case IDCMP_RAWKEY:
-		/* Window-level fallback when the text editor gadget is absent. */
-		if (!session->textEditorGadget)
-			TTX_InputFromIntuiMessage(app, session, imsg);
+		/*
+		 * Always handle window IDCMP keys (HEAD~1 behaviour). The text
+		 * editor gadget also receives IECLASS_RAWKEY when active; InputRawKey
+		 * is idempotent enough for navigation, and printable inserts are
+		 * gated by the active gadget typically consuming RAWKEY first.
+		 * When the gadget is absent or inactive, this is the only path.
+		 */
+		TTX_InputFromIntuiMessage(app, session, imsg);
 		result = TRUE;
 		break;
 
 	case IDCMP_REFRESHWINDOW:
 		if (TT_SessionBuffer(session)) {
 			BeginRefresh(session->window);
-			RenderText(session->window, session);
-			UpdateCursor(session->window, session);
+			TTX_DrawSession(session);
 			EndRefresh(session->window, TRUE);
 		}
 		result = TRUE;

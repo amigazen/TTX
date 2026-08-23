@@ -48,7 +48,10 @@ struct InitTable InitTab = {
 	(APTR)LibInit
 };
 
-/* Standard vectors only; public LVOs follow ttxsupport_lib.sfd when added. */
+/* Standard vectors only; public LVOs follow ttxsupport_lib.sfd when added.
+ * Keep FuncTab ↔ SFD ↔ include/pragmas/ttxsupport_pragmas.h via
+ * SDK/tools/sfd_reconcile.py.
+ */
 APTR FuncTab[] = {
 	(APTR)LibOpen,
 	(APTR)LibClose,
@@ -106,17 +109,14 @@ __ASM__ __SAVE_DS__ LibOpen(__REG__(a6, struct Library *lib))
 APTR
 __ASM__ __SAVE_DS__ LibClose(__REG__(a6, struct Library *lib))
 {
-	if (lib->lib_OpenCnt && --lib->lib_OpenCnt)
-	{
+	if (lib->lib_OpenCnt)
+		--lib->lib_OpenCnt;
+
+	if (lib->lib_OpenCnt)
 		return NULL;
-	}
 
-	if (lib->lib_Flags & LIBF_DELEXP)
-	{
-		return LibExpunge(lib);
-	}
-
-	return NULL;
+	lib->lib_Flags |= LIBF_DELEXP;
+	return LibExpunge(lib);
 }
 
 APTR

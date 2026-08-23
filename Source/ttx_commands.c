@@ -8,6 +8,7 @@
 #include "ttx_driver.h"
 #include "ttx_commands_prot.h"
 #include "ttx_menu_builtin.h"
+#include "ttx_input.h"
 #include "ttx.h"
 
 /* Flush menu trace lines before a crash so output.txt shows the last step. */
@@ -49,8 +50,7 @@ TTX_DoEngineCommand(
 		CalculateMaxScroll(TT_SessionBuffer(session), session->window);
 		ScrollToCursor(TT_SessionBuffer(session), session->window);
 		UpdateScrollBars(session);
-		RenderText(session->window, session);
-		UpdateCursor(session->window, session);
+		TTX_RequestRedraw(session);
 	}
 
 	if (TT_SessionBuffer(session) && session->document)
@@ -475,11 +475,11 @@ static BOOL GetCommandFromMenuPick(ULONG menuNumber, ULONG itemNumber, STRPTR *o
     }
     
     /* Map menu/item numbers to commands based on hardcoded menu structure */
-    /* Menu 0: Project */
+    /* Menu 0: Project — matches TTX_BuiltIn.dfn */
     if (extractedMenu == 0) {
         switch (extractedItem) {
-            case 0: *outCommand = "OpenDoc"; if (outArgs && outArgCount) { outArgs[0] = "FileReq"; *outArgCount = 1; } break;
-            case 1: *outCommand = "OpenDoc"; break;
+            case 0: *outCommand = "OpenFile"; break; /* Open... into current */
+            case 1: *outCommand = "OpenDoc"; if (outArgs && outArgCount) { outArgs[0] = "FileReq"; *outArgCount = 1; } break; /* Open New... */
             case 2: *outCommand = "InsertFile"; break;
             case 4: *outCommand = "SaveFile"; break;
             case 5: *outCommand = "SaveFileAs"; break;
@@ -492,7 +492,7 @@ static BOOL GetCommandFromMenuPick(ULONG menuNumber, ULONG itemNumber, STRPTR *o
         }
         return TRUE;
     }
-    /* Menu 1: Windows */
+    /* Menu 1: Windows — "New" is OpenDoc with no args (blank document) */
     else if (extractedMenu == 1) {
         switch (extractedItem) {
             case 0: *outCommand = "OpenDoc"; break;
@@ -1249,7 +1249,7 @@ BOOL TTX_Cmd_OpenFile(struct TTXApplication *app, struct Session *session, STRPT
 {
     STRPTR fileName = NULL;
     STRPTR selectedFile = NULL;
-    STRPTR oldFileName = NULL;
+    STRPTR openArgs[1];
     
     Printf("[CMD] TTX_Cmd_OpenFile: START\n");
     
@@ -1257,6 +1257,15 @@ BOOL TTX_Cmd_OpenFile(struct TTXApplication *app, struct Session *session, STRPT
         Printf("[CMD] TTX_Cmd_OpenFile: FAIL (app=%lx, session=%lx, buffer=%lx)\n", 
                (ULONG)app, (ULONG)session, (ULONG)(session ? TT_SessionBuffer(session) : NULL));
         return FALSE;
+    }
+
+    /* ASL must not run inside an IDCMP handler */
+    if (app->intuiHandlerDepth > 0 &&
+        !(args && argCount > 0 && args[0])) {
+        Printf("[CMD] TTX_Cmd_OpenFile: deferred FileReq (inside IDCMP handler)\n");
+        app->deferredAction = TTX_DEFER_OPENFILE_FILEREQ;
+        app->deferredOpenSession = session;
+        return TRUE;
     }
     
     /* Check if filename provided in args */
@@ -1280,114 +1289,48 @@ BOOL TTX_Cmd_OpenFile(struct TTXApplication *app, struct Session *session, STRPT
         fileName = selectedFile;
     }
     
-    /* Save old filename for cleanup */
-    oldFileName = session->document->state.fileName;
-    
-    /* Allocate new filename and copy it */
-    if (fileName ) {
-        ULONG fileNameLen = 0;
-        STRPTR newFileName = NULL;
-        STRPTR endPtr = NULL;
-        STRPTR tempPtr = NULL;
-        
-        /* Calculate string length (utility.library V39 doesn't have Strlen) */
-        tempPtr = fileName;
-        while (tempPtr && *tempPtr != '\0') {
-            fileNameLen++;
-            tempPtr++;
-        }
-        fileNameLen++; /* Add 1 for NUL terminator */
-        
-        newFileName = TTX_Alloc(fileNameLen, MEMF_CLEAR);
-        if (newFileName) {
-            endPtr = Strncpy(newFileName, fileName, fileNameLen);
-            if (!endPtr) {
-                /* String was truncated - this shouldn't happen since we allocated the right size */
-                Printf("[CMD] TTX_Cmd_OpenFile: WARN (filename truncated)\n");
-            }
-            session->document->state.fileName = newFileName;
-        } else {
-            Printf("[CMD] TTX_Cmd_OpenFile: FAIL (could not allocate filename)\n");
-            if (selectedFile ) {
-                TTX_Free(selectedFile);
-            }
-            return FALSE;
-        }
-    }
-    
-    /* Load file via turbotext.library engine */
+    /* Load file via turbotext.library engine (owns doc->state.fileName).
+     * Path must reach a3 via correct TT_DoCommand pragma (0BA9805). */
+    openArgs[0] = fileName;
+    Printf("[CMD] TTX_Cmd_OpenFile: loading '%s'\n", fileName);
+    if (!TT_DoCommand(session->document, TT_GetActiveView(session->document),
+                      "OpenFile", openArgs, 1))
     {
-        STRPTR openArgs[1];
-        openArgs[0] = fileName;
-        if (!TT_DoCommand(session->document, TT_GetActiveView(session->document),
-                          "OpenFile", openArgs, 1))
-        {
-            Printf("[CMD] TTX_Cmd_OpenFile: FAIL (engine OpenFile '%s' err=%lu)\n",
-                   fileName, (ULONG)TT_GetLastError());
-            if (selectedFile) {
-                TTX_Free(selectedFile);
-            }
-            return FALSE;
+        Printf("[CMD] TTX_Cmd_OpenFile: FAIL (engine OpenFile '%s' err=%lu)\n",
+               fileName, (ULONG)TT_GetLastError());
+        if (selectedFile) {
+            TTX_Free(selectedFile);
         }
+        return FALSE;
     }
     
-    /* Free old filename if we had one */
-        if (oldFileName ) {
-            TTX_Free(oldFileName);
-    }
-    
-    /* Free selected file path if we allocated it (the filename is now in session->fileName) */
-    if (selectedFile ) {
+    if (selectedFile) {
         TTX_Free(selectedFile);
     }
     
     /* Update window title */
-    if (session->window && session->document->state.fileName) {
-        STRPTR titleText = NULL;
-        ULONG titleLen = 0;
-        ULONG fileNameLen = 0;
-        STRPTR endPtr = NULL;
-        STRPTR tempPtr = NULL;
-        
-        /* Calculate filename length (utility.library V39 doesn't have Strlen) */
-        tempPtr = session->document->state.fileName;
-        while (tempPtr && *tempPtr != '\0') {
-            fileNameLen++;
-            tempPtr++;
-        }
-        
-        titleLen = fileNameLen + 10; /* "TTX - " + filename + null */
-        titleText = TTX_Alloc(titleLen, MEMF_CLEAR);
-        if (titleText) {
-            /* Use Strncpy chaining to concatenate strings */
-            endPtr = Strncpy(titleText, "TTX - ", titleLen);
-            if (endPtr) {
-                Strncpy(endPtr, session->document->state.fileName, titleLen - (ULONG)(endPtr - titleText));
-            }
-            SetWindowTitles(session->window, titleText, (STRPTR)-1);
-        }
-    }
+    TTX_UpdateSessionWindowTitle(session);
     
-    /* Calculate max scroll values and update scroll bars */
-    if (TT_SessionBuffer(session)) {
-        CalculateMaxScroll(TT_SessionBuffer(session), session->window);
-        UpdateScrollBars(session);
-    }
-    
-    /* Reset cursor to top */
+    /* Reset cursor to top and redraw the full document */
     if (TT_SessionBuffer(session)) {
         TT_SessionBuffer(session)->cursorX = 0;
         TT_SessionBuffer(session)->cursorY = 0;
     }
+    session->render.needsFullRedraw = TRUE;
+    TTX_InputRefreshSession(session);
     
-    /* Refresh display */
-    if (TT_SessionBuffer(session) && session->window) {
-        RenderText(session->window, session);
-        UpdateCursor(session->window, session);
+    if (TT_SessionBuffer(session)) {
+        ULONG line0len = 0;
+        if (TT_SessionBuffer(session)->lineCount > 0 &&
+            TT_SessionBuffer(session)->lines[0].text) {
+            while (TT_SessionBuffer(session)->lines[0].text[line0len] != '\0')
+                line0len++;
+        }
+        Printf("[CMD] TTX_Cmd_OpenFile: SUCCESS (lines=%lu line0len=%lu)\n",
+               TT_SessionBuffer(session)->lineCount, line0len);
+    } else {
+        Printf("[CMD] TTX_Cmd_OpenFile: SUCCESS (no buffer)\n");
     }
-    
-    Printf("[CMD] TTX_Cmd_OpenFile: SUCCESS (lines=%lu)\n",
-           TT_SessionBuffer(session) ? TT_SessionBuffer(session)->lineCount : 0);
     return TRUE;
 }
 
@@ -1407,39 +1350,16 @@ BOOL TTX_Cmd_OpenDoc(struct TTXApplication *app, struct Session *session, STRPTR
      */
     if (app && app->intuiHandlerDepth > 0) {
         Printf("[CMD] TTX_Cmd_OpenDoc: deferred %s (inside IDCMP handler)\n",
-               useFileReq ? "OpenFile" : "OpenNew");
-        app->deferredAction = useFileReq ? TTX_DEFER_OPENFILE_FILEREQ
+               useFileReq ? "OpenDoc+FileReq" : "OpenDoc blank");
+        /* FileReq → new window with file; no args → blank new window */
+        app->deferredAction = useFileReq ? TTX_DEFER_OPENDOC_FILEREQ
                                          : TTX_DEFER_OPENDOC_NEW;
         app->deferredOpenSession = session;
         return TRUE;
     }
     
     if (useFileReq) {
-        /* Open with file requester: load into the CURRENT window */
-        STRPTR openArgs[1];
-
-        if (!AslBase) {
-            Printf("[CMD] TTX_Cmd_OpenDoc: FAIL (ASL library not available)\n");
-            return FALSE;
-        }
-        
-        selectedFile = TTX_ShowFileRequester(app, session, NULL, NULL);
-        if (!selectedFile) {
-            /* User cancelled or error */
-            Printf("[CMD] TTX_Cmd_OpenDoc: cancelled or failed\n");
-            return FALSE;
-        }
-        
-        openArgs[0] = selectedFile;
-        result = TTX_Cmd_OpenFile(app, session, openArgs, 1);
-        
-        if (selectedFile) {
-            TTX_Free(selectedFile);
-        }
-        
-        return result;
-    } else {
-        /* Open New: file requester, then load into a NEW window */
+        /* Open New...: requester then load into a NEW window */
         if (!AslBase) {
             Printf("[CMD] TTX_Cmd_OpenDoc: FAIL (ASL library not available)\n");
             return FALSE;
@@ -1459,6 +1379,14 @@ BOOL TTX_Cmd_OpenDoc(struct TTXApplication *app, struct Session *session, STRPTR
             TTX_Free(selectedFile);
         }
         
+        return result;
+    } else {
+        /* Windows/New: blank document in a new window (DFN: OpenDoc) */
+        result = TTX_CreateSession(app, NULL);
+        if (result)
+            TTX_RebuildSignalMask(app);
+        Printf("[CMD] TTX_Cmd_OpenDoc: blank session ok=%lu\n",
+               (ULONG)(result ? 1 : 0));
         return result;
     }
 }
@@ -1680,6 +1608,8 @@ BOOL TTX_Cmd_SaveFileAs(struct TTXApplication *app, struct Session *session, STR
         if (oldFileName && oldFileName != session->document->state.fileName ) {
             TTX_Free(oldFileName);
         }
+
+        TTX_UpdateSessionWindowTitle(session);
     } else {
         LONG errorCode = IoErr();
         if (errorCode != 0) {
@@ -1757,76 +1687,90 @@ BOOL TTX_Cmd_PrintFile(struct TTXApplication *app, struct Session *session, STRP
     return FALSE;
 }
 
-/* Prompt user before closing if document is modified */
+/* Prompt user before closing if document is modified.
+ * Gadgets: Save | Discard | Cancel (EasyRequest return: 1, 2, 0).
+ */
+BOOL TTX_PromptSaveBeforeClose(struct TTXApplication *app, struct Session *session)
+{
+    struct EasyStruct es;
+    LONG choice = 0;
+
+    if (!session || !session->window || !session->document)
+        return FALSE;
+
+    if (!session->document->state.modified)
+        return TRUE;
+
+    es.es_StructSize = sizeof(struct EasyStruct);
+    es.es_Flags = 0;
+    es.es_Title = (UBYTE *)"TTX";
+    es.es_TextFormat = (UBYTE *)"Document has been modified.\nSave changes before closing?";
+    es.es_GadgetFormat = (UBYTE *)"Save|Discard|Cancel";
+
+    choice = EasyRequestArgs(session->window, &es, NULL, NULL);
+
+    if (choice == 1) {
+        /* Save */
+        if (session->document->state.fileName)
+            TTX_Cmd_SaveFile(app, session, NULL, 0);
+        else
+            TTX_Cmd_SaveFileAs(app, session, NULL, 0);
+        if (session->document->state.modified)
+            return FALSE;
+        return TRUE;
+    }
+    if (choice == 2) {
+        /* Discard */
+        return TRUE;
+    }
+    /* Cancel (0) or closed requester */
+    return FALSE;
+}
+
 static BOOL PromptSaveBeforeClose(struct TTXApplication *app, struct Session *session)
 {
-    struct IntuiText bodyText;
-    struct IntuiText posText;
-    struct IntuiText negText;
-    BOOL result = FALSE;
-    STRPTR bodyStr = "Document has been modified.\nSave before closing?";
-    STRPTR posStr = "Save";
-    STRPTR negStr = "Cancel";
-    
-    if (!session || !session->window || !TT_SessionBuffer(session)) {
-        return FALSE;
+    return TTX_PromptSaveBeforeClose(app, session);
+}
+
+VOID
+TTX_UpdateSessionWindowTitle(struct Session *session)
+{
+    STRPTR titleText = NULL;
+    ULONG titleLen = 0;
+    ULONG fileNameLen = 0;
+    STRPTR endPtr = NULL;
+    STRPTR tempPtr = NULL;
+    STRPTR name;
+
+    if (!session || !session->window || session->window == INVALID_RESOURCE)
+        return;
+    if (!session->document)
+        return;
+
+    name = session->document->state.fileName;
+    if (!name || name[0] == '\0')
+        name = (STRPTR)"Untitled";
+
+    tempPtr = name;
+    fileNameLen = 0;
+    while (tempPtr && *tempPtr != '\0') {
+        fileNameLen++;
+        tempPtr++;
     }
-    
-    /* Only prompt if document is modified */
-    if (!session->document->state.modified) {
-        return TRUE; /* Not modified - OK to close */
-    }
-    
-    /* Set up IntuiText structures */
-    bodyText.FrontPen = 0;
-    bodyText.BackPen = 1;
-    bodyText.DrawMode = JAM2;
-    bodyText.LeftEdge = 0;
-    bodyText.TopEdge = 0;
-    bodyText.ITextFont = NULL; /* Use default font */
-    bodyText.IText = bodyStr;
-    bodyText.NextText = NULL;
-    
-    posText.FrontPen = 0;
-    posText.BackPen = 1;
-    posText.DrawMode = JAM2;
-    posText.LeftEdge = 0;
-    posText.TopEdge = 0;
-    posText.ITextFont = NULL;
-    posText.IText = posStr;
-    posText.NextText = NULL;
-    
-    negText.FrontPen = 0;
-    negText.BackPen = 1;
-    negText.DrawMode = JAM2;
-    negText.LeftEdge = 0;
-    negText.TopEdge = 0;
-    negText.ITextFont = NULL;
-    negText.IText = negStr;
-    negText.NextText = NULL;
-    
-    /* Show AutoRequest dialog */
-    result = AutoRequest(session->window, &bodyText, &posText, &negText, 0, 0, 320, 100);
-    
-    if (result) {
-        /* User chose "Save" - save the file */
-        if (session->document->state.fileName) {
-            /* Save to existing filename */
-            TTX_Cmd_SaveFile(app, session, NULL, 0);
-        } else {
-            /* No filename - use Save As */
-            TTX_Cmd_SaveFileAs(app, session, NULL, 0);
-        }
-        /* If save was cancelled, don't close */
-        if (session->document->state.modified) {
-            return FALSE; /* Save was cancelled */
-        }
-    } else {
-        /* User chose "Cancel" - don't close */
-        return FALSE;
-    }
-    
-    return TRUE; /* OK to close */
+
+    titleLen = fileNameLen + 10;
+    titleText = TTX_Alloc(titleLen, MEMF_CLEAR);
+    if (!titleText)
+        return;
+
+    endPtr = Strncpy(titleText, "TTX - ", titleLen);
+    if (endPtr)
+        Strncpy(endPtr, name, titleLen - (ULONG)(endPtr - titleText));
+
+    if (session->windowState.title)
+        TTX_Free(session->windowState.title);
+    session->windowState.title = titleText;
+    SetWindowTitles(session->window, titleText, (STRPTR)-1);
 }
 
 BOOL TTX_Cmd_CloseDoc(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -3856,8 +3800,7 @@ TTX_ProcessDeferredActions(struct TTXApplication *app)
 	app->deferredOpenSession = NULL;
 
 	if (action == TTX_DEFER_OPENFILE_FILEREQ) {
-		deferArgs[0] = (STRPTR)"FileReq";
-		TTX_Cmd_OpenDoc(app, openSession, deferArgs, 1);
+		TTX_Cmd_OpenFile(app, openSession, NULL, 0);
 	} else if (action == TTX_DEFER_OPENDOC_FILEREQ) {
 		deferArgs[0] = (STRPTR)"FileReq";
 		TTX_Cmd_OpenDoc(app, openSession, deferArgs, 1);

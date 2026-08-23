@@ -1,8 +1,8 @@
 /*
  * turbotext.library startup vectors and function table
  *
- * FuncTab[] order matches public LVO exports.  Standard vectors first,
- * then TurboTextRun at bias -948 equivalent position in the table.
+ * FuncTab[]: standard Open/Close/Expunge/ExtFunc, then public LVOs in
+ * SFD order (bias -30). Keep in sync via SDK/tools/sfd_reconcile.py.
  *
  * Copyright (c) 2025 amigazen project
  * Licensed under BSD 2-Clause License
@@ -18,6 +18,7 @@
 #include "compiler.h"
 #include "private/tt_build.h"
 #include "include/libraries/turbotext.h"
+#include "private/tt_internal.h"
 #include "tt_funcs.h"
 
 extern const char TT_LibName[];
@@ -56,7 +57,12 @@ struct InitTable InitTab = {
 };
 
 /*
- * FuncTab[] order MUST match ../SDK/SFD/turbotext_lib.sfd.
+ * FuncTab[] order MUST match ../SDK/SFD/turbotext_lib.sfd and
+ * Source/include/pragmas/turbotext_pragmas.h (regenerate with
+ * SDK/tools/sfd_reconcile.py). Public LVOs start at bias -30.
+ *
+ * Index → offset: Open=-6 Close=-12 Expunge=-18 ExtFunc=-24,
+ * then TurboTextRun=-30 … TT_GetLastError=-60.
  */
 APTR FuncTab[] = {
 	(APTR)LibOpen,
@@ -126,17 +132,20 @@ __ASM__ __SAVE_DS__ LibOpen(__REG__(a6, struct Library *lib))
 APTR
 __ASM__ __SAVE_DS__ LibClose(__REG__(a6, struct Library *lib))
 {
-	if (lib->lib_OpenCnt && --lib->lib_OpenCnt)
-	{
+	/*
+	 * Always expunge on the last CloseLibrary. The ROM default (only
+	 * expunge when LIBF_DELEXP was set by memory pressure) leaves the
+	 * segment resident — so a rebuilt TurboText:Libs/turbotext.library
+	 * is ignored and/or OpenLibrary of the path can fight the old node.
+	 */
+	if (lib->lib_OpenCnt)
+		--lib->lib_OpenCnt;
+
+	if (lib->lib_OpenCnt)
 		return NULL;
-	}
 
-	if (lib->lib_Flags & LIBF_DELEXP)
-	{
-		return LibExpunge(lib);
-	}
-
-	return NULL;
+	lib->lib_Flags |= LIBF_DELEXP;
+	return LibExpunge(lib);
 }
 
 APTR
@@ -157,6 +166,18 @@ __ASM__ __SAVE_DS__ LibExpunge(__REG__(a6, struct Library *lib))
 static VOID
 FreeLib(struct Library *lib)
 {
+	struct TurboTextBase *base = (struct TurboTextBase *)lib;
+
+	/* Drop any documents left open (crash / missed TT_CloseDocument). */
+	if (base)
+	{
+		while (base->documents)
+			TT_CloseDocumentI(base, base->documents);
+	}
+
+	TT_UIHooks = NULL;
+	TT_AppCtx = NULL;
+
 	if (DOSBase)
 	{
 		CloseLibrary((struct Library *)DOSBase);

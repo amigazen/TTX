@@ -7,6 +7,9 @@
 
 #include "ttx_driver.h"
 
+#include <exec/libraries.h>
+#include <exec/lists.h>
+
 struct Library *TurboTextBase;
 
 static BOOL TTX_ProgDirAssigned = FALSE;
@@ -20,6 +23,12 @@ TTX_AssignProgramDir(VOID)
 
 	if (TTX_ProgDirAssigned)
 		return TRUE;
+
+	/*
+	 * Drop a leftover TurboText: assign from a previous process that exited
+	 * without TTX_CloseTurboText (otherwise AssignLock can fail / wedge).
+	 */
+	AssignLock(TTX_PROGASSIGN, (BPTR)NULL);
 
 	lock = GetProgramDir();
 	if (!lock)
@@ -64,10 +73,25 @@ static struct Library *
 TTX_OpenLocalLibrary(STRPTR libName)
 {
 	TEXT path[128];
+	struct Library *resident = NULL;
 
 	TTX_BuildLibPath(path, sizeof(path), libName);
 	if (path[0] == '\0')
 		return NULL;
+
+	/*
+	 * CloseLibrary normally left the segment resident (OpenCnt==0). A
+	 * rebuilt file on disk was then ignored, or OpenLibrary(path) added a
+	 * second LibList node. Flush any zero-open resident copy first.
+	 */
+	Forbid();
+	resident = (struct Library *)FindName(&SysBase->LibList, libName);
+	Permit();
+	if (resident && resident->lib_OpenCnt == 0) {
+		Printf("[INIT] RemLibrary stale resident %s @%lx\n",
+			libName, (ULONG)resident);
+		RemLibrary(resident);
+	}
 
 	return OpenLibrary(path, 0);
 }
@@ -132,9 +156,8 @@ TTX_HookRefreshView(APTR appCtx, struct TTDocument *doc, struct TTView *view)
 	{
 		if (session->document == doc && session->window)
 		{
-			RenderText(session->window, session);
-			UpdateCursor(session->window, session);
 			UpdateScrollBars(session);
+			TTX_RequestRedraw(session);
 			return;
 		}
 		session = session->next;
@@ -203,6 +226,9 @@ TTX_OpenTurboText(struct TTXApplication *app)
 		SetIoErr(err);
 		return FALSE;
 	}
+
+	Printf("[INIT] turbotext.library=%lx ver=%lu size hint: rebuild Libs/ if typing inserts fail\n",
+		(ULONG)TurboTextBase, (ULONG)TurboTextBase->lib_Version);
 
 	return TRUE;
 }

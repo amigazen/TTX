@@ -9,6 +9,7 @@
  */
 
 #include "ttx_texteditor.h"
+#include "ttx_input.h"
 
 #include <devices/inputevent.h>
 #include <intuition/classes.h>
@@ -16,7 +17,22 @@
 #include <intuition/intuition.h>
 #include <clib/alib_protos.h>
 #include <proto/intuition.h>
-#include <proto/keymap.h>
+#include <proto/utility.h>
+
+/* SAS/C register-parameter BOOPSI dispatchers need A4 for FAR data. */
+void geta4(void);
+
+/* Flush init trace lines before a wedge so output.txt shows the last step. */
+static VOID
+TTX_InitTrace(STRPTR step)
+{
+	BPTR out;
+
+	Printf("[INIT] %s\n", step);
+	out = Output();
+	if (out)
+		Flush(out);
+}
 
 /****************************************************************************/
 
@@ -39,109 +55,7 @@ TTX_TE_RefreshSession(struct Session *session)
 
 	CalculateMaxScroll(TT_SessionBuffer(session), session->window);
 	UpdateScrollBars(session);
-	RenderText(session->window, session);
-	UpdateCursor(session->window, session);
-}
-
-/****************************************************************************/
-
-static BOOL
-TTX_TE_HandleKey(
-	struct TTXApplication *app,
-	struct Session *session,
-	struct TTXTextEditorData *data,
-	struct InputEvent *ievent)
-{
-	ULONG qual;
-	STRPTR insArgs[1];
-	TEXT chBuf[2];
-	UBYTE rawCode;
-	struct InputEvent mapEvent;
-	UBYTE charBuffer[10];
-	WORD chars;
-	struct KeyMap *keymap;
-	BOOL processed;
-
-	if (!app || !session || !data || !ievent || !TT_SessionBuffer(session))
-		return FALSE;
-	if (data->readOnly || session->document->state.readOnly)
-		return FALSE;
-	if (ievent->ie_Class != IECLASS_RAWKEY)
-		return FALSE;
-
-	processed = FALSE;
-	qual = (ULONG)ievent->ie_Qualifier;
-	rawCode = (UBYTE)ievent->ie_Code;
-	if (rawCode & IECODE_UP_PREFIX)
-		return FALSE;
-	if (rawCode >= 0x60 && rawCode <= 0x6A)
-		return FALSE;
-
-	if (rawCode == 0x41) {
-		TTX_DoEngineCommand(app, session, "Delete", NULL, 0);
-		processed = TRUE;
-	} else if (rawCode == 0x42) {
-		TTX_DoEngineCommand(app, session, "DeleteForward", NULL, 0);
-		processed = TRUE;
-	} else if (rawCode == 0x43) {
-		TTX_DoEngineCommand(app, session, "InsertLine", NULL, 0);
-		processed = TRUE;
-	} else if (rawCode == 0x4F) {
-		if (TT_SessionBuffer(session)->cursorX > 0)
-			TT_SessionBuffer(session)->cursorX--;
-		else if (TT_SessionBuffer(session)->cursorY > 0) {
-			TT_SessionBuffer(session)->cursorY--;
-			TT_SessionBuffer(session)->cursorX =
-				TT_SessionBuffer(session)->lines[
-					TT_SessionBuffer(session)->cursorY].length;
-		}
-		processed = TRUE;
-	} else if (rawCode == 0x4E) {
-		if (TT_SessionBuffer(session)->cursorX <
-		    TT_SessionBuffer(session)->lines[
-			    TT_SessionBuffer(session)->cursorY].length)
-			TT_SessionBuffer(session)->cursorX++;
-		else if (TT_SessionBuffer(session)->cursorY <
-			 TT_SessionBuffer(session)->lineCount - 1) {
-			TT_SessionBuffer(session)->cursorY++;
-			TT_SessionBuffer(session)->cursorX = 0;
-		}
-		processed = TRUE;
-	} else if (rawCode == 0x4C) {
-		if (TT_SessionBuffer(session)->cursorY > 0)
-			TT_SessionBuffer(session)->cursorY--;
-		processed = TRUE;
-	} else if (rawCode == 0x4D) {
-		if (TT_SessionBuffer(session)->cursorY <
-		    TT_SessionBuffer(session)->lineCount - 1)
-			TT_SessionBuffer(session)->cursorY++;
-		processed = TRUE;
-	} else if (KeymapBase) {
-		keymap = (struct KeyMap *)KeymapBase;
-		mapEvent.ie_Class = IECLASS_RAWKEY;
-		mapEvent.ie_Code = rawCode;
-		mapEvent.ie_Qualifier = (UWORD)qual;
-		mapEvent.ie_SubClass = 0;
-		mapEvent.ie_X = 0;
-		mapEvent.ie_Y = 0;
-		mapEvent.ie_NextEvent = NULL;
-		mapEvent.ie_TimeStamp = ievent->ie_TimeStamp;
-		chars = MapRawKey(&mapEvent, charBuffer, 9, keymap);
-		if (chars > 0 && charBuffer[0] >= 32) {
-			chBuf[0] = (TEXT)charBuffer[0];
-			chBuf[1] = '\0';
-			insArgs[0] = chBuf;
-			TTX_DoEngineCommand(app, session, "Insert", insArgs, 1);
-			processed = TRUE;
-		}
-	}
-
-	if (processed) {
-		session->document->state.modified = TT_SessionBuffer(session)->modified;
-		TTX_TE_RefreshSession(session);
-	}
-
-	return processed;
+	TTX_RequestRedraw(session);
 }
 
 /****************************************************************************/
@@ -256,8 +170,6 @@ TTX_TE_New(Class *cl, Object *obj, struct opSet *ops)
 	struct TTXTextEditorData *data;
 	Object *gadget;
 
-	geta4();
-
 	gadget = (Object *)DoSuperMethodA(cl, obj, (Msg)ops);
 	if (!gadget) {
 		Printf("[INIT] TTX_TE_New: DoSuperMethodA FAIL io=%lu\n",
@@ -266,9 +178,11 @@ TTX_TE_New(Class *cl, Object *obj, struct opSet *ops)
 	}
 
 	data = (struct TTXTextEditorData *)INST_DATA(cl, gadget);
-	data->session = NULL;
-	data->app = NULL;
-	data->readOnly = FALSE;
+	data->session = (struct Session *)GetTagData(TEA_Session, NULL,
+		ops->ops_AttrList);
+	data->app = (struct TTXApplication *)GetTagData(TEA_Application, NULL,
+		ops->ops_AttrList);
+	data->readOnly = (BOOL)GetTagData(TEA_ReadOnly, FALSE, ops->ops_AttrList);
 	data->mouseSelecting = FALSE;
 
 	return (ULONG)gadget;
@@ -331,7 +245,8 @@ TTX_TE_GoActive(Class *cl, Object *obj, struct gpInput *gpi)
 	(void)cl;
 	(void)obj;
 	(void)gpi;
-	return (ULONG)(GMR_MEACTIVE | GMR_REUSE);
+	/* Stay active so GM_HANDLEINPUT keeps receiving key/mouse events. */
+	return (ULONG)GMR_MEACTIVE;
 }
 
 /****************************************************************************/
@@ -345,11 +260,13 @@ TTX_TE_HandleInput(Class *cl, Object *obj, struct gpInput *gpi)
 	struct InputEvent *ievent;
 	struct Window *window;
 	ULONG result;
+	APTR deadKey;
 
 	data = (struct TTXTextEditorData *)INST_DATA(cl, obj);
 	session = data->session;
 	app = data->app;
-	result = (ULONG)(GMR_MEACTIVE | GMR_REUSE);
+	/* Remain active (GMR_MEACTIVE == 0) for continued typing. */
+	result = (ULONG)GMR_MEACTIVE;
 
 	if (!session || !app || !session->window)
 		return result;
@@ -357,9 +274,14 @@ TTX_TE_HandleInput(Class *cl, Object *obj, struct gpInput *gpi)
 	window = session->window;
 	ievent = gpi->gpi_IEvent;
 	while (ievent) {
-		if (ievent->ie_Class == IECLASS_RAWKEY)
-			TTX_TE_HandleKey(app, session, data, ievent);
-		else if (ievent->ie_Class == IECLASS_RAWMOUSE) {
+		if (!data->readOnly && session->document &&
+		    !session->document->state.readOnly) {
+			if (ievent->ie_Class == IECLASS_RAWKEY) {
+				deadKey = ievent->ie_EventAddress;
+				TTX_InputFromInputEvent(app, session, ievent, deadKey);
+			}
+		}
+		if (ievent->ie_Class == IECLASS_RAWMOUSE) {
 			if (ievent->ie_Code == IECODE_NOBUTTON)
 				TTX_TE_HandleMouseMove(session, data, gpi);
 			else
@@ -374,34 +296,17 @@ TTX_TE_HandleInput(Class *cl, Object *obj, struct gpInput *gpi)
 /****************************************************************************/
 
 /*
- * Register hook entry (A0/A2/A1) calling stack-args h_SubEntry.
- * Same role as amiga.lib HookEntry; implemented in C for SAS/C register params.
+ * BOOPSI dispatcher (A0=class, A2=object, A1=message). SAS/C register
+ * convention; geta4() required for far data access in the driver.
  */
-static ULONG __saveds __asm TTX_HookEntry(
-	register __a0 struct Hook *hook,
+static ULONG __saveds __asm TTX_TE_Dispatcher(
+	register __a0 Class *cl,
 	register __a2 Object *obj,
 	register __a1 Msg msg)
 {
-	ULONG __stdargs (*sub)(struct Hook *, Object *, Msg);
-
-	sub = (ULONG __stdargs (*)(struct Hook *, Object *, Msg))hook->h_SubEntry;
-	return sub(hook, obj, msg);
-}
-
-/****************************************************************************/
-
-static ULONG __saveds __stdargs TTX_TE_Dispatch(
-	struct Hook *hook,
-	Object *obj,
-	Msg msg)
-{
-	Class *cl;
 	ULONG result;
 
-	if (obj)
-		cl = OCLASS(obj);
-	else
-		cl = (Class *)hook;
+	geta4();
 
 	switch (msg->MethodID) {
 	case OM_NEW:
@@ -414,7 +319,7 @@ static ULONG __saveds __stdargs TTX_TE_Dispatch(
 		result = TTX_TE_Set(cl, obj, (struct opSet *)msg);
 		break;
 	case GM_HITTEST:
-		result = (ULONG)GMR_GADGETHIT;
+		result = DoSuperMethodA(cl, obj, msg);
 		break;
 	case GM_RENDER:
 		result = TTX_TE_Render(cl, obj, (struct gpRender *)msg);
@@ -441,8 +346,12 @@ TTX_TextEditor_InitClass(VOID)
 	if (TTXTextEditorClass)
 		return TRUE;
 
+	/*
+	 * Private class (NULL public name). Do not call FindClass() — it is
+	 * ==private in intuition_lib.sfd and is not in the public link stubs.
+	 */
 	TTXTextEditorClass = MakeClass(
-		TTXTEXTEDITORCLASS,
+		NULL,
 		GADGETCLASS,
 		NULL,
 		(ULONG)sizeof(struct TTXTextEditorData),
@@ -450,13 +359,13 @@ TTX_TextEditor_InitClass(VOID)
 	if (!TTXTextEditorClass)
 		return FALSE;
 
-	TTXTextEditorClass->cl_Dispatcher.h_Entry = (ULONG (*)())TTX_HookEntry;
-	TTXTextEditorClass->cl_Dispatcher.h_SubEntry =
-		(ULONG (*)())TTX_TE_Dispatch;
+	TTXTextEditorClass->cl_Dispatcher.h_Entry =
+		(ULONG (*)())TTX_TE_Dispatcher;
+	TTXTextEditorClass->cl_Dispatcher.h_SubEntry = NULL;
 
-	AddClass(TTXTextEditorClass);
-	Printf("[INIT] TTX_TextEditor_InitClass: registered %s\n",
-		TTXTEXTEDITORCLASS);
+	/* Private classes are not AddClass()'d. */
+	Printf("[INIT] TTX_TextEditor_InitClass: private class=%lx\n",
+		(ULONG)TTXTextEditorClass);
 	return TRUE;
 }
 
@@ -468,9 +377,9 @@ TTX_TextEditor_FreeClass(VOID)
 	if (!TTXTextEditorClass)
 		return;
 
-	RemoveClass(TTXTextEditorClass);
 	FreeClass(TTXTextEditorClass);
 	TTXTextEditorClass = NULL;
+	Printf("[CLEANUP] TTX_TextEditor_FreeClass: private class freed\n");
 }
 
 /****************************************************************************/
@@ -480,60 +389,21 @@ TTX_TextEditor_CreateGadget(
 	struct TTXApplication *app,
 	struct Session *session)
 {
-	struct Window *window;
-	struct Gadget *gadget;
-	BOOL readOnly;
-	ULONG gadgetW;
-	ULONG gadgetH;
+	/*
+	 * HEAD~1 typed via window IDCMP (VANILLAKEY/RAWKEY), not a full-window
+	 * BOOPSI editor. Creating/attaching ttxtexteditorclass during session
+	 * init previously wedged Intuition on this target. The class remains
+	 * registered for later attach; editing uses ttx_input.c + IDCMP.
+	 */
+	(void)app;
 
-	if (!app || !session || !session->window)
+	if (!session || !session->window)
 		return FALSE;
 	if (session->textEditorGadget)
 		return TRUE;
-	if (!TTXTextEditorClass && !TTX_TextEditor_InitClass())
-		return FALSE;
 
-	window = session->window;
-	readOnly = FALSE;
-	if (session->document)
-		readOnly = session->document->state.readOnly;
-
-	gadgetW = (ULONG)window->Width - (ULONG)window->BorderLeft -
-		(ULONG)window->BorderRight;
-	gadgetH = (ULONG)window->Height - (ULONG)window->BorderTop -
-		(ULONG)window->BorderBottom;
-	if (gadgetW < 8)
-		gadgetW = 8;
-	if (gadgetH < 8)
-		gadgetH = 8;
-
-	gadget = (struct Gadget *)NewObject(
-		NULL, TTXTEXTEDITORCLASS,
-		GA_ID, GID_TEXT_EDITOR,
-		GA_Left, window->BorderLeft,
-		GA_Top, window->BorderTop,
-		GA_Width, gadgetW,
-		GA_Height, gadgetH,
-		GA_Immediate, TRUE,
-		GA_RelVerify, TRUE,
-		TAG_DONE);
-	if (!gadget) {
-		Printf("[INIT] TTX_TextEditor_CreateGadget: FAIL io=%lu\n",
-			(ULONG)IoErr());
-		return FALSE;
-	}
-
-	DoMethod((Object *)gadget, OM_SET,
-		TEA_Session, (ULONG)session,
-		TEA_Application, (ULONG)app,
-		TEA_ReadOnly, (ULONG)readOnly,
-		TAG_DONE);
-
-	gadget->Flags |= GFLG_TABCYCLE;
-
-	session->textEditorGadget = gadget;
-	Printf("[INIT] TTX_TextEditor_CreateGadget: gadget=%lx\n", (ULONG)gadget);
-	return TRUE;
+	TTX_InitTrace("TTX_TextEditor_CreateGadget: SKIP (window IDCMP like HEAD~1)");
+	return FALSE;
 }
 
 /****************************************************************************/
@@ -544,10 +414,9 @@ TTX_TextEditor_DestroyGadget(struct Session *session)
 	if (!session || !session->textEditorGadget)
 		return;
 
-	/*
-	 * Scroll gadget teardown calls RemoveGList on the combined list;
-	 * only dispose the BOOPSI object here.
-	 */
+	if (session->window && session->window != INVALID_RESOURCE)
+		RemoveGList(session->window, session->textEditorGadget, 1);
+
 	DisposeObject((Object *)session->textEditorGadget);
 	session->textEditorGadget = NULL;
 }

@@ -71,6 +71,14 @@ struct TTXScrollGadgets {
 	struct Screen *screen;
 	/* Suppress ICA -> IDCMP_IDCMPUPDATE while SetGadgetAttrs updates PGA_Top */
 	BOOL suppressIcmp;
+	/* Last PGA_* values written — skip SetGadgetAttrs when unchanged (flicker). */
+	ULONG lastVertTotal;
+	ULONG lastVertVisible;
+	ULONG lastVertTop;
+	ULONG lastHorizTotal;
+	ULONG lastHorizVisible;
+	ULONG lastHorizTop;
+	BOOL scrollAttrsValid;
 };
 
 /****************************************************************************/
@@ -243,10 +251,32 @@ LONG TTX_RunWithArgs(struct TTXApplication *app, struct TTXArgs *args);
 
 ULONG GetCharWidth(struct RastPort *rp, UBYTE ch);
 ULONG GetLineHeight(struct RastPort *rp);
+/* Tab-aware measure/draw (TurboText tab stops; never Text() a raw '\\t'). */
+ULONG TTX_TabWidth(struct TTTextBuffer *buffer);
+ULONG TTX_VisualColumn(STRPTR text, ULONG charIndex, ULONG tabWidth);
+ULONG TTX_MeasureChars(
+	struct RastPort *rp,
+	STRPTR text,
+	ULONG start,
+	ULONG count,
+	ULONG tabWidth);
+VOID TTX_DrawChars(
+	struct RastPort *rp,
+	LONG x,
+	LONG baselineY,
+	STRPTR text,
+	ULONG start,
+	ULONG count,
+	ULONG tabWidth,
+	ULONG maxX);
 VOID ScrollToCursor(struct TTTextBuffer *buffer, struct Window *window);
 BOOL CreateSuperBitMap(struct Session *session, struct Window *window);
 VOID FreeSuperBitMap(struct Session *session);
 VOID RenderText(struct Window *window, struct Session *session);
+VOID TTX_DrawSession(struct Session *session);
+VOID TTX_RequestRedraw(struct Session *session);
+/* Redraw one buffer line + cursor (typing); avoids full-window RectFill flicker. */
+VOID TTX_RequestLineRedraw(struct Session *session, ULONG lineY);
 VOID UpdateCursor(struct Window *window, struct Session *session);
 VOID MouseToCursor(struct TTTextBuffer *buffer, struct Window *window, LONG mouseX, LONG mouseY, ULONG *cursorX, ULONG *cursorY);
 VOID CalculateMaxScroll(struct TTTextBuffer *buffer, struct Window *window);

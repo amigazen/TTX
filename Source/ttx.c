@@ -11,6 +11,9 @@
 #include "ttx_texteditor.h"
 #include "ttx.h"
 
+#include <exec/tasks.h>
+#include <exec/libraries.h>
+
 static const char *verstag = "$VER: TTX 3.0 (12/1/2026)\n";
 static const char *stack_cookie = "$STACK: 4096\n";
 
@@ -417,29 +420,38 @@ BOOL TTX_ParseToolTypes(STRPTR *fileName, struct WBStartup *wbMsg) {
 BOOL TTX_CheckExistingInstance(STRPTR fileName) {
   struct MsgPort *existingPort = NULL;
   BOOL result = FALSE;
+  struct Task *sigTask = NULL;
 
   /* Try to find existing message port */
   /* Note: FindPort() MUST be called with Forbid()/Permit() protection */
-  /* We must validate the port - FindPort might return a stale pointer
-   * if a previous instance's port wasn't fully cleaned up */
   Forbid();
   existingPort = FindPort(TTX_MESSAGE_PORT_NAME);
-  /* Validate port structure before Permit() - check it looks like a valid
-   * MsgPort */
   if (existingPort) {
     /* Basic validation: check port structure looks valid */
-    /* NT_MSGPORT is 4, and valid ports should have a signal bit */
     if (existingPort->mp_Node.ln_Type != NT_MSGPORT ||
-        existingPort->mp_SigBit == 0) {
-      /* Port structure looks invalid - might be stale pointer */
+        existingPort->mp_SigBit == (UBYTE)-1) {
       existingPort = NULL;
+    } else {
+      /*
+       * Stale port from a process that exited without RemPort: SigTask
+       * points at freed memory. RemPort the zombie so we do not PutMsg it
+       * (that hang) and so AddPort can reuse TTX.1.
+       */
+      sigTask = existingPort->mp_SigTask;
+      if (!sigTask ||
+          (sigTask->tc_Node.ln_Type != NT_TASK &&
+           sigTask->tc_Node.ln_Type != NT_PROCESS)) {
+        Printf("[INIT] TTX_CheckExistingInstance: RemPort stale %s\n",
+               TTX_MESSAGE_PORT_NAME);
+        RemPort(existingPort);
+        existingPort = NULL;
+      }
     }
   }
   Permit();
 
   if (existingPort) {
     /* Another instance is running, send message to it */
-    /* Use global cleanup stack for inter-instance messages */
     if (fileName) {
       result =
           TTX_SendToExistingInstance( TTX_MSG_OPEN_FILE, fileName);
@@ -582,8 +594,9 @@ VOID TTX_RemoveMessagePort(struct TTXApplication *app) {
     return;
 
   Forbid();
-  app->appPort->mp_Node.ln_Name = NULL;
+  /* RemPort by pointer; clear name after unlink so FindPort cannot see us. */
   RemPort(app->appPort);
+  app->appPort->mp_Node.ln_Name = NULL;
   Permit();
 }
 
@@ -893,12 +906,9 @@ BOOL TTX_RestoreWindow(struct TTXApplication *app, struct Session *session) {
     Printf("[WINDOW] TTX_RestoreWindow: WARN (CreateMenuStrip failed)\n");
   }
 
-  /* Recreate text editor and BOOPSI scroll gadgets */
+  /* Recreate scroll props first, then text editor separately */
   {
     struct DrawInfo *drawInfo = NULL;
-
-    if (!TTX_TextEditor_CreateGadget(app, session))
-      Printf("[WINDOW] TTX_RestoreWindow: WARN (text editor gadget failed)\n");
 
     drawInfo = GetScreenDrawInfo(session->window->WScreen);
     if (drawInfo)
@@ -907,14 +917,16 @@ BOOL TTX_RestoreWindow(struct TTXApplication *app, struct Session *session) {
         Printf("[WINDOW] TTX_RestoreWindow: WARN (scroll gadgets failed)\n");
       FreeScreenDrawInfo(session->window->WScreen, drawInfo);
     }
+
+    if (!TTX_TextEditor_CreateGadget(app, session))
+      Printf("[WINDOW] TTX_RestoreWindow: WARN (text editor gadget failed)\n");
   }
 
   /* Update scroll bars with current buffer state */
   if (TT_SessionBuffer(session)) {
     CalculateMaxScroll(TT_SessionBuffer(session), session->window);
     UpdateScrollBars(session);
-    RenderText(session->window, session);
-    UpdateCursor(session->window, session);
+    TTX_RequestRedraw(session);
   }
 
   if (session->window) {
@@ -1310,7 +1322,7 @@ BOOL TTX_CreateSessionForDocument(struct TTXApplication *app, struct TTDocument 
   session->windowState.innerHeight = 400;
   session->windowState.flags =
       WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_SIZEGADGET | WFLG_SIZEBRIGHT |
-      WFLG_SIZEBBOTTOM | WFLG_CLOSEGADGET | WFLG_SMART_REFRESH |
+      WFLG_SIZEBBOTTOM | WFLG_CLOSEGADGET | WFLG_SIMPLE_REFRESH |
       WFLG_NEWLOOKMENUS;
   /*
    * OpenWindow autodoc: only the first window should use WFLG_ACTIVATE so later
@@ -1437,12 +1449,9 @@ BOOL TTX_CreateSessionForDocument(struct TTXApplication *app, struct TTDocument 
            "without menu)\n");
   }
 
-  /* BOOPSI text editor gadget then scroll props (propgclass + ICA live scroll) */
+  /* Scroll props first, then text editor as a separate AddGList (not chained). */
   {
     struct DrawInfo *drawInfo = NULL;
-
-    if (!TTX_TextEditor_CreateGadget(app, session))
-      Printf("[INIT] TTX_CreateSession: WARN (text editor gadget failed)\n");
 
     drawInfo = GetScreenDrawInfo(session->window->WScreen);
     if (drawInfo)
@@ -1451,6 +1460,10 @@ BOOL TTX_CreateSessionForDocument(struct TTXApplication *app, struct TTDocument 
         Printf("[INIT] TTX_CreateSession: WARN (scroll gadgets failed)\n");
       FreeScreenDrawInfo(session->window->WScreen, drawInfo);
     }
+
+    if (!TTX_TextEditor_CreateGadget(app, session))
+      Printf("[INIT] TTX_CreateSession: WARN (text editor gadget failed — "
+             "using window IDCMP input)\n");
   }
 
   /* Calculate max scroll values and update scroll bars */
@@ -1461,8 +1474,7 @@ BOOL TTX_CreateSessionForDocument(struct TTXApplication *app, struct TTDocument 
 
   /* Initial render */
   if (TT_SessionBuffer(session)) {
-    RenderText(session->window, session);
-    UpdateCursor(session->window, session);
+    TTX_RequestRedraw(session);
   }
 
   /* Add to session list */
@@ -1862,23 +1874,33 @@ VOID TTX_EventLoop(struct TTXApplication *app) {
                session->sessionID, userPort->mp_SigBit);
         while ((imsg = (struct IntuiMessage *)GetMsg(userPort)) != NULL) {
           struct IntuiMessage savedMsg;
+          ULONG classId;
 
           /*
-           * ReplyMsg BEFORE any OpenWindow/AslRequest/CloseWindow/menu work.
-           * Nested Intuition calls with an unreplied IntuiMessage corrupt IBase
-           * (breaks move/resize/depth for all windows). Copy scalars first.
+           * Copy scalars first. For VANILLAKEY/RAWKEY handle while the
+           * IntuiMessage (and dead-key IAddress) is still valid, then Reply.
+           * For everything else Reply first so nested OpenWindow/ASL/menu
+           * work cannot leave an unreplied message (IBase corruption).
            */
           savedMsg = *imsg;
-          ReplyMsg((struct Message *)imsg);
+          classId = savedMsg.Class;
 
-          Printf("[EVENT] Got IntuiMessage: Class=0x%08lx, Code=0x%04x, "
-                 "Qualifier=0x%04x, window=%lx\n",
-                 (ULONG)savedMsg.Class, (unsigned int)savedMsg.Code,
-                 (unsigned int)savedMsg.Qualifier, (ULONG)savedMsg.IDCMPWindow);
+          Printf("[EVENT] Got IntuiMessage: Class=0x%08lx, Code=0x%04lx, "
+                 "Qualifier=0x%04lx\n",
+                 classId, (ULONG)savedMsg.Code, (ULONG)savedMsg.Qualifier);
 
-          app->intuiHandlerDepth++;
-          TTX_HandleIntuitionMessage(app, session, &savedMsg);
-          app->intuiHandlerDepth--;
+          if (classId == IDCMP_VANILLAKEY || classId == IDCMP_RAWKEY ||
+              classId == 0x00200000UL || classId == 0x00000400UL) {
+            app->intuiHandlerDepth++;
+            TTX_HandleIntuitionMessage(app, session, &savedMsg);
+            app->intuiHandlerDepth--;
+            ReplyMsg((struct Message *)imsg);
+          } else {
+            ReplyMsg((struct Message *)imsg);
+            app->intuiHandlerDepth++;
+            TTX_HandleIntuitionMessage(app, session, &savedMsg);
+            app->intuiHandlerDepth--;
+          }
         }
       }
       session = nextSession;
@@ -1925,17 +1947,24 @@ BOOL TTX_Init(struct TTXApplication *app) {
 
   if (!TTX_TextEditor_InitClass()) {
     Printf("[INIT] TTX_Init: FAIL (ttxtexteditorclass)\n");
+    TTX_CloseTurboText(app);
     return FALSE;
   }
 
   app->lastAslDrawer = TTX_AllocPathBuf();
   if (!app->lastAslDrawer) {
     Printf("[INIT] TTX_Init: FAIL (lastAslDrawer)\n");
+    TTX_TextEditor_FreeClass();
+    TTX_CloseTurboText(app);
     return FALSE;
   }
 
   /* Setup message port */
   if (!TTX_SetupMessagePort(app)) {
+    TTX_Free(app->lastAslDrawer);
+    app->lastAslDrawer = NULL;
+    TTX_TextEditor_FreeClass();
+    TTX_CloseTurboText(app);
     return FALSE;
   }
 

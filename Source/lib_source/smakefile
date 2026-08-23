@@ -11,6 +11,10 @@
 # Amiga smake: each recipe line runs in a new shell. Chain cd + smake on one
 # line with ';' (not POSIX &&). Parent directory is '//' (not ../).
 #
+# Host (Mac/Linux) after editing any SDK/SFD/*.sfd:
+#   python3 SDK/tools/sfd_reconcile.py
+#   python3 SDK/tools/sfd_reconcile.py --check
+#
 
 LIBSDIR = //Libs
 
@@ -30,6 +34,8 @@ install: all
 	copy turbotext/turbotext.library to $(LIBSDIR)/turbotext.library clone
 	copy support/ttxsupport.library to $(LIBSDIR)/ttxsupport.library clone
 	copy reqs/ttxreqs.library to $(LIBSDIR)/ttxreqs.library clone
+	@echo "Installed libraries into $(LIBSDIR) (TTX loads TurboText:Libs/)"
+	@echo "Installed libraries into $(LIBSDIR) (TTX loads TurboText:Libs/)"
 
 clean:
 	cd turbotext ; smake clean
