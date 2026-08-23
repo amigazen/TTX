@@ -55,6 +55,10 @@ struct TTTextBuffer {
 	struct TTTextLine *lines;
 	ULONG lineCount;
 	ULONG maxLines;
+	/*
+	 * Working mirrors of the active TTView caret/scroll/mark while engine
+	 * text ops run. Canonical state lives on TTView; use TT_Push/PullView.
+	 */
 	ULONG cursorX;
 	ULONG cursorY;
 	ULONG scrollX;
@@ -85,6 +89,8 @@ struct TTDocumentState {
 /****************************************************************************/
 /* View: per-pane cursor/scroll within a document (manual SplitView model) */
 
+#define TT_MAX_BOOKMARKS 10
+
 struct TTView {
 	struct TTView *next;
 	ULONG viewID;
@@ -93,7 +99,17 @@ struct TTView {
 	ULONG scrollX;
 	ULONG scrollY;
 	BOOL active;
-	APTR uiBinding;  /* Opaque driver window binding */
+	APTR uiBinding;  /* Opaque driver Session / pane binding */
+	struct TTTextMarking marking;
+	ULONG bookmarkX[TT_MAX_BOOKMARKS];
+	ULONG bookmarkY[TT_MAX_BOOKMARKS];
+	UBYTE bookmarkSet[TT_MAX_BOOKMARKS];
+	ULONG lastChangeX;
+	ULONG lastChangeY;
+	UBYTE lastChangeValid;
+	ULONG autoMarkX;
+	ULONG autoMarkY;
+	UBYTE autoMarkValid;
 };
 
 /****************************************************************************/

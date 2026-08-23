@@ -59,6 +59,9 @@ struct TurboTextBase *TT_GetBase(VOID);
 VOID TT_SetLastError(ULONG code);
 struct TTView *TT_CreateView(struct TTDocument *doc);
 VOID TT_FreeView(struct TTView *view);
+BOOL TT_ActivateViewI(struct TTDocument *doc, struct TTView *view);
+VOID TT_PushViewToBuffer(struct TTView *view, struct TTTextBuffer *buf);
+VOID TT_PullViewFromBuffer(struct TTView *view, struct TTTextBuffer *buf);
 BOOL TT_InitTextBuffer(struct TTTextBuffer *buffer);
 VOID TT_FreeTextBuffer(struct TTTextBuffer *buffer);
 
@@ -96,6 +99,31 @@ BOOL TT_MoveEndOfWord(struct TTTextBuffer *buffer);
 BOOL TT_MoveStartOfWord(struct TTTextBuffer *buffer);
 STRPTR TT_GetWordAtCursor(struct TTTextBuffer *buffer);
 BOOL TT_ReplaceWordAtCursor(struct TTTextBuffer *buffer, STRPTR newWord);
+
+/*
+ * Case-insensitive forward search.  If skipIfOnMatch is TRUE (normal Find),
+ * scanning starts one column past the cursor when already on a match so
+ * repeated Find advances.  If FALSE (FindChange), the match under the
+ * cursor is eligible for replacement.
+ */
+BOOL TT_FindTextAt(struct TTTextBuffer *buffer, STRPTR searchStr,
+                   ULONG *outY, ULONG *outX, BOOL skipIfOnMatch);
+BOOL TT_FindText(struct TTTextBuffer *buffer, STRPTR searchStr,
+                 ULONG *outY, ULONG *outX);
+
+/*
+ * In-place reformatting of the current line:
+ *   TT_CenterLine     – strip leading/trailing spaces and re-center within
+ *                       pageW (or 72 columns when pageW == 0).
+ *   TT_JustifyLine    – distribute inter-word spaces so the line reaches
+ *                       exactly pageW (or 72) columns.
+ *   TT_FormatParagraph – collect all words from the paragraph that
+ *                       surrounds the cursor (bounded by blank lines or
+ *                       buffer edges) and re-flow them to pageW/72 columns.
+ */
+BOOL TT_CenterLine(struct TTTextBuffer *buffer);
+BOOL TT_JustifyLine(struct TTTextBuffer *buffer);
+BOOL TT_FormatParagraph(struct TTTextBuffer *buffer);
 
 /****************************************************************************/
 /* Block operations */

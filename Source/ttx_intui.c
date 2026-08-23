@@ -113,7 +113,7 @@ TTX_IntuiRedrawText(struct Session *session)
 	if (!session || !session->window || !TT_SessionBuffer(session))
 		return;
 
-	CalculateMaxScroll(TT_SessionBuffer(session), session->window);
+	CalculateMaxScroll(session, session->window);
 	TTX_RequestRedraw(session);
 }
 
@@ -125,7 +125,7 @@ TTX_IntuiRefreshSession(struct Session *session)
 	if (!session || !session->window || !TT_SessionBuffer(session))
 		return;
 
-	CalculateMaxScroll(TT_SessionBuffer(session), session->window);
+	CalculateMaxScroll(session, session->window);
 	UpdateScrollBars(session);
 	TTX_RequestRedraw(session);
 }
@@ -367,26 +367,52 @@ TTX_IntuiHandleMessage(struct TTXApplication *app, struct Session *portSession,
 				isRelease = TRUE;
 
 			if (isPress || isRelease) {
+				struct TTView *view;
+				struct TTDocument *doc;
+
+				view = TTX_SessionView(session);
+				doc = session->document;
+				/* Clicking a split pane activates that view. */
+				if (isPress && session->splitRatio > 0 && doc &&
+				    doc->views && doc->views->next && session->window) {
+					ULONG mid = session->splitY;
+					if (mid == 0)
+						mid = session->window->BorderTop +
+							((session->window->Height -
+							  session->window->BorderTop -
+							  session->window->BorderBottom) *
+							 session->splitRatio) / 100;
+					if ((ULONG)imsg->MouseY >= mid) {
+						doc->activeView = doc->views->next;
+						doc->views->active = FALSE;
+						doc->views->next->active = TRUE;
+					} else {
+						doc->activeView = doc->views;
+						doc->views->active = TRUE;
+						doc->views->next->active = FALSE;
+					}
+					view = doc->activeView;
+				}
 				if (isPress)
 					ActivateWindow(session->window);
-				MouseToCursor(TT_SessionBuffer(session), session->window,
+				MouseToCursor(session, session->window,
 					imsg->MouseX, imsg->MouseY,
 					&newCursorX, &newCursorY);
-				if (TT_SessionBuffer(session) &&
+				if (view && TT_SessionBuffer(session) &&
 				    newCursorY < TT_SessionBuffer(session)->lineCount) {
-					TT_SessionBuffer(session)->cursorY = newCursorY;
+					view->cursorY = newCursorY;
 					if (newCursorX <= TT_SessionBuffer(session)->lines[
 						    newCursorY].length)
-						TT_SessionBuffer(session)->cursorX = newCursorX;
+						view->cursorX = newCursorX;
 					else
-						TT_SessionBuffer(session)->cursorX =
+						view->cursorX =
 							TT_SessionBuffer(session)->lines[
 								newCursorY].length;
 				}
-				if (isPress) {
+				if (isPress && view) {
 					session->mouseSelecting = TRUE;
-					session->selectStartX = TT_SessionBuffer(session)->cursorX;
-					session->selectStartY = TT_SessionBuffer(session)->cursorY;
+					session->selectStartX = view->cursorX;
+					session->selectStartY = view->cursorY;
 				} else if (session->mouseSelecting) {
 					session->mouseSelecting = FALSE;
 				}
@@ -404,14 +430,16 @@ TTX_IntuiHandleMessage(struct TTXApplication *app, struct Session *portSession,
 		if (session->mouseSelecting) {
 			ULONG newCursorX;
 			ULONG newCursorY;
+			struct TTView *view;
 
-			MouseToCursor(TT_SessionBuffer(session), session->window,
+			view = TTX_SessionView(session);
+			MouseToCursor(session, session->window,
 				imsg->MouseX, imsg->MouseY,
 				&newCursorX, &newCursorY);
-			if (TT_SessionBuffer(session) &&
+			if (view && TT_SessionBuffer(session) &&
 			    newCursorY < TT_SessionBuffer(session)->lineCount) {
-				TT_SessionBuffer(session)->cursorY = newCursorY;
-				TT_SessionBuffer(session)->cursorX = newCursorX;
+				view->cursorY = newCursorY;
+				view->cursorX = newCursorX;
 			}
 			TTX_IntuiRefreshSession(session);
 		}

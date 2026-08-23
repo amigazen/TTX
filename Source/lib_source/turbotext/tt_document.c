@@ -17,6 +17,7 @@ TT_CreateView(struct TTDocument *doc)
 {
 	struct TurboTextBase *base = NULL;
 	struct TTView *view = NULL;
+	ULONG i = 0;
 
 	if (!doc)
 		return NULL;
@@ -34,6 +35,23 @@ TT_CreateView(struct TTDocument *doc)
 	view->scrollY = 0;
 	view->active = (doc->viewCount == 0);
 	view->uiBinding = NULL;
+	view->marking.enabled = FALSE;
+	view->marking.startY = 0;
+	view->marking.startX = 0;
+	view->marking.stopY = 0;
+	view->marking.stopX = 0;
+	for (i = 0; i < TT_MAX_BOOKMARKS; i++)
+	{
+		view->bookmarkX[i] = 0;
+		view->bookmarkY[i] = 0;
+		view->bookmarkSet[i] = 0;
+	}
+	view->lastChangeX = 0;
+	view->lastChangeY = 0;
+	view->lastChangeValid = 0;
+	view->autoMarkX = 0;
+	view->autoMarkY = 0;
+	view->autoMarkValid = 0;
 
 	doc->views = view;
 	doc->viewCount++;
@@ -41,6 +59,57 @@ TT_CreateView(struct TTDocument *doc)
 		doc->activeView = view;
 
 	return view;
+}
+
+/*
+ * Copy canonical view caret/scroll/mark into buffer working mirrors
+ * before engine text ops that still read buffer->cursor*.
+ */
+VOID
+TT_PushViewToBuffer(struct TTView *view, struct TTTextBuffer *buf)
+{
+	if (!view || !buf)
+		return;
+
+	buf->cursorX = view->cursorX;
+	buf->cursorY = view->cursorY;
+	buf->scrollX = view->scrollX;
+	buf->scrollY = view->scrollY;
+	buf->marking = view->marking;
+}
+
+/* Write buffer working mirrors back onto the view after engine text ops. */
+VOID
+TT_PullViewFromBuffer(struct TTView *view, struct TTTextBuffer *buf)
+{
+	if (!view || !buf)
+		return;
+
+	view->cursorX = buf->cursorX;
+	view->cursorY = buf->cursorY;
+	view->scrollX = buf->scrollX;
+	view->scrollY = buf->scrollY;
+	view->marking = buf->marking;
+}
+
+BOOL
+TT_ActivateViewI(struct TTDocument *doc, struct TTView *view)
+{
+	struct TTView *v = NULL;
+
+	if (!doc || !view)
+		return FALSE;
+
+	for (v = doc->views; v; v = v->next)
+	{
+		if (v == view)
+			v->active = TRUE;
+		else
+			v->active = FALSE;
+	}
+
+	doc->activeView = view;
+	return TRUE;
 }
 
 VOID

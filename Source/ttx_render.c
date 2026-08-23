@@ -158,18 +158,24 @@ TTX_DrawChars(
   }
 }
 
-VOID ScrollToCursor(struct TTTextBuffer *buffer, struct Window *window) {
+VOID ScrollToCursor(struct Session *session, struct Window *window) {
+  struct TTTextBuffer *buffer = NULL;
+  struct TTView *view = NULL;
   struct RastPort *rp = NULL;
   ULONG lineHeight = 0;
   ULONG visibleLines = 0;
   ULONG charWidth = 0;
   ULONG visibleChars = 0;
-  LONG cursorScreenX =
-      0; /* Can be negative if cursor is to the left of visible area */
-  LONG cursorScreenY = 0; /* Can be negative if cursor is above visible area */
-  ULONG i = 0;
+  LONG cursorScreenX = 0;
+  LONG cursorScreenY = 0;
 
-  if (!buffer || !window) {
+  if (!session || !window) {
+    return;
+  }
+
+  buffer = TT_SessionBuffer(session);
+  view = TTX_SessionView(session);
+  if (!buffer || !view) {
     return;
   }
 
@@ -180,88 +186,71 @@ VOID ScrollToCursor(struct TTTextBuffer *buffer, struct Window *window) {
 
   lineHeight = GetLineHeight(rp);
   if (lineHeight == 0) {
-    return; /* Can't calculate without valid line height */
+    return;
   }
   visibleLines =
       (window->Height - window->BorderTop - window->BorderBottom) / lineHeight;
   if (visibleLines == 0) {
-    visibleLines = 1; /* At least one line visible */
+    visibleLines = 1;
   }
   charWidth = GetCharWidth(rp, 'M');
 
-  /* Calculate text area boundaries (accounting for left margin) */
   {
     ULONG textStartX = window->BorderLeft + buffer->leftMargin + 1;
     ULONG textEndX = window->Width - (window->BorderRight + 1);
     ULONG textWidth = textEndX - textStartX + 1;
-    visibleChars = textWidth / charWidth;
+    visibleChars = charWidth ? textWidth / charWidth : 1;
   }
 
-  /* Calculate cursor screen position (relative to visible area) */
-  /* cursorScreenY = cursor line - scroll position */
-  /* Negative means cursor is above visible area, >= visibleLines means below */
-  cursorScreenY = (LONG)buffer->cursorY - (LONG)buffer->scrollY;
-  if (buffer->lines && buffer->cursorY < buffer->lineCount) {
+  cursorScreenY = (LONG)view->cursorY - (LONG)view->scrollY;
+  if (buffer->lines && view->cursorY < buffer->lineCount) {
     cursorScreenX = (LONG)TTX_MeasureChars(
-        rp, buffer->lines[buffer->cursorY].text, 0, buffer->cursorX,
+        rp, buffer->lines[view->cursorY].text, 0, view->cursorX,
         TTX_TabWidth(buffer));
   }
   if (charWidth > 0) {
-    cursorScreenX = cursorScreenX / (LONG)charWidth - (LONG)buffer->scrollX;
+    cursorScreenX = cursorScreenX / (LONG)charWidth - (LONG)view->scrollX;
   } else {
     cursorScreenX = 0;
   }
 
-  /* Adjust vertical scroll to keep cursor visible */
-  /* Check if cursor is above visible area (cursorScreenY < 0) */
   if (cursorScreenY < 0) {
-    /* Cursor is above visible area - scroll up to show cursor at top */
-    ULONG oldScrollY = buffer->scrollY;
-    buffer->scrollY = buffer->cursorY;
-    if (buffer->scrollY < 0) {
-      buffer->scrollY = 0;
-    }
-    /* Clamp to max scroll */
-    if (buffer->maxScrollY > 0 && buffer->scrollY > buffer->maxScrollY) {
-      buffer->scrollY = buffer->maxScrollY;
-    }
-    /* Ensure scroll position actually changed */
-    if (buffer->scrollY != oldScrollY) {
-      /* Scroll position was updated - this will trigger a redraw */
+    view->scrollY = view->cursorY;
+    if (buffer->maxScrollY > 0 && view->scrollY > buffer->maxScrollY) {
+      view->scrollY = buffer->maxScrollY;
     }
   } else if (visibleLines > 0 && cursorScreenY >= (LONG)visibleLines) {
-    /* Cursor is below visible area - scroll down to show cursor at bottom */
-    ULONG oldScrollY = buffer->scrollY;
-    buffer->scrollY = buffer->cursorY - visibleLines + 1;
-    if (buffer->scrollY < 0) {
-      buffer->scrollY = 0;
+    view->scrollY = view->cursorY - visibleLines + 1;
+    if (view->scrollY < 0) {
+      view->scrollY = 0;
     }
-    /* Clamp to max scroll */
-    if (buffer->maxScrollY > 0 && buffer->scrollY > buffer->maxScrollY) {
-      buffer->scrollY = buffer->maxScrollY;
-    }
-    /* Ensure scroll position actually changed */
-    if (buffer->scrollY != oldScrollY) {
-      /* Scroll position was updated - this will trigger a redraw */
+    if (buffer->maxScrollY > 0 && view->scrollY > buffer->maxScrollY) {
+      view->scrollY = buffer->maxScrollY;
     }
   }
 
-  /* Adjust horizontal scroll */
   if (cursorScreenX < 0) {
-    buffer->scrollX = 0;
-    if (buffer->cursorX > 0) {
-      buffer->scrollX = buffer->cursorX - visibleChars / 2;
-      if (buffer->scrollX < 0) {
-        buffer->scrollX = 0;
+    view->scrollX = 0;
+    if (view->cursorX > 0) {
+      view->scrollX = view->cursorX - visibleChars / 2;
+      if (view->scrollX < 0) {
+        view->scrollX = 0;
       }
     }
   } else if (cursorScreenX >= (LONG)visibleChars) {
-    buffer->scrollX = buffer->cursorX - visibleChars + 1;
-    if (buffer->scrollX < 0) {
-      buffer->scrollX = 0;
+    view->scrollX = view->cursorX - visibleChars + 1;
+    if (view->scrollX < 0) {
+      view->scrollX = 0;
     }
   }
+
+  /* Keep buffer mirrors aligned for any legacy buffer scroll readers. */
+  buffer->scrollX = view->scrollX;
+  buffer->scrollY = view->scrollY;
+  buffer->cursorX = view->cursorX;
+  buffer->cursorY = view->cursorY;
 }
+
 
 BOOL CreateSuperBitMap(struct Session *session, struct Window *window) {
   (void)session;
@@ -279,6 +268,7 @@ VOID FreeSuperBitMap(struct Session *session) {
 
 VOID RenderText(struct Window *window, struct Session *session) {
   struct TTTextBuffer *buffer = NULL;
+  struct TTView *view = NULL;
   struct RastPort *rp = NULL;
   struct DrawInfo *dri = NULL;
   ULONG startY = 0;
@@ -321,6 +311,14 @@ VOID RenderText(struct Window *window, struct Session *session) {
   }
 
   buffer = BUF(session);
+  view = TTX_SessionView(session);
+  if (view) {
+    buffer->scrollX = view->scrollX;
+    buffer->scrollY = view->scrollY;
+    buffer->cursorX = view->cursorX;
+    buffer->cursorY = view->cursorY;
+    buffer->marking = view->marking;
+  }
   if (!buffer) {
     return;
   }
@@ -361,6 +359,18 @@ VOID RenderText(struct Window *window, struct Session *session) {
   if (maxY <= window->BorderTop + 8)
     maxY = window->Height - window->BorderBottom;
 
+  /* Split-pane clip: confine vertical drawing to one pane. */
+  {
+    ULONG drawTop;
+
+    drawTop = window->BorderTop;
+    if (session->paneClipActive) {
+      drawTop = session->paneClipTop;
+      maxY = session->paneClipBottom;
+      if (maxY <= drawTop + 4)
+        maxY = drawTop + lineHeight;
+    }
+
   /* Calculate maximum characters per line (PageW) */
   /* PageW = (Width - BorderRight - (BorderLeft + leftMargin + 1)) / FontX - 1
    */
@@ -385,7 +395,7 @@ VOID RenderText(struct Window *window, struct Session *session) {
   /* Calculate visible lines - ensure we don't render into bottom border or
    * scroll bar */
   /* Text area height = maxY - top border */
-  textAreaHeight = maxY - window->BorderTop; /* Actual text area height */
+  textAreaHeight = maxY - drawTop; /* Actual text area height */
   if (textAreaHeight < 0) {
     textAreaHeight = 0;
   }
@@ -393,6 +403,7 @@ VOID RenderText(struct Window *window, struct Session *session) {
   if (visibleLines == 0 && textAreaHeight > 0) {
     visibleLines = 1; /* At least show one line if there's any space */
   }
+  buffer->pageH = visibleLines ? visibleLines : 1;
 
   startY = buffer->scrollY;
   endY = startY + visibleLines;
@@ -400,26 +411,19 @@ VOID RenderText(struct Window *window, struct Session *session) {
     endY = buffer->lineCount;
   }
 
-  /* Set clipping rectangle to prevent rendering outside text area */
-  /* This ensures text never renders into window borders */
-  /* Note: We'll rely on careful character counting instead of clipping regions
-   */
-  /* Clipping regions require SetClipRegion which may not be available in all
-   * AmigaOS versions */
-  /* We'll measure each character and stop before exceeding textEndX */
-
   /* Clear text area with DrawInfo paper colour. */
+  TTX_InvalidateCursor(session);
   SetBPen(rp, penBack);
   SetAPen(rp, penBack);
   SetDrMd(rp, JAM2);
-  if (maxY > window->BorderTop) {
-    RectFill(rp, textStartX - 1, window->BorderTop, textEndX, maxY - 1);
+  if (maxY > drawTop) {
+    RectFill(rp, textStartX - 1, drawTop, textEndX, maxY - 1);
   }
   SetAPen(rp, penText);
   SetBPen(rp, penBack);
   SetDrMd(rp, JAM2);
 
-  y = window->BorderTop;
+  y = drawTop;
   for (i = startY; i < endY && y < maxY; i++) {
     if (i < buffer->lineCount) {
       ULONG selectStartX = 0;
@@ -685,21 +689,87 @@ VOID RenderText(struct Window *window, struct Session *session) {
 
   if (dri)
     FreeScreenDrawInfo(window->WScreen, dri);
+  } /* end drawTop scope */
 }
 
 /*
  * Draw text and cursor to the window RPort.
+ * When splitRatio > 0, paint both panes (horizontal split).
  */
 VOID
 TTX_DrawSession(struct Session *session)
 {
+  struct Window *window;
+  struct TTDocument *doc;
+  struct TTView *topView;
+  struct TTView *botView;
+  struct TTView *savedActive;
+  struct RastPort *rp;
+  ULONG clientTop;
+  ULONG clientBot;
+  ULONG clientH;
+  ULONG mid;
+  ULONG barH;
+
   if (!session || !session->window || session->window == INVALID_RESOURCE)
     return;
   if (!TT_SessionBuffer(session))
     return;
 
-  RenderText(session->window, session);
-  UpdateCursor(session->window, session);
+  window = session->window;
+  doc = session->document;
+
+  if (session->splitRatio == 0 || !doc || !doc->views || !doc->views->next) {
+    session->paneClipActive = FALSE;
+    RenderText(window, session);
+    UpdateCursor(window, session);
+    return;
+  }
+
+  topView = doc->views;
+  botView = doc->views->next;
+  savedActive = doc->activeView;
+  clientTop = window->BorderTop;
+  clientBot = window->Height - window->BorderBottom - 10;
+  if (clientBot <= clientTop + 16)
+    clientBot = window->Height - window->BorderBottom;
+  clientH = clientBot - clientTop;
+  barH = 3;
+  mid = clientTop + (clientH * session->splitRatio) / 100;
+  if (mid < clientTop + 8)
+    mid = clientTop + 8;
+  if (mid + barH > clientBot - 8)
+    mid = clientBot - barH - 8;
+  session->splitY = mid;
+
+  /* Top pane */
+  doc->activeView = topView;
+  session->paneClipActive = TRUE;
+  session->paneClipTop = clientTop;
+  session->paneClipBottom = mid;
+  RenderText(window, session);
+  if (savedActive == topView)
+    UpdateCursor(window, session);
+
+  /* Split bar */
+  rp = window->RPort;
+  if (rp) {
+    SetAPen(rp, 1);
+    SetDrMd(rp, JAM1);
+    RectFill(rp, window->BorderLeft, mid,
+      window->Width - window->BorderRight - 1, mid + barH - 1);
+  }
+
+  /* Bottom pane */
+  doc->activeView = botView;
+  session->paneClipTop = mid + barH;
+  session->paneClipBottom = clientBot;
+  RenderText(window, session);
+  if (savedActive == botView)
+    UpdateCursor(window, session);
+
+  doc->activeView = savedActive;
+  session->paneClipActive = FALSE;
 }
 
 /*
@@ -722,6 +792,7 @@ TTX_RequestLineRedraw(struct Session *session, ULONG lineY)
 {
   struct Window *window;
   struct TTTextBuffer *buffer;
+  struct TTView *view;
   struct RastPort *rp;
   struct DrawInfo *dri;
   ULONG lineHeight;
@@ -746,11 +817,12 @@ TTX_RequestLineRedraw(struct Session *session, ULONG lineY)
 
   window = session->window;
   buffer = TT_SessionBuffer(session);
-  if (!buffer || !buffer->lines || lineY >= buffer->lineCount)
+  view = TTX_SessionView(session);
+  if (!buffer || !view || !buffer->lines || lineY >= buffer->lineCount)
     return;
 
   /* Line not visible — nothing to paint. */
-  if (lineY < buffer->scrollY)
+  if (lineY < view->scrollY)
     return;
 
   rp = window->RPort;
@@ -780,7 +852,7 @@ TTX_RequestLineRedraw(struct Session *session, ULONG lineY)
   if (maxY <= window->BorderTop + 8)
     maxY = window->Height - window->BorderBottom;
 
-  y = window->BorderTop + (lineY - buffer->scrollY) * lineHeight;
+  y = window->BorderTop + (lineY - view->scrollY) * lineHeight;
   if (y + lineHeight > maxY) {
     if (dri)
       FreeScreenDrawInfo(window->WScreen, dri);
@@ -788,6 +860,7 @@ TTX_RequestLineRedraw(struct Session *session, ULONG lineY)
   }
 
   /* Clear just this line cell. */
+  TTX_InvalidateCursor(session);
   SetBPen(rp, penBack);
   SetAPen(rp, penBack);
   SetDrMd(rp, JAM2);
@@ -796,14 +869,14 @@ TTX_RequestLineRedraw(struct Session *session, ULONG lineY)
   lineText = buffer->lines[lineY].text;
   lineLen = buffer->lines[lineY].length;
   scrollXPixels = TTX_MeasureChars(
-      rp, lineText, 0, buffer->scrollX, TTX_TabWidth(buffer));
+      rp, lineText, 0, view->scrollX, TTX_TabWidth(buffer));
 
   if (scrollXPixels < textStartX)
     textX = textStartX - scrollXPixels;
   else
     textX = textStartX;
 
-  renderStart = buffer->scrollX;
+  renderStart = view->scrollX;
   if (renderStart > lineLen)
     renderStart = lineLen;
 
@@ -835,23 +908,38 @@ TTX_RequestLineRedraw(struct Session *session, ULONG lineY)
   UpdateCursor(window, session);
 }
 
+VOID TTX_InvalidateCursor(struct Session *session)
+{
+  if (session)
+    session->render.cursorVisible = FALSE;
+}
+
+/*
+ * Original turbotext drew the caret with SetDrMd(COMPLEMENT) + RectFill over
+ * the character cell (see output/turbotext.library.c FUN_00009550 /
+ * FUN_000099d0: SetDrMd, RectFill, SetDrMd). XOR toggle avoids JAM2 line
+ * artifacts: erase by painting the old cell again, then paint the new cell.
+ */
 VOID UpdateCursor(struct Window *window, struct Session *session) {
   struct TTTextBuffer *buffer = NULL;
+  struct TTView *view = NULL;
   struct RastPort *rp = NULL;
-  struct DrawInfo *cdri = NULL;
   ULONG lineHeight = 0;
   ULONG charWidth = 0;
-  ULONG i = 0;
   ULONG screenX = 0;
   ULONG screenY = 0;
   ULONG scrollOffset = 0;
+  ULONG textStartX = 0;
+  ULONG cellW = 0;
+  UBYTE ch = 0;
 
   if (!window || !session || !session->document) {
     return;
   }
 
   buffer = BUF(session);
-  if (!buffer) {
+  view = TTX_SessionView(session);
+  if (!buffer || !view) {
     return;
   }
 
@@ -864,53 +952,86 @@ VOID UpdateCursor(struct Window *window, struct Session *session) {
   if (lineHeight < 1)
     lineHeight = 8;
   charWidth = GetCharWidth(rp, 'M');
-  (void)charWidth;
+  if (charWidth < 1)
+    charWidth = 8;
 
-  /* Calculate text start position (accounting for left margin) */
-  {
-    ULONG textStartX = window->BorderLeft + buffer->leftMargin + 1;
+  textStartX = window->BorderLeft + buffer->leftMargin + 1;
+  screenY = window->BorderTop + (view->cursorY - view->scrollY) * lineHeight;
+  if (session->paneClipActive)
+    screenY = session->paneClipTop + (view->cursorY - view->scrollY) * lineHeight;
+  screenX = textStartX;
 
-    /* Calculate cursor screen position */
-    screenY =
-        window->BorderTop + (buffer->cursorY - buffer->scrollY) * lineHeight;
-    screenX = textStartX;
-
-    if (buffer->lines && buffer->cursorY < buffer->lineCount) {
-      screenX += TTX_MeasureChars(
-          rp, buffer->lines[buffer->cursorY].text, 0, buffer->cursorX,
+  if (buffer->lines && view->cursorY < buffer->lineCount) {
+    screenX += TTX_MeasureChars(
+        rp, buffer->lines[view->cursorY].text, 0, view->cursorX,
+        TTX_TabWidth(buffer));
+    if (view->scrollX > 0) {
+      scrollOffset = TTX_MeasureChars(
+          rp, buffer->lines[view->cursorY].text, 0, view->scrollX,
           TTX_TabWidth(buffer));
-      if (buffer->scrollX > 0) {
-        scrollOffset = TTX_MeasureChars(
-            rp, buffer->lines[buffer->cursorY].text, 0, buffer->scrollX,
-            TTX_TabWidth(buffer));
-        screenX -= scrollOffset;
-      }
+      screenX -= scrollOffset;
     }
-  } /* End textStartX scope */
-
-  SetDrMd(rp, JAM2);
-  SetAPen(rp, 1);
-  if (window->WScreen) {
-    cdri = GetScreenDrawInfo(window->WScreen);
-    if (cdri && cdri->dri_Pens) {
-      SetAPen(rp, cdri->dri_Pens[TEXTPEN]);
-      FreeScreenDrawInfo(window->WScreen, cdri);
+    if (view->cursorX < buffer->lines[view->cursorY].length &&
+        buffer->lines[view->cursorY].text) {
+      ch = (UBYTE)buffer->lines[view->cursorY].text[view->cursorX];
+      cellW = GetCharWidth(rp, ch);
+    } else {
+      cellW = charWidth;
     }
+  } else {
+    cellW = charWidth;
   }
-  Move(rp, screenX, screenY);
-  Draw(rp, screenX, screenY + lineHeight - 1);
+  if (cellW < 1)
+    cellW = charWidth;
+
+  /* Off-screen caret: just forget any previous XOR stamp. */
+  if (view->cursorY < view->scrollY) {
+    TTX_InvalidateCursor(session);
+    return;
+  }
+
+  /* Erase previous COMPLEMENT cell if it is still in the bitmap. */
+  if (session->render.cursorVisible) {
+    if (session->render.cursorPixelX == screenX &&
+        session->render.cursorPixelY == screenY &&
+        session->render.cursorPixelW == cellW &&
+        session->render.cursorPixelH == lineHeight) {
+      return; /* Already showing at this cell */
+    }
+    SetDrMd(rp, COMPLEMENT);
+    RectFill(rp,
+             (LONG)session->render.cursorPixelX,
+             (LONG)session->render.cursorPixelY,
+             (LONG)(session->render.cursorPixelX + session->render.cursorPixelW - 1),
+             (LONG)(session->render.cursorPixelY + session->render.cursorPixelH - 1));
+    SetDrMd(rp, JAM1);
+    session->render.cursorVisible = FALSE;
+  }
+
+  SetDrMd(rp, COMPLEMENT);
+  RectFill(rp,
+           (LONG)screenX,
+           (LONG)screenY,
+           (LONG)(screenX + cellW - 1),
+           (LONG)(screenY + lineHeight - 1));
   SetDrMd(rp, JAM1);
+
+  session->render.cursorVisible = TRUE;
+  session->render.cursorPixelX = screenX;
+  session->render.cursorPixelY = screenY;
+  session->render.cursorPixelW = cellW;
+  session->render.cursorPixelH = lineHeight;
 }
 
-VOID MouseToCursor(struct TTTextBuffer *buffer, struct Window *window,
+VOID MouseToCursor(struct Session *session, struct Window *window,
                    LONG mouseX, LONG mouseY, ULONG *cursorX, ULONG *cursorY) {
+  struct TTTextBuffer *buffer = NULL;
+  struct TTView *view = NULL;
   struct RastPort *rp = NULL;
   ULONG lineHeight = 0;
   ULONG charWidth = 0;
-  ULONG visibleLines = 0;
   ULONG textAreaX = 0;
   ULONG textAreaY = 0;
-  ULONG textAreaWidth = 0;
   ULONG textAreaHeight = 0;
   ULONG lineIndex = 0;
   ULONG charIndex = 0;
@@ -919,7 +1040,13 @@ VOID MouseToCursor(struct TTTextBuffer *buffer, struct Window *window,
   ULONG i = 0;
   ULONG currentX = 0;
 
-  if (!buffer || !window || !cursorX || !cursorY) {
+  if (!session || !window || !cursorX || !cursorY) {
+    return;
+  }
+
+  buffer = TT_SessionBuffer(session);
+  view = TTX_SessionView(session);
+  if (!buffer || !view) {
     return;
   }
 
@@ -931,16 +1058,10 @@ VOID MouseToCursor(struct TTTextBuffer *buffer, struct Window *window,
   lineHeight = GetLineHeight(rp);
   charWidth = GetCharWidth(rp, 'M');
 
-  /* Calculate text area bounds (accounting for left margin) */
-  textAreaX = window->BorderLeft + buffer->leftMargin +
-              1; /* Text starts after left margin */
+  textAreaX = window->BorderLeft + buffer->leftMargin + 1;
   textAreaY = window->BorderTop;
-  textAreaWidth = window->Width - window->BorderLeft - window->BorderRight -
-                  buffer->leftMargin - 1;
   textAreaHeight = window->Height - window->BorderTop - window->BorderBottom;
-  visibleLines = textAreaHeight / lineHeight;
 
-  /* Convert mouse coordinates relative to text area */
   {
     LONG relX = mouseX - (LONG)textAreaX;
     LONG relY = mouseY - (LONG)textAreaY;
@@ -958,9 +1079,8 @@ VOID MouseToCursor(struct TTTextBuffer *buffer, struct Window *window,
     }
   }
 
-  /* Calculate line index */
   {
-    LONG calcLine = (LONG)buffer->scrollY + ((LONG)pixelY / (LONG)lineHeight);
+    LONG calcLine = (LONG)view->scrollY + ((LONG)pixelY / (LONG)lineHeight);
     if (calcLine < 0) {
       lineIndex = 0;
     } else if ((ULONG)calcLine >= buffer->lineCount) {
@@ -972,12 +1092,8 @@ VOID MouseToCursor(struct TTTextBuffer *buffer, struct Window *window,
 
   *cursorY = lineIndex;
 
-  /* Calculate character index within line */
   if (lineIndex < buffer->lineCount) {
-    /* Account for horizontal scroll */
-    pixelX += buffer->scrollX * charWidth;
-
-    /* Find character position by measuring text width */
+    pixelX += view->scrollX * charWidth;
     currentX = 0;
     charIndex = 0;
 
@@ -999,7 +1115,10 @@ VOID MouseToCursor(struct TTTextBuffer *buffer, struct Window *window,
   }
 }
 
-VOID CalculateMaxScroll(struct TTTextBuffer *buffer, struct Window *window) {
+
+VOID CalculateMaxScroll(struct Session *session, struct Window *window) {
+  struct TTTextBuffer *buffer = NULL;
+  struct TTView *view = NULL;
   ULONG i = 0;
   ULONG maxLineLen = 0;
   ULONG lineHeight = 0;
@@ -1012,6 +1131,12 @@ VOID CalculateMaxScroll(struct TTTextBuffer *buffer, struct Window *window) {
   ULONG scrollBarW = 0;
   ULONG lineLimit = 0;
 
+  if (!session) {
+    return;
+  }
+
+  buffer = TT_SessionBuffer(session);
+  view = TTX_SessionView(session);
   if (!buffer) {
     return;
   }
@@ -1025,8 +1150,8 @@ VOID CalculateMaxScroll(struct TTTextBuffer *buffer, struct Window *window) {
   }
 
   scrollBarW = (ULONG)window->BorderRight;
-  if (scrollBarW < TTX_ARROW_SIZE)
-    scrollBarW = TTX_ARROW_SIZE;
+  if (scrollBarW < 16)
+    scrollBarW = 16;
 
   lineHeight = GetLineHeight(window->RPort);
   if (lineHeight > 0) {
@@ -1082,9 +1207,19 @@ VOID CalculateMaxScroll(struct TTTextBuffer *buffer, struct Window *window) {
     buffer->maxScrollX = 0;
   }
 
-  if (buffer->scrollY > buffer->maxScrollY)
-    buffer->scrollY = buffer->maxScrollY;
-  if (buffer->scrollX > buffer->maxScrollX)
-    buffer->scrollX = buffer->maxScrollX;
+  if (view) {
+    if (view->scrollY > buffer->maxScrollY)
+      view->scrollY = buffer->maxScrollY;
+    if (view->scrollX > buffer->maxScrollX)
+      view->scrollX = buffer->maxScrollX;
+    buffer->scrollX = view->scrollX;
+    buffer->scrollY = view->scrollY;
+  } else {
+    if (buffer->scrollY > buffer->maxScrollY)
+      buffer->scrollY = buffer->maxScrollY;
+    if (buffer->scrollX > buffer->maxScrollX)
+      buffer->scrollX = buffer->maxScrollX;
+  }
 }
+
 

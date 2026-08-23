@@ -15,6 +15,7 @@ VOID
 TTX_InputRefreshSession(struct Session *session)
 {
 	struct TTTextBuffer *buf;
+	struct TTView *view;
 	ULONG oldScrollX;
 	ULONG oldScrollY;
 	ULONG oldLineCount;
@@ -24,20 +25,24 @@ TTX_InputRefreshSession(struct Session *session)
 		return;
 
 	buf = TT_SessionBuffer(session);
-	oldScrollX = buf->scrollX;
-	oldScrollY = buf->scrollY;
-	oldLineCount = buf->lineCount;
-	cursorLine = buf->cursorY;
+	view = TTX_SessionView(session);
+	if (!view)
+		return;
 
-	CalculateMaxScroll(buf, session->window);
-	ScrollToCursor(buf, session->window);
+	oldScrollX = view->scrollX;
+	oldScrollY = view->scrollY;
+	oldLineCount = buf->lineCount;
+	cursorLine = view->cursorY;
+
+	CalculateMaxScroll(session, session->window);
+	ScrollToCursor(session, session->window);
 
 	/*
 	 * Typing one character must not RectFill the whole text area or poke
 	 * prop gadgets every time — that is the flicker. Full redraw only when
 	 * scroll position or line count changes (newline, delete-line, etc.).
 	 */
-	if (buf->scrollX != oldScrollX || buf->scrollY != oldScrollY ||
+	if (view->scrollX != oldScrollX || view->scrollY != oldScrollY ||
 	    buf->lineCount != oldLineCount) {
 		UpdateScrollBars(session);
 		TTX_RequestRedraw(session);
@@ -55,6 +60,7 @@ TTX_InputInsertChar(
 	UBYTE ch)
 {
 	struct TTTextBuffer *buf;
+	struct TTView *view;
 	struct TTTextLine *line;
 	ULONG x;
 	ULONG i;
@@ -70,14 +76,15 @@ TTX_InputInsertChar(
 	 * (processed=1, buffer unchanged, cursor flickers, no glyphs).
 	 */
 	buf = TT_SessionBuffer(session);
-	if (!buf || !buf->lines || buf->cursorY >= buf->lineCount)
+	view = TTX_SessionView(session);
+	if (!buf || !view || !buf->lines || view->cursorY >= buf->lineCount)
 		return FALSE;
 
-	line = &buf->lines[buf->cursorY];
+	line = &buf->lines[view->cursorY];
 	if (!line->text)
 		return FALSE;
 
-	x = buf->cursorX;
+	x = view->cursorX;
 	if (x > line->length)
 		x = line->length;
 
@@ -100,13 +107,18 @@ TTX_InputInsertChar(
 	line->text[x] = (TEXT)ch;
 	line->length++;
 	line->text[line->length] = '\0';
-	buf->cursorX = x + 1;
+	view->cursorX = x + 1;
+	view->lastChangeX = view->cursorX;
+	view->lastChangeY = view->cursorY;
+	view->lastChangeValid = 1;
+	buf->cursorX = view->cursorX;
+	buf->cursorY = view->cursorY;
 	buf->modified = TRUE;
 	if (session->document)
 		session->document->state.modified = TRUE;
 
 	Printf("[INPUT] Insert ch=%lu len=%lu x=%lu\n",
-		(ULONG)ch, line->length, buf->cursorX);
+		(ULONG)ch, line->length, view->cursorX);
 	return TRUE;
 }
 
@@ -212,6 +224,7 @@ TTX_InputRawKey(
 	APTR iaddr)
 {
 	struct TTTextBuffer *buffer;
+	struct TTView *view;
 	struct InputEvent ievent;
 	UBYTE charBuffer[10];
 	WORD chars;
@@ -224,39 +237,43 @@ TTX_InputRawKey(
 		return FALSE;
 
 	buffer = TT_SessionBuffer(session);
+	view = TTX_SessionView(session);
 	processed = FALSE;
+
+	if (!buffer || !view)
+		return FALSE;
 
 	if (rawCode & 0x80)
 		return FALSE;
 
 	if (rawCode == 0x4F) {
-		if (buffer->cursorX > 0)
-			buffer->cursorX--;
-		else if (buffer->cursorY > 0) {
-			buffer->cursorY--;
-			buffer->cursorX = buffer->lines[buffer->cursorY].length;
+		if (view->cursorX > 0)
+			view->cursorX--;
+		else if (view->cursorY > 0) {
+			view->cursorY--;
+			view->cursorX = buffer->lines[view->cursorY].length;
 		}
 		processed = TRUE;
 	} else if (rawCode == 0x4E) {
-		if (buffer->cursorX < buffer->lines[buffer->cursorY].length)
-			buffer->cursorX++;
-		else if (buffer->cursorY < buffer->lineCount - 1) {
-			buffer->cursorY++;
-			buffer->cursorX = 0;
+		if (view->cursorX < buffer->lines[view->cursorY].length)
+			view->cursorX++;
+		else if (view->cursorY < buffer->lineCount - 1) {
+			view->cursorY++;
+			view->cursorX = 0;
 		}
 		processed = TRUE;
 	} else if (rawCode == 0x4C) {
-		if (buffer->cursorY > 0) {
-			buffer->cursorY--;
-			if (buffer->cursorX > buffer->lines[buffer->cursorY].length)
-				buffer->cursorX = buffer->lines[buffer->cursorY].length;
+		if (view->cursorY > 0) {
+			view->cursorY--;
+			if (view->cursorX > buffer->lines[view->cursorY].length)
+				view->cursorX = buffer->lines[view->cursorY].length;
 		}
 		processed = TRUE;
 	} else if (rawCode == 0x4D) {
-		if (buffer->cursorY < buffer->lineCount - 1) {
-			buffer->cursorY++;
-			if (buffer->cursorX > buffer->lines[buffer->cursorY].length)
-				buffer->cursorX = buffer->lines[buffer->cursorY].length;
+		if (view->cursorY < buffer->lineCount - 1) {
+			view->cursorY++;
+			if (view->cursorX > buffer->lines[view->cursorY].length)
+				view->cursorX = buffer->lines[view->cursorY].length;
 		}
 		processed = TRUE;
 	} else if (rawCode == 0x41) {

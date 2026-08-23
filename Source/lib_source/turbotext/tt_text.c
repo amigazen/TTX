@@ -1297,3 +1297,491 @@ BOOL TT_ConvertSpacesToTabs(struct TTTextBuffer *buffer) {
   return FALSE;
 }
 
+/****************************************************************************/
+/* TT_FindText
+ *
+ * Case-insensitive forward search from the current cursor (column-inclusive
+ * so Find from SOF can match column 0). If the cursor already sits on a
+ * match, scanning starts one column past so repeated Find advances.
+ * No wrap: caller may re-issue from (0,0) to wrap.
+ *
+ * Returns TRUE and writes the match start into *outY / *outX on success.
+ */
+static UBYTE
+TT_FindFoldChar(UBYTE ch)
+{
+  if (ch >= (UBYTE)'A' && ch <= (UBYTE)'Z')
+    return (UBYTE)(ch - (UBYTE)'A' + (UBYTE)'a');
+  return ch;
+}
+
+BOOL
+TT_FindTextAt(struct TTTextBuffer *buffer, STRPTR searchStr,
+              ULONG *outY, ULONG *outX, BOOL skipIfOnMatch)
+{
+  ULONG searchLen = 0;
+  ULONG startX    = 0;
+  ULONG y         = 0;
+  ULONG x         = 0;
+  ULONG j         = 0;
+  STRPTR lineText  = NULL;
+  ULONG lineLen   = 0;
+  BOOL  match     = FALSE;
+
+  if (!buffer || !searchStr || !outY || !outX)
+    return FALSE;
+
+  while (searchStr[searchLen] != '\0')
+    searchLen++;
+
+  if (searchLen == 0)
+    return FALSE;
+
+  if (buffer->cursorY >= buffer->lineCount || !buffer->lines)
+    return FALSE;
+
+  startX = buffer->cursorX;
+  if (skipIfOnMatch)
+  {
+    ULONG k = 0;
+    BOOL onMatch = TRUE;
+
+    lineText = buffer->lines[buffer->cursorY].text;
+    lineLen = buffer->lines[buffer->cursorY].length;
+    if (!lineText || startX + searchLen > lineLen)
+      onMatch = FALSE;
+    else
+    {
+      for (k = 0; k < searchLen; k++)
+      {
+        if (TT_FindFoldChar((UBYTE)lineText[startX + k]) !=
+            TT_FindFoldChar((UBYTE)searchStr[k]))
+        {
+          onMatch = FALSE;
+          break;
+        }
+      }
+    }
+    if (onMatch)
+      startX = buffer->cursorX + 1;
+  }
+
+  for (y = buffer->cursorY; y < buffer->lineCount; y++)
+  {
+    lineText = buffer->lines[y].text;
+    lineLen  = buffer->lines[y].length;
+
+    x = (y == buffer->cursorY) ? startX : 0;
+
+    if (!lineText || lineLen < searchLen)
+      continue;
+
+    for (; x + searchLen <= lineLen; x++)
+    {
+      match = TRUE;
+      for (j = 0; j < searchLen; j++)
+      {
+        if (TT_FindFoldChar((UBYTE)lineText[x + j]) !=
+            TT_FindFoldChar((UBYTE)searchStr[j]))
+        {
+          match = FALSE;
+          break;
+        }
+      }
+      if (match)
+      {
+        *outY = y;
+        *outX = x;
+        return TRUE;
+      }
+    }
+  }
+
+  return FALSE;
+}
+
+BOOL
+TT_FindText(struct TTTextBuffer *buffer, STRPTR searchStr,
+            ULONG *outY, ULONG *outX)
+{
+  return TT_FindTextAt(buffer, searchStr, outY, outX, TRUE);
+}
+
+/****************************************************************************/
+/* TT_CenterLine
+ *
+ * Strips leading and trailing spaces from the current line and re-inserts
+ * the trimmed content with enough leading spaces to center it within
+ * buffer->pageW columns (defaulting to 72 when pageW is 0).
+ * Leaves the cursor at the first non-space character.
+ */
+BOOL
+TT_CenterLine(struct TTTextBuffer *buffer)
+{
+  struct TTTextLine *line   = NULL;
+  ULONG width      = 0;
+  ULONG trimStart  = 0;
+  ULONG trimEnd    = 0;
+  ULONG trimLen    = 0;
+  ULONG leftPad    = 0;
+  ULONG newLen     = 0;
+  STRPTR newText   = NULL;
+  ULONG i          = 0;
+
+  if (!buffer || buffer->cursorY >= buffer->lineCount)
+    return FALSE;
+
+  line = &buffer->lines[buffer->cursorY];
+  if (!line->text)
+    return FALSE;
+
+  width = (buffer->pageW > 0) ? buffer->pageW : 72;
+
+  /* Find content boundaries after stripping surrounding spaces */
+  trimStart = 0;
+  while (trimStart < line->length && line->text[trimStart] == ' ')
+    trimStart++;
+
+  trimEnd = line->length;
+  while (trimEnd > trimStart && line->text[trimEnd - 1] == ' ')
+    trimEnd--;
+
+  trimLen = trimEnd - trimStart;
+
+  leftPad = (trimLen < width) ? (width - trimLen) / 2 : 0;
+  newLen  = leftPad + trimLen;
+
+  newText = (STRPTR)TT_Alloc(newLen + 1, MEMF_CLEAR);
+  if (!newText)
+    return FALSE;
+
+  for (i = 0; i < leftPad; i++)
+    newText[i] = ' ';
+
+  if (trimLen > 0)
+    CopyMem(&line->text[trimStart], &newText[leftPad], trimLen);
+
+  newText[newLen] = '\0';
+
+  TT_Free(line->text);
+  line->text      = newText;
+  line->length    = newLen;
+  line->allocated = newLen + 1;
+
+  /* Place cursor at start of visible content */
+  buffer->cursorX  = leftPad;
+  buffer->modified = TRUE;
+  return TRUE;
+}
+
+/****************************************************************************/
+/* TT_JustifyLine
+ *
+ * Distributes inter-word space on the current line so that it reaches
+ * exactly pageW (or 72) columns.  Requires at least two words.
+ * Extra space is spread left-to-right across the (wordCount-1) gaps;
+ * any remainder modulo gapCount is given one extra space each to the
+ * leftmost gaps.
+ */
+BOOL
+TT_JustifyLine(struct TTTextBuffer *buffer)
+{
+  struct TTTextLine *line    = NULL;
+  ULONG width               = 0;
+  ULONG i                   = 0;
+  ULONG w                   = 0;
+  ULONG inWord              = 0;
+  ULONG wStart              = 0;
+  ULONG wordCount           = 0;
+  ULONG totalWordLen        = 0;
+  ULONG gapCount            = 0;
+  ULONG extraSpaces         = 0;
+  ULONG spaceEach           = 0;
+  ULONG spaceExtra          = 0;
+  ULONG destPos             = 0;
+  ULONG wordStarts[128];
+  ULONG wordLens[128];
+  STRPTR newText            = NULL;
+  UBYTE ch                  = 0;
+
+  if (!buffer || buffer->cursorY >= buffer->lineCount)
+    return FALSE;
+
+  line = &buffer->lines[buffer->cursorY];
+  if (!line->text || line->length == 0)
+    return FALSE;
+
+  width = (buffer->pageW > 0) ? buffer->pageW : 72;
+
+  /* Extract word extents; cap at array size */
+  wordCount = 0;
+  inWord    = 0;
+  for (i = 0; i <= line->length && wordCount < 128; i++)
+  {
+    ch = (i < line->length) ? (UBYTE)line->text[i] : 0;
+    if (ch != ' ' && ch != '\t' && ch != '\0')
+    {
+      if (!inWord)
+      {
+        wStart = i;
+        inWord = 1;
+      }
+    }
+    else
+    {
+      if (inWord)
+      {
+        wordStarts[wordCount] = wStart;
+        wordLens[wordCount]   = i - wStart;
+        wordCount++;
+        inWord = 0;
+      }
+    }
+  }
+
+  if (wordCount < 2)
+    return FALSE;
+
+  totalWordLen = 0;
+  for (w = 0; w < wordCount; w++)
+    totalWordLen += wordLens[w];
+
+  if (totalWordLen >= width)
+    return FALSE; /* line already at or beyond target width */
+
+  gapCount   = wordCount - 1;
+  extraSpaces = width - totalWordLen;
+  spaceEach  = extraSpaces / gapCount;
+  spaceExtra = extraSpaces % gapCount;
+
+  /* width+2 gives a small safety margin */
+  newText = (STRPTR)TT_Alloc(width + 2, MEMF_CLEAR);
+  if (!newText)
+    return FALSE;
+
+  destPos = 0;
+  for (w = 0; w < wordCount; w++)
+  {
+    ULONG spaces = 0;
+    ULONG si     = 0;
+
+    if (destPos + wordLens[w] >= width + 2)
+      break;
+    CopyMem(&line->text[wordStarts[w]], &newText[destPos], wordLens[w]);
+    destPos += wordLens[w];
+
+    if (w < gapCount)
+    {
+      spaces = spaceEach + ((w < spaceExtra) ? 1 : 0);
+      for (si = 0; si < spaces; si++)
+      {
+        if (destPos + 1 >= width + 2)
+          break;
+        newText[destPos++] = ' ';
+      }
+    }
+  }
+  if (destPos >= width + 2)
+    destPos = width + 1;
+  newText[destPos] = '\0';
+
+  TT_Free(line->text);
+  line->text      = newText;
+  line->length    = destPos;
+  line->allocated = width + 2;
+
+  buffer->modified = TRUE;
+  return TRUE;
+}
+
+/****************************************************************************/
+/* TT_FormatParagraph
+ *
+ * Re-flows the paragraph around the cursor.  A paragraph is a run of
+ * consecutive non-blank lines bounded above and below by blank lines or
+ * the buffer edges.
+ *
+ * Algorithm:
+ *   1. Find paragraph bounds (paraStart..paraEnd).
+ *   2. Copy all paragraph text into a scratch heap buffer, joining lines
+ *      with a single space.
+ *   3. Remove all but the first paragraph line from buffer->lines[].
+ *   4. Clear the remaining paraStart line for fresh content.
+ *   5. Walk the scratch buffer word by word, inserting characters and
+ *      inserting newlines at the wrap column (pageW, defaulting to 72).
+ */
+BOOL
+TT_FormatParagraph(struct TTTextBuffer *buffer)
+{
+  ULONG paraStart  = 0;
+  ULONG paraEnd    = 0;
+  ULONG y          = 0;
+  ULONG totalTextLen = 0;
+  STRPTR textBuf   = NULL;
+  ULONG pos        = 0;
+  ULONG i          = 0;
+  ULONG lineWidth  = 72;
+  ULONG curLineLen = 0;
+  ULONG wordStart  = 0;
+  ULONG wordLen    = 0;
+  ULONG delCount   = 0;
+  ULONG wi         = 0;
+  UBYTE wc         = 0;
+  ULONG j          = 0;
+
+  if (!buffer || buffer->cursorY >= buffer->lineCount)
+    return FALSE;
+
+  /* Locate paragraph: extend upward while lines are non-blank */
+  paraStart = buffer->cursorY;
+  while (paraStart > 0 && buffer->lines[paraStart - 1].length > 0)
+    paraStart--;
+
+  /* Extend downward while lines are non-blank */
+  paraEnd = buffer->cursorY;
+  while (paraEnd + 1 < buffer->lineCount && buffer->lines[paraEnd + 1].length > 0)
+    paraEnd++;
+
+  if (buffer->pageW > 0)
+    lineWidth = buffer->pageW;
+
+  /* Sum characters needed for the scratch buffer */
+  totalTextLen = 0;
+  for (y = paraStart; y <= paraEnd; y++)
+    totalTextLen += buffer->lines[y].length + 1; /* +1 for joining space */
+
+  if (totalTextLen == 0)
+    return FALSE;
+
+  textBuf = (STRPTR)TT_Alloc(totalTextLen + 1, MEMF_CLEAR);
+  if (!textBuf)
+    return FALSE;
+
+  /* Copy paragraph text into scratch, joining lines with a space */
+  pos = 0;
+  for (y = paraStart; y <= paraEnd; y++)
+  {
+    ULONG len = buffer->lines[y].length;
+    if (len > 0 && buffer->lines[y].text)
+    {
+      CopyMem(buffer->lines[y].text, &textBuf[pos], len);
+      pos += len;
+    }
+    if (y < paraEnd)
+      textBuf[pos++] = ' ';
+  }
+  textBuf[pos] = '\0';
+
+  /*
+   * Remove lines paraStart+1 .. paraEnd from the buffer by freeing each
+   * and shifting the lines array upward.  Work from the bottom up so
+   * index arithmetic stays stable.
+   */
+  delCount = paraEnd - paraStart;
+  for (i = 0; i < delCount; i++)
+  {
+    ULONG delY = paraEnd - i;
+
+    if (buffer->lines[delY].text)
+    {
+      TT_Free(buffer->lines[delY].text);
+      buffer->lines[delY].text = NULL;
+    }
+    for (j = delY; j < buffer->lineCount - 1; j++)
+      buffer->lines[j] = buffer->lines[j + 1];
+
+    /* Clear the vacated trailing slot */
+    buffer->lines[buffer->lineCount - 1].text      = NULL;
+    buffer->lines[buffer->lineCount - 1].length    = 0;
+    buffer->lines[buffer->lineCount - 1].allocated = 0;
+    buffer->lineCount--;
+  }
+
+  /* Reset the paraStart line to an empty buffer ready for re-insertion */
+  if (buffer->lines[paraStart].text)
+  {
+    TT_Free(buffer->lines[paraStart].text);
+    buffer->lines[paraStart].text = NULL;
+  }
+  buffer->lines[paraStart].allocated = 256;
+  buffer->lines[paraStart].text = (STRPTR)TT_Alloc(256, MEMF_CLEAR);
+  if (!buffer->lines[paraStart].text)
+  {
+    TT_Free(textBuf);
+    return FALSE;
+  }
+  buffer->lines[paraStart].text[0] = '\0';
+  buffer->lines[paraStart].length  = 0;
+
+  buffer->cursorY = paraStart;
+  buffer->cursorX = 0;
+
+  /*
+   * Re-flow: walk the scratch buffer, inserting words and breaking
+   * lines at lineWidth columns.
+   */
+  curLineLen = 0;
+  i          = 0;
+  while (textBuf[i] != '\0')
+  {
+    /* Skip whitespace between words */
+    while (textBuf[i] == ' ' || textBuf[i] == '\t')
+      i++;
+
+    if (textBuf[i] == '\0')
+      break;
+
+    /* Measure next word */
+    wordStart = i;
+    wordLen   = 0;
+    while (textBuf[i + wordLen] != '\0' &&
+           textBuf[i + wordLen] != ' '  &&
+           textBuf[i + wordLen] != '\t')
+      wordLen++;
+
+    /*
+     * If this word does not fit on the current line (and we are not
+     * at the start of a fresh line), emit a newline before it.
+     */
+    if (curLineLen > 0 && curLineLen + 1 + wordLen > lineWidth)
+    {
+      if (!TT_InsertNewline(buffer))
+      {
+        TT_Free(textBuf);
+        buffer->modified = TRUE;
+        return FALSE;
+      }
+      curLineLen = 0;
+    }
+    else if (curLineLen > 0)
+    {
+      /* Separate from the preceding word on the same line */
+      if (!TT_InsertChar(buffer, ' '))
+      {
+        TT_Free(textBuf);
+        buffer->modified = TRUE;
+        return FALSE;
+      }
+      curLineLen++;
+    }
+
+    /* Insert the word character by character */
+    for (wi = 0; wi < wordLen; wi++)
+    {
+      wc = (UBYTE)textBuf[wordStart + wi];
+      if (!TT_InsertChar(buffer, wc))
+      {
+        TT_Free(textBuf);
+        buffer->modified = TRUE;
+        return FALSE;
+      }
+    }
+    curLineLen += wordLen;
+    i = wordStart + wordLen;
+  }
+
+  TT_Free(textBuf);
+  buffer->modified = TRUE;
+  return TRUE;
+}
+

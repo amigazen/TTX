@@ -53,7 +53,7 @@ TTX_TE_RefreshSession(struct Session *session)
 	if (!session || !session->window || !TT_SessionBuffer(session))
 		return;
 
-	CalculateMaxScroll(TT_SessionBuffer(session), session->window);
+	CalculateMaxScroll(session, session->window);
 	UpdateScrollBars(session);
 	TTX_RequestRedraw(session);
 }
@@ -74,10 +74,14 @@ TTX_TE_HandleMouse(
 	BOOL isRelease;
 	LONG mouseX;
 	LONG mouseY;
+	struct TTView *view;
 
 	if (!session || !data || !ievent || !window || !gpi || !gpi->gpi_GInfo)
 		return FALSE;
 	if (!TT_SessionBuffer(session))
+		return FALSE;
+	view = TTX_SessionView(session);
+	if (!view)
 		return FALSE;
 	if (ievent->ie_Class != IECLASS_RAWMOUSE)
 		return FALSE;
@@ -98,23 +102,22 @@ TTX_TE_HandleMouse(
 	mouseX = (LONG)gpi->gpi_GInfo->gi_Domain.Left + (LONG)gpi->gpi_Mouse.X;
 	mouseY = (LONG)gpi->gpi_GInfo->gi_Domain.Top + (LONG)gpi->gpi_Mouse.Y;
 
-	MouseToCursor(TT_SessionBuffer(session), window,
+	MouseToCursor(session, window,
 		mouseX, mouseY, &newCursorX, &newCursorY);
 
 	if (newCursorY < TT_SessionBuffer(session)->lineCount) {
-		TT_SessionBuffer(session)->cursorY = newCursorY;
+		view->cursorY = newCursorY;
 		if (newCursorX <= TT_SessionBuffer(session)->lines[newCursorY].length)
-			TT_SessionBuffer(session)->cursorX = newCursorX;
+			view->cursorX = newCursorX;
 		else
-			TT_SessionBuffer(session)->cursorX =
-				TT_SessionBuffer(session)->lines[newCursorY].length;
+			view->cursorX = TT_SessionBuffer(session)->lines[newCursorY].length;
 	}
 
 	if (isPress) {
 		data->mouseSelecting = TRUE;
 		session->mouseSelecting = TRUE;
-		session->selectStartX = TT_SessionBuffer(session)->cursorX;
-		session->selectStartY = TT_SessionBuffer(session)->cursorY;
+		session->selectStartX = view->cursorX;
+		session->selectStartY = view->cursorY;
 	} else if (data->mouseSelecting) {
 		data->mouseSelecting = FALSE;
 		session->mouseSelecting = FALSE;
@@ -137,10 +140,14 @@ TTX_TE_HandleMouseMove(
 	LONG mouseX;
 	LONG mouseY;
 	struct Window *window;
+	struct TTView *view;
 
 	if (!session || !data || !gpi || !gpi->gpi_GInfo)
 		return FALSE;
 	if (!TT_SessionBuffer(session) || !data->mouseSelecting)
+		return FALSE;
+	view = TTX_SessionView(session);
+	if (!view)
 		return FALSE;
 
 	window = session->window;
@@ -150,12 +157,12 @@ TTX_TE_HandleMouseMove(
 	mouseX = (LONG)gpi->gpi_GInfo->gi_Domain.Left + (LONG)gpi->gpi_Mouse.X;
 	mouseY = (LONG)gpi->gpi_GInfo->gi_Domain.Top + (LONG)gpi->gpi_Mouse.Y;
 
-	MouseToCursor(TT_SessionBuffer(session), window,
+	MouseToCursor(session, window,
 		mouseX, mouseY, &newCursorX, &newCursorY);
 
 	if (newCursorY < TT_SessionBuffer(session)->lineCount) {
-		TT_SessionBuffer(session)->cursorY = newCursorY;
-		TT_SessionBuffer(session)->cursorX = newCursorX;
+		view->cursorY = newCursorY;
+		view->cursorX = newCursorX;
 	}
 
 	TTX_TE_RefreshSession(session);

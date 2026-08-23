@@ -77,19 +77,16 @@ STRPTR TT_GetBlock(struct TTTextBuffer *buffer)
             }
         }
     } else {
-        /* Multi-line selection */
-        /* First line */
+        /* Multi-line selection — include one newline per line break */
         if (startY < buffer->lineCount) {
             lineLen = buffer->lines[startY].length;
             if (startX < lineLen) {
                 totalLen += lineLen - startX;
             }
         }
-        /* Middle lines */
         for (i = startY + 1; i < stopY && i < buffer->lineCount; i++) {
             totalLen += buffer->lines[i].length;
         }
-        /* Last line */
         if (stopY < buffer->lineCount) {
             lineLen = buffer->lines[stopY].length;
             if (stopX > lineLen) {
@@ -97,13 +94,14 @@ STRPTR TT_GetBlock(struct TTTextBuffer *buffer)
             }
             totalLen += stopX;
         }
+        if (stopY > startY)
+            totalLen += (stopY - startY);
     }
     
     if (totalLen == 0) {
         return NULL;
     }
     
-    /* Allocate memory for result (add 1 for null terminator) */
     result = (STRPTR)TT_Alloc(totalLen + 1, MEMF_CLEAR);
     if (!result) {
         return NULL;
@@ -111,9 +109,7 @@ STRPTR TT_GetBlock(struct TTTextBuffer *buffer)
     
     ptr = result;
     
-    /* Copy selected text */
     if (startY == stopY) {
-        /* Single line selection */
         if (startY < buffer->lineCount && startX < buffer->lines[startY].length) {
             lineLen = stopX - startX;
             if (lineLen > buffer->lines[startY].length - startX) {
@@ -125,8 +121,6 @@ STRPTR TT_GetBlock(struct TTTextBuffer *buffer)
             }
         }
     } else {
-        /* Multi-line selection */
-        /* First line */
         if (startY < buffer->lineCount) {
             lineLen = buffer->lines[startY].length;
             if (startX < lineLen) {
@@ -134,14 +128,15 @@ STRPTR TT_GetBlock(struct TTTextBuffer *buffer)
                 CopyMem(&buffer->lines[startY].text[startX], ptr, copyLen);
                 ptr += copyLen;
             }
+            *ptr++ = '\n';
         }
-        /* Middle lines */
         for (i = startY + 1; i < stopY && i < buffer->lineCount; i++) {
             lineLen = buffer->lines[i].length;
-            CopyMem(buffer->lines[i].text, ptr, lineLen);
+            if (lineLen > 0 && buffer->lines[i].text)
+                CopyMem(buffer->lines[i].text, ptr, lineLen);
             ptr += lineLen;
+            *ptr++ = '\n';
         }
-        /* Last line */
         if (stopY < buffer->lineCount) {
             lineLen = buffer->lines[stopY].length;
             if (stopX > lineLen) {
@@ -399,8 +394,8 @@ BOOL TT_MovePrevWord(struct TTTextBuffer *buffer)
             buffer->cursorX = lineLen;
             moved = TRUE;
         } else {
-            /* At start of file */
-            return FALSE;
+            /* At start of file — no-op success */
+            return TRUE;
         }
     }
     

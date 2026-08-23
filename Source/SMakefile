@@ -11,8 +11,8 @@ LIBDIR = lib_source
 TURBOTEXTDIR = lib_source/turbotext
 LIBSDIR = Libs
 
-SRCS = ttx.c ttx_commands.c ttx_dfn.c ttx_render.c ttx_lib.c ttx_boopsi.c ttx_intui.c ttx_input.c ttx_texteditor.c ttx_menu_builtin.c ttx_block.c ttx_buffer.c ttx_mem.c
-OBJS = ttx.o ttx_commands.o ttx_dfn.o ttx_render.o ttx_lib.o ttx_boopsi.o ttx_intui.o ttx_input.o ttx_texteditor.o ttx_menu_builtin.o ttx_block.o ttx_buffer.o ttx_mem.o
+SRCS = ttx.c ttx_commands.c ttx_dfn.c ttx_render.c ttx_lib.c ttx_boopsi.c ttx_intui.c ttx_input.c ttx_texteditor.c ttx_menu_builtin.c ttx_block.c ttx_buffer.c ttx_mem.c ttx_arexx.c
+OBJS = ttx.o ttx_commands.o ttx_dfn.o ttx_render.o ttx_lib.o ttx_boopsi.o ttx_intui.o ttx_input.o ttx_texteditor.o ttx_menu_builtin.o ttx_block.o ttx_buffer.o ttx_mem.o ttx_arexx.o
 
 CC = sc
 LINK = slink
@@ -70,6 +70,9 @@ ttx_buffer.o: ttx_buffer.c ttx_driver.h
 
 ttx_mem.o: ttx_mem.c ttx_mem.h
 	$(CC) ttx_mem.c OBJNAME=ttx_mem.o IDIR=include:
+
+ttx_arexx.o: ttx_arexx.c ttx_arexx.h ttx_driver.h
+	$(CC) ttx_arexx.c OBJNAME=ttx_arexx.o IDIR=$(TURBOTEXTDIR)/include IDIR=include:
 
 clean:
 	Delete $(OBJS) $(PROGRAM)

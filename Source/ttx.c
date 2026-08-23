@@ -924,7 +924,7 @@ BOOL TTX_RestoreWindow(struct TTXApplication *app, struct Session *session) {
 
   /* Update scroll bars with current buffer state */
   if (TT_SessionBuffer(session)) {
-    CalculateMaxScroll(TT_SessionBuffer(session), session->window);
+    CalculateMaxScroll(session, session->window);
     UpdateScrollBars(session);
     TTX_RequestRedraw(session);
   }
@@ -1314,6 +1314,20 @@ BOOL TTX_CreateSessionForDocument(struct TTXApplication *app, struct TTDocument 
   session->document = doc;
   session->render.superBitMap = NULL;
   session->render.needsFullRedraw = TRUE;
+  session->render.cursorVisible = FALSE;
+  session->render.cursorPixelX = 0;
+  session->render.cursorPixelY = 0;
+  session->render.cursorPixelW = 0;
+  session->render.cursorPixelH = 0;
+  session->splitY = 0;
+  session->splitRatio = 0;
+  session->paneClipTop = 0;
+  session->paneClipBottom = 0;
+  session->paneClipActive = FALSE;
+  session->arexxPortName[0] = '\0';
+  TTX_ArexxBindSession(app, session);
+  if (doc->activeView)
+    doc->activeView->uiBinding = session;
 
   /* Initialize window state with defaults */
   session->windowState.leftEdge = 50; /* Default position */
@@ -1441,7 +1455,7 @@ BOOL TTX_CreateSessionForDocument(struct TTXApplication *app, struct TTDocument 
    * 0 can wedge Intuition; compute page metrics before any BOOPSI props.
    */
   if (TT_SessionBuffer(session) && session->window)
-    CalculateMaxScroll(TT_SessionBuffer(session), session->window);
+    CalculateMaxScroll(session, session->window);
 
   /* Menu strip before scroll gadgets */
   if (!TTX_CreateMenuStrip(session)) {
@@ -1468,7 +1482,7 @@ BOOL TTX_CreateSessionForDocument(struct TTXApplication *app, struct TTDocument 
 
   /* Calculate max scroll values and update scroll bars */
   if (TT_SessionBuffer(session)) {
-    CalculateMaxScroll(TT_SessionBuffer(session), session->window);
+    CalculateMaxScroll(session, session->window);
     UpdateScrollBars(session);
   }
 
@@ -1755,6 +1769,9 @@ VOID TTX_RebuildSignalMask(struct TTXApplication *app) {
   if (app->appIconPort) {
     app->sigmask |= (1UL << app->appIconPort->mp_SigBit);
   }
+  if (app->arexxPort) {
+    app->sigmask |= (1UL << app->arexxPort->mp_SigBit);
+  }
   app->sigmask |= SIGBREAKF_CTRL_C;
 
   Printf("[EVENT] TTX_RebuildSignalMask: old mask=0x%08lx, new mask=0x%08lx\n",
@@ -1818,6 +1835,12 @@ VOID TTX_EventLoop(struct TTXApplication *app) {
     /* Check app icon port (app icon messages) */
     if (app->appIconPort && (signals & (1UL << app->appIconPort->mp_SigBit))) {
       TTX_ProcessAppIcon(app);
+    }
+
+    /* ARexx host: TurboText command strings from ADDRESS TURBOTEXT */
+    if (app->arexxPort &&
+        (signals & (1UL << app->arexxPort->mp_SigBit))) {
+      TTX_ArexxProcess(app);
     }
 
     /* Check application port (inter-instance messages) */
@@ -1968,6 +1991,9 @@ BOOL TTX_Init(struct TTXApplication *app) {
     return FALSE;
   }
 
+  /* Optional ARexx host (ADDRESS TURBOTEXT) for exercise scripts */
+  TTX_ArexxInit(app);
+
   /* COMMENTED OUT: Commodities disabled
   // Setup commodity if available
   if (CxBase) {
@@ -2002,6 +2028,9 @@ VOID TTX_Cleanup(struct TTXApplication *app) {
 
   /* Remove app icon before destroying sessions */
   TTX_RemoveAppIcon(app);
+
+  /* Tear down ARexx host before sessions / ports */
+  TTX_ArexxShutdown(app);
 
   if (app->lastAslDrawer) {
     TTX_Free(app->lastAslDrawer);

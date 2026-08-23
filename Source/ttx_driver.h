@@ -91,6 +91,16 @@ struct TTXRenderState {
 	ULONG lastScrollX;
 	ULONG lastScrollY;
 	BOOL needsFullRedraw;
+	/*
+	 * COMPLEMENT block cursor (matches original turbotext SetDrMd/RectFill
+	 * toggle). When TRUE, cursorPixel* is still XOR'd into the RPort and
+	 * must be toggled off before a JAM2 redraw of that area.
+	 */
+	BOOL cursorVisible;
+	ULONG cursorPixelX;
+	ULONG cursorPixelY;
+	ULONG cursorPixelW;
+	ULONG cursorPixelH;
 };
 
 struct TTXMessage {
@@ -152,6 +162,15 @@ struct Session {
 	BOOL mouseSelecting;
 	ULONG selectStartX;
 	ULONG selectStartY;
+	/* Document ARexx port name (TURBOTEXTn); global host is TURBOTEXT. */
+	TEXT arexxPortName[32];
+	/* Horizontal split: 0 = single pane; else pixel Y of split bar. */
+	ULONG splitY;
+	ULONG splitRatio; /* 1..99 percent for top pane; 0 = unsplit */
+	/* Temporary clip for RenderText when drawing one split pane. */
+	ULONG paneClipTop;
+	ULONG paneClipBottom;
+	BOOL paneClipActive;
 };
 
 #define TTX_DEFER_NONE            0
@@ -182,6 +201,10 @@ struct TTXApplication {
 	struct Session *deferredCloseSession;
 	struct Session *deferredOpenSession;
 	STRPTR lastAslDrawer;
+	/* ARexx host (global TURBOTEXT port) */
+	struct MsgPort *arexxPort;
+	UBYTE arexxSigBit;
+	TEXT lastArexxResult[256];
 };
 
 /****************************************************************************/
@@ -199,9 +222,11 @@ extern struct Library *AslBase;
 extern struct Library *GadToolsBase;
 
 /****************************************************************************/
-/* Session buffer accessor */
+/* Session document accessors */
 
 struct TTTextBuffer *TT_SessionBuffer(struct Session *session);
+/* Canonical caret/scroll/mark live on the document's active TTView. */
+struct TTView *TTX_SessionView(struct Session *session);
 
 /****************************************************************************/
 
@@ -246,6 +271,17 @@ VOID TTX_RebuildSignalMask(struct TTXApplication *app);
 VOID TTX_ProcessDeferredActions(struct TTXApplication *app);
 LONG TTX_RunWithArgs(struct TTXApplication *app, struct TTXArgs *args);
 
+/* ARexx host (see ttx_arexx.c) */
+BOOL TTX_ArexxInit(struct TTXApplication *app);
+VOID TTX_ArexxShutdown(struct TTXApplication *app);
+VOID TTX_ArexxProcess(struct TTXApplication *app);
+VOID TTX_ArexxBindSession(struct TTXApplication *app, struct Session *session);
+VOID TTX_ArexxSetResult(struct TTXApplication *app, STRPTR result);
+BOOL TTX_HandleCommandLine(
+	struct TTXApplication *app,
+	struct Session *session,
+	STRPTR line);
+
 /****************************************************************************/
 /* Rendering (driver UI layer) */
 
@@ -269,7 +305,7 @@ VOID TTX_DrawChars(
 	ULONG count,
 	ULONG tabWidth,
 	ULONG maxX);
-VOID ScrollToCursor(struct TTTextBuffer *buffer, struct Window *window);
+VOID ScrollToCursor(struct Session *session, struct Window *window);
 BOOL CreateSuperBitMap(struct Session *session, struct Window *window);
 VOID FreeSuperBitMap(struct Session *session);
 VOID RenderText(struct Window *window, struct Session *session);
@@ -278,8 +314,10 @@ VOID TTX_RequestRedraw(struct Session *session);
 /* Redraw one buffer line + cursor (typing); avoids full-window RectFill flicker. */
 VOID TTX_RequestLineRedraw(struct Session *session, ULONG lineY);
 VOID UpdateCursor(struct Window *window, struct Session *session);
-VOID MouseToCursor(struct TTTextBuffer *buffer, struct Window *window, LONG mouseX, LONG mouseY, ULONG *cursorX, ULONG *cursorY);
-VOID CalculateMaxScroll(struct TTTextBuffer *buffer, struct Window *window);
+/* Drop cursorVisible after a JAM2 paint that covered the caret cell. */
+VOID TTX_InvalidateCursor(struct Session *session);
+VOID MouseToCursor(struct Session *session, struct Window *window, LONG mouseX, LONG mouseY, ULONG *cursorX, ULONG *cursorY);
+VOID CalculateMaxScroll(struct Session *session, struct Window *window);
 VOID UpdateScrollBars(struct Session *session);
 
 /****************************************************************************/

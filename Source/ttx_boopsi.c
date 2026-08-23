@@ -14,6 +14,13 @@
 #include <intuition/icclass.h>
 #include <proto/intuition.h>
 
+
+static struct TTView *
+TTX_BoopsiView(struct Session *session)
+{
+	return TTX_SessionView(session);
+}
+
 /****************************************************************************/
 
 static VOID
@@ -120,7 +127,7 @@ TTX_BoopsiCreateScrollGadgets(
 		initialTotal = TT_SessionBuffer(session)->lineCount;
 		if (initialTotal < initialVisible)
 			initialTotal = initialVisible;
-		initialTop = TT_SessionBuffer(session)->scrollY;
+		initialTop = TTX_BoopsiView(session)->scrollY;
 	}
 	if (initialVisible < 1)
 		initialVisible = 1;
@@ -168,7 +175,7 @@ TTX_BoopsiCreateScrollGadgets(
 		initialTotal = maxLineLen;
 		if (initialTotal < initialVisible)
 			initialTotal = initialVisible;
-		initialTop = TT_SessionBuffer(session)->scrollX;
+		initialTop = TTX_BoopsiView(session)->scrollX;
 	}
 	if (initialVisible < 1)
 		initialVisible = 1;
@@ -274,7 +281,7 @@ TTX_BoopsiUpdateScrollGadgets(struct Session *session)
 	if (gadget) {
 		total = TT_SessionBuffer(session)->lineCount;
 		visible = TT_SessionBuffer(session)->pageH;
-		top = TT_SessionBuffer(session)->scrollY;
+		top = TTX_BoopsiView(session)->scrollY;
 
 		TTX_ScaleScrollValues(total, visible, top,
 			&scaledTotal, &scaledVisible, &scaledTop, &shift);
@@ -310,7 +317,7 @@ TTX_BoopsiUpdateScrollGadgets(struct Session *session)
 
 		total = maxLineLen;
 		visible = TT_SessionBuffer(session)->pageW;
-		top = TT_SessionBuffer(session)->scrollX;
+		top = TTX_BoopsiView(session)->scrollX;
 
 		TTX_ScaleScrollValues(total, visible, top,
 			&scaledTotal, &scaledVisible, &scaledTop, &shift);
@@ -360,7 +367,7 @@ TTX_BoopsiHandleScrollGadgetUp(
 			newScroll <<= TT_SessionBuffer(session)->scrollYShift;
 		if (newScroll > TT_SessionBuffer(session)->maxScrollY)
 			newScroll = TT_SessionBuffer(session)->maxScrollY;
-		TT_SessionBuffer(session)->scrollY = newScroll;
+		TTX_BoopsiView(session)->scrollY = newScroll;
 		return TRUE;
 	}
 
@@ -374,7 +381,7 @@ TTX_BoopsiHandleScrollGadgetUp(
 			newScroll <<= TT_SessionBuffer(session)->scrollXShift;
 		if (newScroll > TT_SessionBuffer(session)->maxScrollX)
 			newScroll = TT_SessionBuffer(session)->maxScrollX;
-		TT_SessionBuffer(session)->scrollX = newScroll;
+		TTX_BoopsiView(session)->scrollX = newScroll;
 		return TRUE;
 	}
 
@@ -410,8 +417,8 @@ TTX_BoopsiHandleIdcmpUpdate(
 			newScroll <<= TT_SessionBuffer(session)->scrollYShift;
 		if (newScroll > TT_SessionBuffer(session)->maxScrollY)
 			newScroll = TT_SessionBuffer(session)->maxScrollY;
-		if (newScroll != TT_SessionBuffer(session)->scrollY) {
-			TT_SessionBuffer(session)->scrollY = newScroll;
+		if (newScroll != TTX_BoopsiView(session)->scrollY) {
+			TTX_BoopsiView(session)->scrollY = newScroll;
 			changed = TRUE;
 		}
 	} else if (gadgetID == GID_HORIZ_PROP) {
@@ -424,8 +431,8 @@ TTX_BoopsiHandleIdcmpUpdate(
 			newScroll <<= TT_SessionBuffer(session)->scrollXShift;
 		if (newScroll > TT_SessionBuffer(session)->maxScrollX)
 			newScroll = TT_SessionBuffer(session)->maxScrollX;
-		if (newScroll != TT_SessionBuffer(session)->scrollX) {
-			TT_SessionBuffer(session)->scrollX = newScroll;
+		if (newScroll != TTX_BoopsiView(session)->scrollX) {
+			TTX_BoopsiView(session)->scrollX = newScroll;
 			changed = TRUE;
 		}
 	} else {

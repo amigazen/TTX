@@ -106,6 +106,16 @@ TT_SessionBuffer(struct Session *session)
 	return &session->document->buffer;
 }
 
+struct TTView *
+TTX_SessionView(struct Session *session)
+{
+	if (!session || !session->document)
+		return NULL;
+	if (session->document->activeView)
+		return session->document->activeView;
+	return TT_GetActiveView(session->document);
+}
+
 /****************************************************************************/
 
 static BOOL __saveds
