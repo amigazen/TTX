@@ -206,6 +206,17 @@ TTX_BoopsiCreateScrollGadgets(
 		gadgetList = session->scroll.horizProp;
 	}
 
+	/* Chain text editor after props so one RemoveGList tears everything down. */
+	if (gadgetList && session->textEditorGadget) {
+		struct Gadget *tail;
+
+		tail = gadgetList;
+		while (tail->NextGadget)
+			tail = tail->NextGadget;
+		tail->NextGadget = session->textEditorGadget;
+		session->textEditorGadget->NextGadget = NULL;
+	}
+
 	if (gadgetList) {
 		session->scroll.gadgetHead = gadgetList;
 		TTX_BoopsiTrace("TTX_BoopsiCreateScrollGadgets: AddGList");
@@ -217,10 +228,12 @@ TTX_BoopsiCreateScrollGadgets(
 		return TRUE;
 	}
 
-	/* Scroll props failed — still attach the text editor if we have one. */
+	/* Scroll props failed - still attach the text editor if we have one. */
 	if (session->textEditorGadget) {
 		AddGList(window, session->textEditorGadget, (UWORD)-1, (WORD)-1, NULL);
 		RefreshGList(session->textEditorGadget, window, NULL, 1);
+		session->scroll.gadgetHead = session->textEditorGadget;
+		session->scroll.gadgetsOnWindow = TRUE;
 		return TRUE;
 	}
 

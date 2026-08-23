@@ -349,15 +349,15 @@ VOID RenderText(struct Window *window, struct Session *session) {
   if (charWidth < 1)
     charWidth = 8;
 
-  /* In-window prop scrollers sit inside the client area (not Border*). */
+  /* In-window prop scrollers sit inside BorderRight/BorderBottom. */
   textStartX = window->BorderLeft + buffer->leftMargin + 1;
-  textEndX = window->Width - (window->BorderRight + 18);
+  textEndX = window->Width - window->BorderRight - 1;
   if (textEndX <= textStartX + 8)
-    textEndX = window->Width - (window->BorderRight + 1);
+    textEndX = textStartX + 8;
 
-  maxY = window->Height - window->BorderBottom - 10;
+  maxY = window->Height - window->BorderBottom;
   if (maxY <= window->BorderTop + 8)
-    maxY = window->Height - window->BorderBottom;
+    maxY = window->BorderTop + 8;
 
   /* Split-pane clip: confine vertical drawing to one pane. */
   {
@@ -730,9 +730,9 @@ TTX_DrawSession(struct Session *session)
   botView = doc->views->next;
   savedActive = doc->activeView;
   clientTop = window->BorderTop;
-  clientBot = window->Height - window->BorderBottom - 10;
+  clientBot = window->Height - window->BorderBottom;
   if (clientBot <= clientTop + 16)
-    clientBot = window->Height - window->BorderBottom;
+    clientBot = clientTop + 16;
   clientH = clientBot - clientTop;
   barH = 3;
   mid = clientTop + (clientH * session->splitRatio) / 100;
@@ -844,13 +844,13 @@ TTX_RequestLineRedraw(struct Session *session, ULONG lineY)
     lineHeight = 8;
 
   textStartX = window->BorderLeft + buffer->leftMargin + 1;
-  textEndX = window->Width - (window->BorderRight + 18);
+  textEndX = window->Width - window->BorderRight - 1;
   if (textEndX <= textStartX + 8)
-    textEndX = window->Width - (window->BorderRight + 1);
+    textEndX = textStartX + 8;
 
-  maxY = window->Height - window->BorderBottom - 10;
+  maxY = window->Height - window->BorderBottom;
   if (maxY <= window->BorderTop + 8)
-    maxY = window->Height - window->BorderBottom;
+    maxY = window->BorderTop + 8;
 
   y = window->BorderTop + (lineY - view->scrollY) * lineHeight;
   if (y + lineHeight > maxY) {
@@ -859,8 +859,13 @@ TTX_RequestLineRedraw(struct Session *session, ULONG lineY)
     return;
   }
 
-  /* Clear just this line cell. */
-  TTX_InvalidateCursor(session);
+  /* Clear just this line cell.
+   * Must XOR-erase the caret first: vertical moves only redraw the new
+   * line, so InvalidateCursor alone would leave a COMPLEMENT stamp on
+   * the previous line (trails). Horizontal moves redraw the same line
+   * and full redraws wipe the area, which is why those looked fine.
+   */
+  TTX_EraseCursor(window, session);
   SetBPen(rp, penBack);
   SetAPen(rp, penBack);
   SetDrMd(rp, JAM2);
@@ -912,6 +917,31 @@ VOID TTX_InvalidateCursor(struct Session *session)
 {
   if (session)
     session->render.cursorVisible = FALSE;
+}
+
+VOID TTX_EraseCursor(struct Window *window, struct Session *session)
+{
+  struct RastPort *rp;
+
+  if (!session || !session->render.cursorVisible)
+    return;
+
+  if (window && window->RPort &&
+      session->render.cursorPixelW > 0 &&
+      session->render.cursorPixelH > 0) {
+    rp = window->RPort;
+    SetDrMd(rp, COMPLEMENT);
+    RectFill(rp,
+             (LONG)session->render.cursorPixelX,
+             (LONG)session->render.cursorPixelY,
+             (LONG)(session->render.cursorPixelX +
+                    session->render.cursorPixelW - 1),
+             (LONG)(session->render.cursorPixelY +
+                    session->render.cursorPixelH - 1));
+    SetDrMd(rp, JAM1);
+  }
+
+  session->render.cursorVisible = FALSE;
 }
 
 /*
@@ -984,9 +1014,9 @@ VOID UpdateCursor(struct Window *window, struct Session *session) {
   if (cellW < 1)
     cellW = charWidth;
 
-  /* Off-screen caret: just forget any previous XOR stamp. */
+  /* Off-screen caret: XOR-erase any previous stamp then forget it. */
   if (view->cursorY < view->scrollY) {
-    TTX_InvalidateCursor(session);
+    TTX_EraseCursor(window, session);
     return;
   }
 
@@ -998,14 +1028,7 @@ VOID UpdateCursor(struct Window *window, struct Session *session) {
         session->render.cursorPixelH == lineHeight) {
       return; /* Already showing at this cell */
     }
-    SetDrMd(rp, COMPLEMENT);
-    RectFill(rp,
-             (LONG)session->render.cursorPixelX,
-             (LONG)session->render.cursorPixelY,
-             (LONG)(session->render.cursorPixelX + session->render.cursorPixelW - 1),
-             (LONG)(session->render.cursorPixelY + session->render.cursorPixelH - 1));
-    SetDrMd(rp, JAM1);
-    session->render.cursorVisible = FALSE;
+    TTX_EraseCursor(window, session);
   }
 
   SetDrMd(rp, COMPLEMENT);
@@ -1116,6 +1139,48 @@ VOID MouseToCursor(struct Session *session, struct Window *window,
 }
 
 
+/*
+ * Empty client rect after title bar and size/scroll borders.
+ * Matches the text editor BOOPSI domain (GA_Left/Top + RelWidth/RelHeight).
+ */
+VOID TTX_GetTextClientBounds(
+	struct Window *window,
+	LONG *outLeft,
+	LONG *outTop,
+	LONG *outWidth,
+	LONG *outHeight)
+{
+	LONG left;
+	LONG top;
+	LONG width;
+	LONG height;
+
+	left = 0;
+	top = 0;
+	width = 8;
+	height = 8;
+	if (window) {
+		left = (LONG)window->BorderLeft;
+		top = (LONG)window->BorderTop;
+		width = (LONG)window->Width - (LONG)window->BorderLeft -
+			(LONG)window->BorderRight;
+		height = (LONG)window->Height - (LONG)window->BorderTop -
+			(LONG)window->BorderBottom;
+		if (width < 8)
+			width = 8;
+		if (height < 8)
+			height = 8;
+	}
+	if (outLeft)
+		*outLeft = left;
+	if (outTop)
+		*outTop = top;
+	if (outWidth)
+		*outWidth = width;
+	if (outHeight)
+		*outHeight = height;
+}
+
 VOID CalculateMaxScroll(struct Session *session, struct Window *window) {
   struct TTTextBuffer *buffer = NULL;
   struct TTView *view = NULL;
@@ -1150,15 +1215,13 @@ VOID CalculateMaxScroll(struct Session *session, struct Window *window) {
   }
 
   scrollBarW = (ULONG)window->BorderRight;
-  if (scrollBarW < 16)
-    scrollBarW = 16;
+  if (scrollBarW < 1)
+    scrollBarW = 1;
 
   lineHeight = GetLineHeight(window->RPort);
   if (lineHeight > 0) {
     visibleLines = (ULONG)(window->Height - window->BorderTop -
                            window->BorderBottom) / lineHeight;
-    if (visibleLines > 0)
-      visibleLines--;
     if (visibleLines < 1)
       visibleLines = 1;
     buffer->pageH = visibleLines;

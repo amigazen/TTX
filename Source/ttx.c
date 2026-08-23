@@ -906,9 +906,12 @@ BOOL TTX_RestoreWindow(struct TTXApplication *app, struct Session *session) {
     Printf("[WINDOW] TTX_RestoreWindow: WARN (CreateMenuStrip failed)\n");
   }
 
-  /* Recreate scroll props first, then text editor separately */
+  /* Text editor first (client clip), then scroll props chain it into AddGList. */
   {
     struct DrawInfo *drawInfo = NULL;
+
+    if (!TTX_TextEditor_CreateGadget(app, session))
+      Printf("[WINDOW] TTX_RestoreWindow: WARN (text editor gadget failed)\n");
 
     drawInfo = GetScreenDrawInfo(session->window->WScreen);
     if (drawInfo)
@@ -917,9 +920,6 @@ BOOL TTX_RestoreWindow(struct TTXApplication *app, struct Session *session) {
         Printf("[WINDOW] TTX_RestoreWindow: WARN (scroll gadgets failed)\n");
       FreeScreenDrawInfo(session->window->WScreen, drawInfo);
     }
-
-    if (!TTX_TextEditor_CreateGadget(app, session))
-      Printf("[WINDOW] TTX_RestoreWindow: WARN (text editor gadget failed)\n");
   }
 
   /* Update scroll bars with current buffer state */
@@ -931,7 +931,7 @@ BOOL TTX_RestoreWindow(struct TTXApplication *app, struct Session *session) {
 
   if (session->window) {
     ActivateWindow(session->window);
-    TTX_TextEditor_Activate(session);
+    /* Keys via IDCMP; ActivateGadget would trap input until click-release. */
   }
 
   session->windowState.windowOpen = TRUE;
@@ -1337,7 +1337,7 @@ BOOL TTX_CreateSessionForDocument(struct TTXApplication *app, struct TTDocument 
   session->windowState.flags =
       WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_SIZEGADGET | WFLG_SIZEBRIGHT |
       WFLG_SIZEBBOTTOM | WFLG_CLOSEGADGET | WFLG_SIMPLE_REFRESH |
-      WFLG_NEWLOOKMENUS;
+      WFLG_NEWLOOKMENUS | WFLG_REPORTMOUSE;
   /*
    * OpenWindow autodoc: only the first window should use WFLG_ACTIVATE so later
    * windows do not steal keyboard focus from the user's active task.
@@ -1463,9 +1463,13 @@ BOOL TTX_CreateSessionForDocument(struct TTXApplication *app, struct TTDocument 
            "without menu)\n");
   }
 
-  /* Scroll props first, then text editor as a separate AddGList (not chained). */
+  /* Text editor first (client clip), then scroll props chain it into AddGList. */
   {
     struct DrawInfo *drawInfo = NULL;
+
+    if (!TTX_TextEditor_CreateGadget(app, session))
+      Printf("[INIT] TTX_CreateSession: WARN (text editor gadget failed - "
+             "using window IDCMP input)\n");
 
     drawInfo = GetScreenDrawInfo(session->window->WScreen);
     if (drawInfo)
@@ -1474,10 +1478,6 @@ BOOL TTX_CreateSessionForDocument(struct TTXApplication *app, struct TTDocument 
         Printf("[INIT] TTX_CreateSession: WARN (scroll gadgets failed)\n");
       FreeScreenDrawInfo(session->window->WScreen, drawInfo);
     }
-
-    if (!TTX_TextEditor_CreateGadget(app, session))
-      Printf("[INIT] TTX_CreateSession: WARN (text editor gadget failed — "
-             "using window IDCMP input)\n");
   }
 
   /* Calculate max scroll values and update scroll bars */
@@ -1506,8 +1506,9 @@ BOOL TTX_CreateSessionForDocument(struct TTXApplication *app, struct TTDocument 
   /* Ensure keyboard focus and cursor on the new window */
   if (session->window) {
     ActivateWindow(session->window);
-    if (session->textEditorGadget)
-      TTX_TextEditor_Activate(session);
+    /* Do not ActivateGadget here - that leaves the editor sticky-active
+     * and blocks menus/close until a click cycle. Keys use window IDCMP.
+     */
     if (TT_SessionBuffer(session)) {
       UpdateCursor(session->window, session);
     }

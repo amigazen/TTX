@@ -345,6 +345,31 @@ VOID SetMarking(struct TTTextBuffer *buffer, ULONG startY, ULONG startX, ULONG s
     buffer->marking.stopX = stopX;
 }
 
+/*
+ * Drag-select and MarkBlk highlight live on TTView; RenderText copies
+ * view->marking onto the buffer mirror before painting.
+ */
+VOID TTX_ApplyMarking(
+	struct Session *session,
+	ULONG startY,
+	ULONG startX,
+	ULONG stopY,
+	ULONG stopX)
+{
+	struct TTTextBuffer *buffer;
+	struct TTView *view;
+
+	if (!session)
+		return;
+	buffer = TT_SessionBuffer(session);
+	if (!buffer)
+		return;
+	SetMarking(buffer, startY, startX, stopY, stopX);
+	view = TTX_SessionView(session);
+	if (view)
+		view->marking = buffer->marking;
+}
+
 /* Clear marking */
 VOID ClearMarking(struct TTTextBuffer *buffer)
 {

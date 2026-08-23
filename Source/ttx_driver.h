@@ -314,11 +314,27 @@ VOID TTX_RequestRedraw(struct Session *session);
 /* Redraw one buffer line + cursor (typing); avoids full-window RectFill flicker. */
 VOID TTX_RequestLineRedraw(struct Session *session, ULONG lineY);
 VOID UpdateCursor(struct Window *window, struct Session *session);
-/* Drop cursorVisible after a JAM2 paint that covered the caret cell. */
+/* Forget cursorVisible after a JAM2 paint that covered the caret cell. */
 VOID TTX_InvalidateCursor(struct Session *session);
+/* XOR-erase the caret if still stamped (needed when only another line is redrawn). */
+VOID TTX_EraseCursor(struct Window *window, struct Session *session);
 VOID MouseToCursor(struct Session *session, struct Window *window, LONG mouseX, LONG mouseY, ULONG *cursorX, ULONG *cursorY);
 VOID CalculateMaxScroll(struct Session *session, struct Window *window);
 VOID UpdateScrollBars(struct Session *session);
+/* Client rect inside title/borders/size+scroll strips (matches text editor gadget). */
+VOID TTX_GetTextClientBounds(
+	struct Window *window,
+	LONG *outLeft,
+	LONG *outTop,
+	LONG *outWidth,
+	LONG *outHeight);
+/* Sync view+buffer marking for drag-select / MarkBlk highlight. */
+VOID TTX_ApplyMarking(
+	struct Session *session,
+	ULONG startY,
+	ULONG startX,
+	ULONG stopY,
+	ULONG stopX);
 
 /****************************************************************************/
 /* DFN parser */

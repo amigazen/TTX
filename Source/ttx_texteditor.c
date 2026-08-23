@@ -1,8 +1,9 @@
 /*
  * TTX driver - multiline text editor BOOPSI class
  *
- * Subclass of gadgetclass. GM_RENDER draws the document via RenderText;
- * GM_HANDLEINPUT routes IECLASS_RAWKEY / IECLASS_RAWMOUSE to turbotext.
+ * Subclass of gadgetclass. Domain fills the window client area (inside
+ * title/borders; scroll props sit in BorderRight/BorderBottom). Drawing is
+ * done at window level (RenderText); GM_HANDLEINPUT routes RAWKEY/RAWMOUSE.
  *
  * Copyright (c) 2025 amigazen project
  * Licensed under BSD 2-Clause License
@@ -10,6 +11,7 @@
 
 #include "ttx_texteditor.h"
 #include "ttx_input.h"
+#include "ttx.h"
 
 #include <devices/inputevent.h>
 #include <intuition/classes.h>
@@ -60,6 +62,33 @@ TTX_TE_RefreshSession(struct Session *session)
 
 /****************************************************************************/
 
+static VOID
+TTX_TE_ApplyCursor(
+	struct Session *session,
+	ULONG newCursorX,
+	ULONG newCursorY)
+{
+	struct TTView *view;
+	struct TTTextBuffer *buffer;
+
+	view = TTX_SessionView(session);
+	buffer = TT_SessionBuffer(session);
+	if (!view || !buffer || !buffer->lines)
+		return;
+	if (newCursorY >= buffer->lineCount)
+		return;
+
+	view->cursorY = newCursorY;
+	if (newCursorX <= buffer->lines[newCursorY].length)
+		view->cursorX = newCursorX;
+	else
+		view->cursorX = buffer->lines[newCursorY].length;
+	buffer->cursorX = view->cursorX;
+	buffer->cursorY = view->cursorY;
+}
+
+/****************************************************************************/
+
 static BOOL
 TTX_TE_HandleMouse(
 	struct Session *session,
@@ -99,26 +128,27 @@ TTX_TE_HandleMouse(
 	if (isPress)
 		ActivateWindow(window);
 
+	/* Domain origin + gadget-relative mouse = window coordinates. */
 	mouseX = (LONG)gpi->gpi_GInfo->gi_Domain.Left + (LONG)gpi->gpi_Mouse.X;
 	mouseY = (LONG)gpi->gpi_GInfo->gi_Domain.Top + (LONG)gpi->gpi_Mouse.Y;
 
 	MouseToCursor(session, window,
 		mouseX, mouseY, &newCursorX, &newCursorY);
-
-	if (newCursorY < TT_SessionBuffer(session)->lineCount) {
-		view->cursorY = newCursorY;
-		if (newCursorX <= TT_SessionBuffer(session)->lines[newCursorY].length)
-			view->cursorX = newCursorX;
-		else
-			view->cursorX = TT_SessionBuffer(session)->lines[newCursorY].length;
-	}
+	TTX_TE_ApplyCursor(session, newCursorX, newCursorY);
 
 	if (isPress) {
 		data->mouseSelecting = TRUE;
 		session->mouseSelecting = TRUE;
 		session->selectStartX = view->cursorX;
 		session->selectStartY = view->cursorY;
+		/* Anchor = current caret (same as pre-refactor SetMarking). */
+		TTX_ApplyMarking(session,
+			session->selectStartY, session->selectStartX,
+			view->cursorY, view->cursorX);
 	} else if (data->mouseSelecting) {
+		TTX_ApplyMarking(session,
+			session->selectStartY, session->selectStartX,
+			view->cursorY, view->cursorX);
 		data->mouseSelecting = FALSE;
 		session->mouseSelecting = FALSE;
 	}
@@ -159,12 +189,14 @@ TTX_TE_HandleMouseMove(
 
 	MouseToCursor(session, window,
 		mouseX, mouseY, &newCursorX, &newCursorY);
+	TTX_TE_ApplyCursor(session, newCursorX, newCursorY);
 
-	if (newCursorY < TT_SessionBuffer(session)->lineCount) {
-		view->cursorY = newCursorY;
-		view->cursorX = newCursorX;
-	}
+	/* Extend selection end to caret while dragging (pre-refactor behaviour). */
+	TTX_ApplyMarking(session,
+		session->selectStartY, session->selectStartX,
+		view->cursorY, view->cursorX);
 
+	ScrollToCursor(session, window);
 	TTX_TE_RefreshSession(session);
 	return TRUE;
 }
@@ -249,11 +281,48 @@ TTX_TE_Render(Class *cl, Object *obj, struct gpRender *gpr)
 static ULONG
 TTX_TE_GoActive(Class *cl, Object *obj, struct gpInput *gpi)
 {
+	struct TTXTextEditorData *data;
+	struct Session *session;
+	struct InputEvent *ievent;
+
 	(void)cl;
-	(void)obj;
-	(void)gpi;
-	/* Stay active so GM_HANDLEINPUT keeps receiving key/mouse events. */
+	data = (struct TTXTextEditorData *)INST_DATA(cl, obj);
+	session = data->session;
+
+	/*
+	 * Only stay active for an actual LBUTTON press (drag-select).
+	 * ActivateGadget() with no event must not trap the window forever —
+	 * that blocks menus, close, and other gadgets.
+	 */
+	if (!session || !session->window || !gpi)
+		return (ULONG)GMR_NOREUSE;
+
+	ievent = gpi->gpi_IEvent;
+	if (!ievent || ievent->ie_Class != IECLASS_RAWMOUSE ||
+	    ievent->ie_Code != IECODE_LBUTTON)
+		return (ULONG)GMR_NOREUSE;
+
+	TTX_TE_HandleMouse(session, data, ievent, session->window, gpi);
+	if (!data->mouseSelecting)
+		return (ULONG)GMR_NOREUSE;
+
 	return (ULONG)GMR_MEACTIVE;
+}
+
+/****************************************************************************/
+
+static ULONG
+TTX_TE_GoInactive(Class *cl, Object *obj, struct gpGoInactive *gpgi)
+{
+	struct TTXTextEditorData *data;
+
+	(void)cl;
+	(void)gpgi;
+	data = (struct TTXTextEditorData *)INST_DATA(cl, obj);
+	data->mouseSelecting = FALSE;
+	if (data->session)
+		data->session->mouseSelecting = FALSE;
+	return 0;
 }
 
 /****************************************************************************/
@@ -268,15 +337,20 @@ TTX_TE_HandleInput(Class *cl, Object *obj, struct gpInput *gpi)
 	struct Window *window;
 	ULONG result;
 	APTR deadKey;
+	BOOL sawButtonUp;
 
 	data = (struct TTXTextEditorData *)INST_DATA(cl, obj);
 	session = data->session;
 	app = data->app;
-	/* Remain active (GMR_MEACTIVE == 0) for continued typing. */
+	sawButtonUp = FALSE;
+	/*
+	 * Stay active only while the LBUTTON drag is in progress. Keys are
+	 * handled via window IDCMP when inactive (see ttx_intui.c).
+	 */
 	result = (ULONG)GMR_MEACTIVE;
 
 	if (!session || !app || !session->window)
-		return result;
+		return (ULONG)GMR_NOREUSE;
 
 	window = session->window;
 	ievent = gpi->gpi_IEvent;
@@ -289,13 +363,21 @@ TTX_TE_HandleInput(Class *cl, Object *obj, struct gpInput *gpi)
 			}
 		}
 		if (ievent->ie_Class == IECLASS_RAWMOUSE) {
-			if (ievent->ie_Code == IECODE_NOBUTTON)
+			if (ievent->ie_Code == IECODE_NOBUTTON) {
 				TTX_TE_HandleMouseMove(session, data, gpi);
-			else
+			} else {
+				if (ievent->ie_Code ==
+				    (IECODE_LBUTTON | IECODE_UP_PREFIX))
+					sawButtonUp = TRUE;
 				TTX_TE_HandleMouse(session, data, ievent, window, gpi);
+			}
 		}
 		ievent = ievent->ie_NextEvent;
 	}
+
+	/* Release activation so menus / close / other gadgets work again. */
+	if (sawButtonUp || !data->mouseSelecting)
+		result = (ULONG)GMR_NOREUSE;
 
 	return result;
 }
@@ -337,6 +419,9 @@ static ULONG __saveds __asm TTX_TE_Dispatcher(
 	case GM_HANDLEINPUT:
 		result = TTX_TE_HandleInput(cl, obj, (struct gpInput *)msg);
 		break;
+	case GM_GOINACTIVE:
+		result = TTX_TE_GoInactive(cl, obj, (struct gpGoInactive *)msg);
+		break;
 	default:
 		result = DoSuperMethodA(cl, obj, msg);
 		break;
@@ -354,7 +439,7 @@ TTX_TextEditor_InitClass(VOID)
 		return TRUE;
 
 	/*
-	 * Private class (NULL public name). Do not call FindClass() — it is
+	 * Private class (NULL public name). Do not call FindClass() - it is
 	 * ==private in intuition_lib.sfd and is not in the public link stubs.
 	 */
 	TTXTextEditorClass = MakeClass(
@@ -396,21 +481,60 @@ TTX_TextEditor_CreateGadget(
 	struct TTXApplication *app,
 	struct Session *session)
 {
-	/*
-	 * HEAD~1 typed via window IDCMP (VANILLAKEY/RAWKEY), not a full-window
-	 * BOOPSI editor. Creating/attaching ttxtexteditorclass during session
-	 * init previously wedged Intuition on this target. The class remains
-	 * registered for later attach; editing uses ttx_input.c + IDCMP.
-	 */
-	(void)app;
+	struct Window *window;
+	struct Gadget *gadget;
+	BOOL readOnly;
+	LONG left;
+	LONG top;
+	LONG width;
+	LONG height;
 
-	if (!session || !session->window)
+	if (!app || !session || !session->window)
 		return FALSE;
 	if (session->textEditorGadget)
 		return TRUE;
+	if (!TTXTextEditorClass && !TTX_TextEditor_InitClass())
+		return FALSE;
 
-	TTX_InitTrace("TTX_TextEditor_CreateGadget: SKIP (window IDCMP like HEAD~1)");
-	return FALSE;
+	window = session->window;
+	readOnly = FALSE;
+	if (session->document)
+		readOnly = session->document->state.readOnly;
+
+	/*
+	 * Domain = empty client area after title bar and size/scroll borders.
+	 * Vert/horiz prop gadgets sit inside BorderRight / BorderBottom, so
+	 * RelWidth/RelHeight against those borders matches the paint clip.
+	 */
+	TTX_GetTextClientBounds(window, &left, &top, &width, &height);
+
+	TTX_InitTrace("TTX_TextEditor_CreateGadget: NewObject");
+	gadget = (struct Gadget *)NewObject(
+		TTXTextEditorClass, NULL,
+		GA_ID, GID_TEXT_EDITOR,
+		GA_Left, left,
+		GA_Top, top,
+		GA_RelWidth, -(window->BorderLeft + window->BorderRight),
+		GA_RelHeight, -(window->BorderTop + window->BorderBottom),
+		GA_Immediate, TRUE,
+		GA_RelVerify, TRUE,
+		TEA_Session, (ULONG)session,
+		TEA_Application, (ULONG)app,
+		TEA_ReadOnly, (ULONG)readOnly,
+		TAG_DONE);
+	if (!gadget) {
+		Printf("[INIT] TTX_TextEditor_CreateGadget: FAIL io=%lu\n",
+			(ULONG)IoErr());
+		return FALSE;
+	}
+
+	gadget->Flags |= GFLG_RELWIDTH | GFLG_RELHEIGHT | GFLG_TABCYCLE |
+		GFLG_GADGHNONE;
+
+	session->textEditorGadget = gadget;
+	Printf("[INIT] TTX_TextEditor_CreateGadget: gadget=%lx domain=%ld,%ld %ldx%ld\n",
+		(ULONG)gadget, left, top, width, height);
+	return TRUE;
 }
 
 /****************************************************************************/
@@ -421,9 +545,10 @@ TTX_TextEditor_DestroyGadget(struct Session *session)
 	if (!session || !session->textEditorGadget)
 		return;
 
-	if (session->window && session->window != INVALID_RESOURCE)
-		RemoveGList(session->window, session->textEditorGadget, 1);
-
+	/*
+	 * Scroll gadget teardown RemoveGList's the combined list; only
+	 * dispose the BOOPSI object here.
+	 */
 	DisposeObject((Object *)session->textEditorGadget);
 	session->textEditorGadget = NULL;
 }
@@ -433,11 +558,12 @@ TTX_TextEditor_DestroyGadget(struct Session *session)
 VOID
 TTX_TextEditor_Activate(struct Session *session)
 {
-	if (!session || !session->window || !session->textEditorGadget)
-		return;
-
-	/* ActivateGadget only — ActivateWindow is already implied when active. */
-	ActivateGadget(session->textEditorGadget, session->window, NULL);
+	(void)session;
+	/*
+	 * Do not call ActivateGadget(). A full-window editor that returns
+	 * GMR_MEACTIVE until deactivated swallows menus, close, and other
+	 * gadgets. Clicks use GM_GOACTIVE; typing uses window IDCMP.
+	 */
 }
 
 /****************************************************************************/
