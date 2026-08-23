@@ -16,6 +16,31 @@
 #include <clib/ttxreqs_protos.h>
 #endif /* CLIB_TTXREQS_PROTOS_H */
 
-/* No public LVOs in ttxreqs_lib.sfd yet (FuncTab = std vectors only). */
+/* TR_RequestBool: SFD (a0,a1,a2) → mask A9803 offset -30 */
+#pragma libcall TTXReqsBase TR_RequestBool 1E A9803
+/* TR_RequestChoice: SFD (a0,a1,a2,a3) → mask BA9804 offset -36 */
+#pragma libcall TTXReqsBase TR_RequestChoice 24 BA9804
+/* TR_RequestStr: SFD (a0,a1,a2,a3) → mask BA9804 offset -42 */
+#pragma libcall TTXReqsBase TR_RequestStr 2A BA9804
+/* TR_RequestNum: SFD (a0,a1,d0,d1,a2) → mask A109805 offset -48 */
+#pragma libcall TTXReqsBase TR_RequestNum 30 A109805
+/* TR_RequestFile: SFD (a0,a1,d0,a2,a3) → mask BA09805 offset -54 */
+#pragma libcall TTXReqsBase TR_RequestFile 36 BA09805
+/* TR_RequestFind: SFD (a0,a1,a2,d0,a3) → mask B0A9805 offset -60 */
+#pragma libcall TTXReqsBase TR_RequestFind 3C B0A9805
+/* TR_RequestFindChange: SFD (a0,a1,a2,a3,d0,d1) → mask 10BA9806 offset -66 */
+#pragma libcall TTXReqsBase TR_RequestFindChange 42 10BA9806
+/* TR_PrefsSetDefaults: SFD (a0) → mask 801 offset -72 */
+#pragma libcall TTXReqsBase TR_PrefsSetDefaults 48 801
+/* TR_PrefsGet: SFD ((none)) → mask 000 offset -78 */
+#pragma libcall TTXReqsBase TR_PrefsGet 4E 000
+/* TR_PrefsSet: SFD (a0) → mask 801 offset -84 */
+#pragma libcall TTXReqsBase TR_PrefsSet 54 801
+/* TR_PrefsLoad: SFD (a0,a1) → mask 9802 offset -90 */
+#pragma libcall TTXReqsBase TR_PrefsLoad 5A 9802
+/* TR_PrefsSave: SFD (a0,a1) → mask 9802 offset -96 */
+#pragma libcall TTXReqsBase TR_PrefsSave 60 9802
+/* TR_PrefsRequester: SFD (a0,a1) → mask 9802 offset -102 */
+#pragma libcall TTXReqsBase TR_PrefsRequester 66 9802
 
 #endif /* PRAGMAS_TTXREQS_PRAGMAS_H */

@@ -14,6 +14,7 @@
 #include "ttx_boopsi.h"
 #include "ttx_texteditor.h"
 #include "ttx_input.h"
+#include "ttx_prefs.h"
 #include "ttx_commands_prot.h"
 
 #include <devices/inputevent.h>
@@ -412,12 +413,16 @@ TTX_IntuiHandleMessage(struct TTXApplication *app, struct Session *portSession,
 					buffer->cursorY = view->cursorY;
 				}
 				if (isPress && view) {
-					session->mouseSelecting = TRUE;
+					session->mouseSelecting = FALSE;
 					session->selectStartX = view->cursorX;
 					session->selectStartY = view->cursorY;
-					TTX_ApplyMarking(session,
-						session->selectStartY, session->selectStartX,
-						view->cursorY, view->cursorX);
+					if (TTX_PrefsGet()->selectWhenDragging) {
+						session->mouseSelecting = TRUE;
+						TTX_ApplyMarking(session,
+							session->selectStartY,
+							session->selectStartX,
+							view->cursorY, view->cursorX);
+					}
 				} else if (session->mouseSelecting && view) {
 					TTX_ApplyMarking(session,
 						session->selectStartY, session->selectStartX,

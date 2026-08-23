@@ -9,8 +9,11 @@
 
 #include <exec/libraries.h>
 #include <exec/lists.h>
+#include <libraries/ttxreqs.h>
+#include <proto/ttxreqs.h>
 
 struct Library *TurboTextBase;
+struct Library *TTXReqsBase;
 
 static BOOL TTX_ProgDirAssigned = FALSE;
 
@@ -240,6 +243,23 @@ TTX_OpenTurboText(struct TTXApplication *app)
 	Printf("[INIT] turbotext.library=%lx ver=%lu size hint: rebuild Libs/ if typing inserts fail\n",
 		(ULONG)TurboTextBase, (ULONG)TurboTextBase->lib_Version);
 
+	TTXReqsBase = TTX_OpenLocalLibrary(TTXREQSNAME);
+	if (!TTXReqsBase)
+	{
+		err = IoErr();
+		if (err == 0)
+			err = ERROR_OBJECT_NOT_FOUND;
+		Printf("TTX: could not open %s (IoErr=%ld)\n", TTXREQSNAME, err);
+		Printf("TTX: place %s in Libs/ beside the TTX executable\n",
+			TTXREQSNAME);
+		CloseLibrary(TurboTextBase);
+		TurboTextBase = NULL;
+		SetIoErr(err);
+		return FALSE;
+	}
+	Printf("[INIT] ttxreqs.library=%lx ver=%lu\n",
+		(ULONG)TTXReqsBase, (ULONG)TTXReqsBase->lib_Version);
+
 	return TRUE;
 }
 
@@ -247,6 +267,13 @@ VOID
 TTX_CloseTurboText(struct TTXApplication *app)
 {
 	(void)app;
+
+	if (TTXReqsBase)
+	{
+		Printf("[CLEANUP] TTX_CloseTurboText: closing ttxreqs.library\n");
+		CloseLibrary(TTXReqsBase);
+		TTXReqsBase = NULL;
+	}
 
 	if (TurboTextBase)
 	{

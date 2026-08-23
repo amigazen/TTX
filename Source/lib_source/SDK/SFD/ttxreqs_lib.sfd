@@ -1,4 +1,4 @@
-==id $VER: ttxreqs_lib.sfd 3.1 (21.8.2026)
+==id $VER: ttxreqs_lib.sfd 3.1 (23.8.2026)
 *"ttxreqs.library"
 ==base _TTXReqsBase
 ==basetype struct Library *
@@ -6,4 +6,17 @@
 ==include <libraries/ttxreqs.h>
 ==bias 30
 ==public
+BOOL TR_RequestBool(struct Window * parent, STRPTR title, STRPTR prompt) (a0,a1,a2)
+LONG TR_RequestChoice(struct Window * parent, STRPTR title, STRPTR prompt, STRPTR gadgets) (a0,a1,a2,a3)
+BOOL TR_RequestStr(struct Window * parent, STRPTR title, STRPTR defStr, STRPTR * outStr) (a0,a1,a2,a3)
+BOOL TR_RequestNum(struct Window * parent, STRPTR title, LONG defVal, BOOL positiveOnly, LONG * outNum) (a0,a1,d0,d1,a2)
+STRPTR TR_RequestFile(struct Window * parent, STRPTR title, BOOL saveMode, STRPTR initialFile, STRPTR initialDrawer) (a0,a1,d0,a2,a3)
+BOOL TR_RequestFind(struct Window * parent, struct TRFindOptions * opts, STRPTR findBuf, ULONG bufLen, LONG * action) (a0,a1,a2,d0,a3)
+BOOL TR_RequestFindChange(struct Window * parent, struct TRFindOptions * opts, STRPTR findBuf, STRPTR changeBuf, ULONG bufLen, LONG * action) (a0,a1,a2,a3,d0,d1)
+VOID TR_PrefsSetDefaults(struct TRPrefs * p) (a0)
+struct TRPrefs * TR_PrefsGet() ()
+VOID TR_PrefsSet(struct TRPrefs * p) (a0)
+BOOL TR_PrefsLoad(struct TRPrefs * p, STRPTR path) (a0,a1)
+BOOL TR_PrefsSave(struct TRPrefs * p, STRPTR path) (a0,a1)
+BOOL TR_PrefsRequester(struct Window * parent, struct TRPrefs * p) (a0,a1)
 ==end

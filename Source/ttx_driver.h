@@ -256,6 +256,8 @@ BOOL TTX_HandleMenuPick(struct TTXApplication *app, struct Session *session, ULO
 BOOL TTX_CreateMenuStrip(struct Session *session);
 VOID TTX_FreeMenuStrip(struct Session *session);
 VOID TTX_ResetMenuStrip(struct Session *session);
+VOID TTX_SetDefinitionsPath(STRPTR path);
+STRPTR TTX_GetDefinitionsPath(VOID);
 VOID TTX_ShowUsage(VOID);
 VOID TTX_Iconify(struct TTXApplication *app, BOOL iconify);
 VOID TTX_DoIconify(struct TTXApplication *app, BOOL iconify);

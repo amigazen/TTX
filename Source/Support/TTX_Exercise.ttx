@@ -1,0 +1,289 @@
+/*
+ * TTX_Exercise.ttx - build a self-checking document while exercising TTX
+ *
+ * Requires RexxMast, TTX open, rebuilt turbotext.library + TTX.
+ *
+ *   rx TurboText:Support/TTX_Exercise.ttx
+ *   rx TurboText:Support/TTX_Exercise.ttx edit
+ *
+ * The buffer IS the report. Check PASS/FAIL lines and EXPECTED markers.
+ *
+ * NoteCmd writes PASS/FAIL at EOF then restores the cursor via an optional
+ * Find target (ARG 3) so mid-edit logging does not leave you on the wrong line.
+ */
+
+OPTIONS RESULTS
+
+PARSE ARG section
+IF section = '' THEN section = 'all'
+section = UPPER(STRIP(section))
+
+okcount = 0
+failed = 0
+host = 'TURBOTEXT'
+
+SAY '=== TTX ARexx exercise ==='
+SAY 'host='host 'section='section
+
+CALL DoCmd 'GetVersion'
+SAY '  GetVersion RESULT=['RESULT'] RC='RC
+verstr = RESULT
+IF verstr = '' | UPPER(verstr) = 'RESULT' THEN verstr = '(no RESULT)'
+
+CALL DoCmd 'GetPort'
+SAY '  GetPort RESULT=['RESULT'] RC='RC
+
+CALL DoCmd 'ClearFile'
+CALL DoCmd 'MoveSOF'
+
+CALL PutLine '=== TTX ARexx Exercise Report ==='
+CALL PutLine 'Inspect this buffer: PASS/FAIL lines and EXPECTED markers.'
+CALL PutLine 'Host GetVersion=[' || verstr || ']'
+CALL BlankLine
+
+IF section = 'ALL' | section = 'NAV' THEN DO
+  SAY '-- navigation --'
+  CALL PutLine '--- NAV ---'
+  CALL DoCmd 'MoveSOF'
+  CALL DoCmd 'MoveEOF'
+  CALL DoCmd 'MoveSOL'
+  CALL DoCmd 'MoveEOL'
+  CALL DoCmd 'MoveRight'
+  CALL DoCmd 'MoveLeft'
+  CALL DoCmd 'MoveDown'
+  CALL DoCmd 'MoveUp'
+  CALL DoCmd 'MoveNextWord'
+  CALL DoCmd 'MovePrevWord'
+  CALL DoCmd 'MoveNextTabStop'
+  CALL DoCmd 'MovePrevTabStop'
+  CALL DoCmd 'GetCursorPos'
+  SAY '  GetCursorPos RESULT=['RESULT']'
+  CALL NoteResult 'NAV GetCursorPos', RESULT
+  CALL NoteCmd 'NAV SetBookmark', 'SetBookmark 1'
+  CALL NoteCmd 'NAV MoveBookmark', 'MoveBookmark 1'
+  CALL NoteCmd 'NAV MoveLastChange', 'MoveLastChange'
+  CALL NoteCmd 'NAV MoveAutomark', 'MoveAutomark'
+  CALL BlankLine
+END
+
+IF section = 'ALL' | section = 'EDIT' THEN DO
+  SAY '-- edit --'
+  CALL GoReportEnd
+  CALL PutLine '--- EDIT ---'
+  CALL PutLine 'EDIT seed line follows (case transforms apply to it):'
+  CALL DoCmd 'InsertLine'
+  CALL DoCmd 'Insert "EDIT_MARKER MixedCase Word"'
+  CALL DoCmd 'InsertLine'
+  CALL DoCmd 'MoveSOF'
+  CALL NoteCmd 'EDIT Find seed', 'Find "EDIT_MARKER"', 'EDIT_MARKER'
+  CALL DoCmd 'MoveSOL'
+  CALL NoteCmd 'EDIT DeleteEOL', 'DeleteEOL'
+  CALL NoteCmd 'EDIT UndeleteLine', 'UndeleteLine', 'EDIT_MARKER'
+  CALL DoCmd 'MoveSOF'
+  CALL DoCmd 'Find "EDIT_MARKER"'
+  CALL DoCmd 'MoveSOL'
+  CALL NoteCmd 'EDIT ToggleCharCase', 'ToggleCharCase', 'EDIT_MARKER'
+  CALL NoteCmd 'EDIT Conv2Upper', 'Conv2Upper', 'EDIT_MARKER'
+  CALL GoReportEnd
+  CALL PutLine 'EXPECTED if stopped before Conv2Lower: EDIT_MARKER MIXEDCASE WORD'
+  CALL DoCmd 'MoveSOF'
+  CALL DoCmd 'Find "EDIT_MARKER"'
+  CALL NoteCmd 'EDIT Conv2Lower', 'Conv2Lower', 'edit_marker'
+  CALL GoReportEnd
+  CALL PutLine 'EXPECTED seed line: edit_marker mixedcase word'
+  CALL DoCmd 'MoveSOF'
+  CALL DoCmd 'Find "edit_marker"'
+  CALL NoteCmd 'EDIT Center', 'Center', 'edit_marker'
+  CALL NoteCmd 'EDIT FormatParagraph', 'FormatParagraph', 'edit_marker'
+  CALL NoteCmd 'EDIT MoveLastChange', 'MoveLastChange'
+  CALL BlankLine
+END
+
+IF section = 'ALL' | section = 'BLOCK' THEN DO
+  SAY '-- block / clip --'
+  CALL GoReportEnd
+  CALL PutLine '--- BLOCK / CLIP ---'
+  CALL DoCmd 'InsertLine'
+  CALL DoCmd 'Insert "BLOCK_COPY_LINE_A"'
+  CALL DoCmd 'InsertLine'
+  CALL DoCmd 'Insert "BLOCK_COPY_LINE_B"'
+  CALL DoCmd 'InsertLine'
+  CALL DoCmd 'MoveSOF'
+  CALL NoteCmd 'BLOCK Find A', 'Find "BLOCK_COPY_LINE_A"', 'BLOCK_COPY_LINE_A'
+  CALL DoCmd 'MoveSOL'
+  CALL NoteCmd 'BLOCK MarkBlk start', 'MarkBlk', 'BLOCK_COPY_LINE_A'
+  CALL DoCmd 'MoveDown'
+  CALL DoCmd 'MoveEOL'
+  CALL NoteCmd 'BLOCK MarkBlk end', 'MarkBlk'
+  CALL NoteCmd 'BLOCK CopyBlk', 'CopyBlk'
+  CALL GoReportEnd
+  CALL DoCmd 'InsertLine'
+  CALL DoCmd 'Insert "PASTE_BELOW_SHOULD_DUPLICATE_A_AND_B:"'
+  CALL DoCmd 'InsertLine'
+  CALL NoteCmd 'BLOCK PasteClip', 'PasteClip'
+  CALL GoReportEnd
+  CALL PutLine 'EXPECTED: BLOCK_COPY_LINE_A appears twice'
+  CALL PutLine 'EXPECTED: BLOCK_COPY_LINE_B appears twice'
+  CALL BlankLine
+END
+
+IF section = 'ALL' | section = 'SEARCH' THEN DO
+  SAY '-- search --'
+  CALL GoReportEnd
+  CALL PutLine '--- SEARCH ---'
+  CALL DoCmd 'InsertLine'
+  CALL DoCmd 'Insert "SEARCH_NEEDLE_Alpha stays until FindChange"'
+  CALL DoCmd 'InsertLine'
+  CALL DoCmd 'MoveSOF'
+  CALL NoteCmd 'SEARCH Find', 'Find "SEARCH_NEEDLE_Alpha"', 'SEARCH_NEEDLE_Alpha'
+  CALL NoteCmd 'SEARCH MoveAutomark', 'MoveAutomark', 'SEARCH_NEEDLE_Alpha'
+  /* Inclusive FindChange (library rebuild): replaces match under cursor. */
+  CALL NoteCmd 'SEARCH FindChange', ,
+    'FindChange "SEARCH_NEEDLE_Alpha" "SEARCH_NEEDLE_OK"', ,
+    'SEARCH_NEEDLE_OK'
+  CALL GoReportEnd
+  CALL PutLine 'EXPECTED line: SEARCH_NEEDLE_OK stays until FindChange'
+  CALL PutLine 'EXPECTED absent: SEARCH_NEEDLE_Alpha'
+  CALL BlankLine
+END
+
+IF section = 'ALL' | section = 'VIEW' THEN DO
+  SAY '-- multi-view --'
+  CALL GoReportEnd
+  CALL PutLine '--- VIEW ---'
+  CALL NoteCmd 'VIEW SplitView', 'SplitView'
+  CALL NoteCmd 'VIEW SwitchView', 'SwitchView'
+  CALL NoteCmd 'VIEW CenterView', 'CenterView'
+  CALL NoteCmd 'VIEW SwapViews', 'SwapViews'
+  CALL DoCmd 'GetViewInfo'
+  SAY '  GetViewInfo RESULT=['RESULT']'
+  CALL NoteResult 'VIEW GetViewInfo', RESULT
+  CALL BlankLine
+END
+
+IF section = 'ALL' | section = 'META' THEN DO
+  SAY '-- file meta / window --'
+  CALL GoReportEnd
+  CALL PutLine '--- META ---'
+  CALL DoCmd 'GetFilePath'
+  SAY '  GetFilePath RESULT=['RESULT']'
+  CALL NoteResult 'META GetFilePath', RESULT
+  CALL DoCmd 'GetFileInfo'
+  SAY '  GetFileInfo RESULT=['RESULT']'
+  CALL NoteResult 'META GetFileInfo', RESULT
+  CALL DoCmd 'GetReadOnly'
+  SAY '  GetReadOnly RESULT=['RESULT']'
+  CALL NoteResult 'META GetReadOnly', RESULT
+  CALL NoteCmd 'META UpdateView', 'UpdateView'
+  CALL NoteCmd 'META ScrollView', 'ScrollView 0 1'
+  CALL BlankLine
+END
+
+CALL GoReportEnd
+CALL DoCmd 'InsertLine'
+CALL PutLine '=== SUMMARY ==='
+CALL PutLine 'Shell tally: ok=' || okcount || ' failed=' || failed
+IF failed = 0 THEN
+  CALL PutLine 'VERDICT: ALL PASS - check EXPECTED markers match the buffer'
+ELSE
+  CALL PutLine 'VERDICT: FAILURES - search FAIL lines and missing EXPECTED text'
+CALL PutLine '=== end of report ==='
+
+CALL DoCmd 'MoveSOF'
+CALL DoCmd 'UpdateView'
+
+SAY '=== TTX ARexx exercise done ==='
+SAY 'ok='okcount 'failed='failed
+SAY 'Inspect the TTX document window for PASS/FAIL and EXPECTED markers.'
+EXIT 0
+
+/* ---------- helpers ---------- */
+
+BlankLine: PROCEDURE EXPOSE host okcount failed RC RESULT
+  ADDRESS VALUE host
+  INTERPRET 'MoveEOF'
+  INTERPRET 'InsertLine'
+  RETURN
+
+GoReportEnd: PROCEDURE EXPOSE host okcount failed RC RESULT
+  ADDRESS VALUE host
+  INTERPRET 'MoveEOF'
+  RETURN
+
+/*
+ * Always start a new line at EOF so PASS/FAIL never append mid-line.
+ */
+PutLine: PROCEDURE EXPOSE host okcount failed RC RESULT
+  PARSE ARG text
+  ADDRESS VALUE host
+  INTERPRET 'MoveEOF'
+  INTERPRET 'InsertLine'
+  IF text ~= '' THEN DO
+    INTERPRET 'Insert "' || text || '"'
+    INTERPRET 'InsertLine'
+  END
+  RETURN
+
+DoCmd: PROCEDURE EXPOSE host okcount failed RC RESULT
+  PARSE ARG cmdline
+  cmdline = STRIP(cmdline)
+  IF cmdline = '' THEN RETURN
+  ADDRESS VALUE host
+  INTERPRET cmdline
+  IF RC = 0 THEN DO
+    okcount = okcount + 1
+    SAY '  OK   ' cmdline
+  END
+  ELSE DO
+    failed = failed + 1
+    SAY '  FAIL RC=' || RC || '  ' cmdline
+  END
+  RETURN
+
+/*
+ * ARG(1)=label  ARG(2)=cmdline  ARG(3)=optional Find restore token
+ * Saves RC before PutLine (Insert would clobber RC to 0).
+ */
+NoteCmd: PROCEDURE EXPOSE host okcount failed RC RESULT
+  label = ARG(1)
+  cmdline = STRIP(ARG(2))
+  restore = ARG(3)
+  cmdrc = 10
+
+  IF cmdline = '' THEN DO
+    failed = failed + 1
+    SAY '  FAIL (empty cmdline) ' label
+    CALL PutLine 'FAIL ' || label || ' (empty cmdline)'
+    RETURN
+  END
+
+  ADDRESS VALUE host
+  INTERPRET cmdline
+  cmdrc = RC
+
+  IF cmdrc = 0 THEN DO
+    okcount = okcount + 1
+    SAY '  OK   ' cmdline
+    CALL PutLine 'PASS ' || label
+  END
+  ELSE DO
+    failed = failed + 1
+    SAY '  FAIL RC=' || cmdrc || '  ' cmdline
+    CALL PutLine 'FAIL ' || label || ' RC=' || cmdrc
+  END
+
+  IF restore ~= '' THEN DO
+    ADDRESS VALUE host
+    INTERPRET 'MoveSOF'
+    INTERPRET 'Find "' || restore || '"'
+  END
+  RETURN
+
+NoteResult: PROCEDURE EXPOSE host okcount failed RC RESULT
+  label = ARG(1)
+  value = ARG(2)
+  IF value = '' | UPPER(value) = 'RESULT' THEN
+    CALL PutLine 'NOTE ' || label || ' RESULT=(empty)'
+  ELSE
+    CALL PutLine 'NOTE ' || label || ' RESULT=[' || value || ']'
+  RETURN

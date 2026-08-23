@@ -11,6 +11,7 @@
 
 #include "ttx_texteditor.h"
 #include "ttx_input.h"
+#include "ttx_prefs.h"
 #include "ttx.h"
 
 #include <devices/inputevent.h>
@@ -137,14 +138,18 @@ TTX_TE_HandleMouse(
 	TTX_TE_ApplyCursor(session, newCursorX, newCursorY);
 
 	if (isPress) {
-		data->mouseSelecting = TRUE;
-		session->mouseSelecting = TRUE;
+		data->mouseSelecting = FALSE;
+		session->mouseSelecting = FALSE;
 		session->selectStartX = view->cursorX;
 		session->selectStartY = view->cursorY;
-		/* Anchor = current caret (same as pre-refactor SetMarking). */
-		TTX_ApplyMarking(session,
-			session->selectStartY, session->selectStartX,
-			view->cursorY, view->cursorX);
+		/* Prefs: Select When Dragging enables MarkBlk on press/drag. */
+		if (TTX_PrefsGet()->selectWhenDragging) {
+			data->mouseSelecting = TRUE;
+			session->mouseSelecting = TRUE;
+			TTX_ApplyMarking(session,
+				session->selectStartY, session->selectStartX,
+				view->cursorY, view->cursorX);
+		}
 	} else if (data->mouseSelecting) {
 		TTX_ApplyMarking(session,
 			session->selectStartY, session->selectStartX,

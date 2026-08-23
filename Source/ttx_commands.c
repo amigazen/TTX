@@ -8,6 +8,8 @@
 #include "ttx_driver.h"
 #include "ttx_commands_prot.h"
 #include "ttx_menu_builtin.h"
+#include "ttx_reqsui.h"
+#include "ttx_prefs.h"
 #include "ttx_input.h"
 #include "ttx.h"
 
@@ -724,7 +726,24 @@ static BOOL GetCommandFromMenuPick(ULONG menuNumber, ULONG itemNumber, STRPTR *o
         }
         return TRUE;
     }
-    /* Menu 7: Prefs — stub */
+    /* Menu 7: Prefs — matches TTX_BuiltIn.dfn */
+    else if (extractedMenu == 7) {
+        switch (extractedItem) {
+            case 0: /* Change... */
+                *outCommand = "OpenRequester";
+                if (outArgs && outArgCount) {
+                    outArgs[0] = "Prefs";
+                    *outArgCount = 1;
+                }
+                break;
+            case 2: *outCommand = "OpenPrefs"; break;
+            case 3: *outCommand = "SavePrefs"; break;
+            case 4: *outCommand = "SaveDefPrefs"; break;
+            case 6: *outCommand = "OpenDefinitions"; break;
+            default: return FALSE;
+        }
+        return TRUE;
+    }
     else {
         return FALSE;
     }
@@ -769,6 +788,28 @@ BOOL TTX_HandleMenuPick(struct TTXApplication *app, struct Session *session, ULO
     return result;
 }
 
+/* Active definitions path for menu/key DFN (OpenDefinitions updates this). */
+static TEXT TTX_DefinitionsPath[256] = "PROGDIR:Support/TTX_BuiltIn.dfn";
+
+VOID TTX_SetDefinitionsPath(STRPTR path)
+{
+	ULONG i;
+
+	if (!path || path[0] == '\0')
+		return;
+	i = 0;
+	while (path[i] != '\0' && i < (sizeof(TTX_DefinitionsPath) - 1UL)) {
+		TTX_DefinitionsPath[i] = path[i];
+		i++;
+	}
+	TTX_DefinitionsPath[i] = '\0';
+}
+
+STRPTR TTX_GetDefinitionsPath(VOID)
+{
+	return TTX_DefinitionsPath;
+}
+
 /* Create menu strip matching DFN file structure */
 BOOL TTX_CreateMenuStrip(struct Session *session)
 {
@@ -778,12 +819,14 @@ BOOL TTX_CreateMenuStrip(struct Session *session)
     struct NewMenu *dfnMenu = NULL;
     ULONG dfnMenuCount = 0;
     BOOL useDFN = FALSE;
-    static const STRPTR dfnPath = "PROGDIR:Support/TTX_BuiltIn.dfn";
+    STRPTR dfnPath;
     BPTR dfnLock = NULL;
     
     if (!session || !session->window) {
         return FALSE;
     }
+
+    dfnPath = TTX_DefinitionsPath;
     
     TTX_MenuTrace("TTX_CreateMenuStrip: START");
     
@@ -797,10 +840,10 @@ BOOL TTX_CreateMenuStrip(struct Session *session)
      * we never touch dos.library Open/parse when the file is absent.
      */
     SetIoErr(0);
-    dfnLock = Lock((STRPTR)dfnPath, ACCESS_READ);
+    dfnLock = Lock(dfnPath, ACCESS_READ);
     if (dfnLock) {
         UnLock(dfnLock);
-        dfn = ParseDFNFile((STRPTR)dfnPath);
+        dfn = ParseDFNFile(dfnPath);
         if (dfn) {
             TTX_MenuTrace("TTX_CreateMenuStrip: loaded DFN");
             useDFN = TRUE;
@@ -2356,35 +2399,82 @@ BOOL TTX_Cmd_MoveWindow(struct TTXApplication *app, struct Session *session, STR
 BOOL TTX_Cmd_OpenRequester(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
 	STRPTR which = NULL;
+	struct Window *win = NULL;
+	struct TTXFindOptions opts;
+	TEXT findBuf[256];
+	TEXT changeBuf[256];
+	LONG action = 0;
+	STRPTR fcArgs[2];
 
 	if (!args || argCount < 1 || !args[0]) {
 		Printf("[CMD] TTX_Cmd_OpenRequester: FAIL (need type)\n");
 		return FALSE;
 	}
 	which = args[0];
+	win = (session && session->window) ? session->window : NULL;
 
-	/* Full ASL/string requesters live in ttxreqs later; for Find we reuse last string. */
-	if (Stricmp(which, "Find") == 0) {
-		if (!TTX_LastFind) {
-			Printf("[CMD] OpenRequester Find: set search via ARexx Find \"text\" first\n");
-			DisplayBeep(NULL);
-			return FALSE;
+	opts.doPatterns = FALSE;
+	opts.ignoreAccents = FALSE;
+	opts.ignoreCase = TRUE;
+	opts.wholeWords = FALSE;
+	opts.scanBackwards = FALSE;
+
+	findBuf[0] = '\0';
+	changeBuf[0] = '\0';
+	if (TTX_LastFind) {
+		ULONG i = 0;
+		while (TTX_LastFind[i] && i < 255) {
+			findBuf[i] = TTX_LastFind[i];
+			i++;
 		}
-		return TTX_Cmd_Find(app, session, NULL, 0);
+		findBuf[i] = '\0';
+	}
+	if (TTX_LastReplace) {
+		ULONG i = 0;
+		while (TTX_LastReplace[i] && i < 255) {
+			changeBuf[i] = TTX_LastReplace[i];
+			i++;
+		}
+		changeBuf[i] = '\0';
+	}
+
+	if (Stricmp(which, "Find") == 0) {
+		if (!TTX_RequestFind(win, &opts, findBuf, sizeof(findBuf), &action))
+			return FALSE;
+		if (TTX_LastFind)
+			TTX_Free(TTX_LastFind);
+		TTX_LastFind = TTX_DupStr(findBuf);
+		fcArgs[0] = findBuf;
+		return TTX_Cmd_Find(app, session, fcArgs, 1);
 	}
 	if (Stricmp(which, "FindChange") == 0) {
-		STRPTR fcArgs[2];
-		if (!TTX_LastFind || !TTX_LastReplace) {
-			Printf("[CMD] OpenRequester FindChange: use ARexx FindChange first\n");
-			DisplayBeep(NULL);
+		if (!TTX_RequestFindChange(win, &opts, findBuf, changeBuf,
+			sizeof(findBuf), &action))
 			return FALSE;
-		}
-		fcArgs[0] = TTX_LastFind;
-		fcArgs[1] = TTX_LastReplace;
+		if (TTX_LastFind)
+			TTX_Free(TTX_LastFind);
+		if (TTX_LastReplace)
+			TTX_Free(TTX_LastReplace);
+		TTX_LastFind = TTX_DupStr(findBuf);
+		TTX_LastReplace = TTX_DupStr(changeBuf);
+		fcArgs[0] = findBuf;
+		fcArgs[1] = changeBuf;
+		if (action == 0)
+			return TTX_Cmd_Find(app, session, fcArgs, 1);
+		/* Change / Change All — engine FindChange replaces one match. */
 		return TTX_Cmd_FindChange(app, session, fcArgs, 2);
 	}
 	if (Stricmp(which, "Info") == 0) {
 		return TTX_Cmd_GetFileInfo(app, session, NULL, 0);
+	}
+	if (Stricmp(which, "Prefs") == 0) {
+		struct TTXPrefs edit;
+
+		edit = *TTX_PrefsGet();
+		if (!TTX_PrefsRequester(win, &edit))
+			return FALSE;
+		TTX_PrefsApply(app, session, &edit);
+		return TRUE;
 	}
 
 	Printf("[CMD] TTX_Cmd_OpenRequester: type '%s' not implemented\n", which);
@@ -3090,32 +3180,100 @@ BOOL TTX_Cmd_GetCursorPos(struct TTXApplication *app, struct Session *session, S
 
 BOOL TTX_Cmd_Move(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-	return TTX_DoEngineCommand(app, session, "Move", args, argCount);
+	STRPTR useArgs[2];
+	TEXT numBuf[32];
+	LONG lineNum;
+	struct Window *win;
+
+	useArgs[0] = NULL;
+	useArgs[1] = NULL;
+	numBuf[0] = '\0';
+	lineNum = 1;
+	win = (session && session->window) ? session->window : NULL;
+
+	if (args && argCount > 0 && args[0])
+		return TTX_DoEngineCommand(app, session, "Move", args, argCount);
+
+	/* Go To Line... — prompt when no args (menu / bare Move). */
+	if (TT_SessionBuffer(session) && TTX_SessionView(session))
+		lineNum = (LONG)TTX_SessionView(session)->cursorY + 1;
+	if (!TTX_RequestNum(win, (STRPTR)"Go To Line", lineNum, TRUE, &lineNum))
+		return FALSE;
+	sprintf(numBuf, "%ld", (long)lineNum);
+	useArgs[0] = numBuf;
+	return TTX_DoEngineCommand(app, session, "Move", useArgs, 1);
 }
 
 
 BOOL TTX_Cmd_MoveChar(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    LONG count = 1;
-    
-    if (!session || !TT_SessionBuffer(session)) {
-        return FALSE;
-    }
-    
-    /* Parse count from args */
-    if (args && argCount > 0) {
-        /* TODO: Parse numeric - for now use 1 */
-        count = 1;
-    }
-    
-    /* Move cursor by count characters (positive = right, negative = left) */
-    if (count > 0) {
-        return TTX_Cmd_MoveRight(app, session, args, argCount);
-    } else if (count < 0) {
-        return TTX_Cmd_MoveLeft(app, session, args, argCount);
-    }
-    
-    return TRUE;
+	LONG count;
+	struct Window *win;
+	TEXT numBuf[32];
+	STRPTR useArgs[1];
+	ULONG i;
+
+	count = 1;
+	win = (session && session->window) ? session->window : NULL;
+
+	if (!session || !TT_SessionBuffer(session))
+		return FALSE;
+
+	if (args && argCount > 0 && args[0]) {
+		count = 0;
+		{
+			STRPTR s = args[0];
+			LONG sign = 1;
+			if (*s == '-') {
+				sign = -1;
+				s++;
+			}
+			while (*s >= '0' && *s <= '9') {
+				count = count * 10 + (*s - '0');
+				s++;
+			}
+			count *= sign;
+		}
+	} else {
+		/* Go To Char... */
+		if (TTX_SessionView(session))
+			count = (LONG)TTX_SessionView(session)->cursorX + 1;
+		if (!TTX_RequestNum(win, (STRPTR)"Go To Char", count, TRUE, &count))
+			return FALSE;
+		sprintf(numBuf, "%ld", (long)count);
+		useArgs[0] = numBuf;
+		/* Absolute column on current line via Move line,col */
+		{
+			STRPTR mvArgs[2];
+			TEXT lineBuf[32];
+			LONG lineNum;
+
+			lineNum = 1;
+			if (TTX_SessionView(session))
+				lineNum = (LONG)TTX_SessionView(session)->cursorY + 1;
+			sprintf(lineBuf, "%ld", (long)lineNum);
+			mvArgs[0] = lineBuf;
+			mvArgs[1] = numBuf;
+			return TTX_DoEngineCommand(app, session, "Move", mvArgs, 2);
+		}
+	}
+
+	if (count > 0) {
+		for (i = 0; i < (ULONG)count; i++) {
+			if (!TTX_Cmd_MoveRight(app, session, NULL, 0))
+				break;
+		}
+		return TRUE;
+	}
+	if (count < 0) {
+		count = -count;
+		for (i = 0; i < (ULONG)count; i++) {
+			if (!TTX_Cmd_MoveLeft(app, session, NULL, 0))
+				break;
+		}
+		return TRUE;
+	}
+	return TRUE;
 }
 
 BOOL TTX_Cmd_MoveDown(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -3987,44 +4145,216 @@ BOOL TTX_Cmd_ExecTool(struct TTXApplication *app, struct Session *session, STRPT
 
 BOOL TTX_Cmd_GetPrefs(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Return preferences for ARexx */
-    Printf("[CMD] TTX_Cmd_GetPrefs: not yet implemented\n");
-    return FALSE;
+	struct TTXPrefs *p;
+	STRPTR name;
+	TEXT buf[32];
+
+	(void)session;
+	p = TTX_PrefsGet();
+	name = (args && argCount > 0 && args[0]) ? args[0] : NULL;
+	if (!name) {
+		TTX_ArexxSetResult(app, (STRPTR)"");
+		return FALSE;
+	}
+	buf[0] = '\0';
+	if (Stricmp(name, "Overstrike") == 0)
+		strcpy(buf, p->overstrike ? "ON" : "OFF");
+	else if (Stricmp(name, "FreeForm") == 0)
+		strcpy(buf, p->freeForm ? "ON" : "OFF");
+	else if (Stricmp(name, "AutoIndent") == 0 ||
+		 Stricmp(name, "AutoIndentNewLines") == 0)
+		strcpy(buf, p->autoIndentNewLines ? "ON" : "OFF");
+	else if (Stricmp(name, "WordWrap") == 0)
+		strcpy(buf, p->wordWrap ? "ON" : "OFF");
+	else if (Stricmp(name, "LineWrap") == 0)
+		strcpy(buf, p->lineWrap ? "ON" : "OFF");
+	else if (Stricmp(name, "SelectWhenDragging") == 0)
+		strcpy(buf, p->selectWhenDragging ? "ON" : "OFF");
+	else if (Stricmp(name, "AutoCorrectWordCase") == 0)
+		strcpy(buf, p->autoCorrectWordCase ? "ON" : "OFF");
+	else if (Stricmp(name, "AutoEraseSelectedBlocks") == 0)
+		strcpy(buf, p->autoEraseSelectedBlocks ? "ON" : "OFF");
+	else if (Stricmp(name, "ExpandTabs") == 0)
+		strcpy(buf, p->expandTabs ? "ON" : "OFF");
+	else if (Stricmp(name, "TabWidth") == 0)
+		sprintf(buf, "%lu", (unsigned long)p->tabWidth);
+	else if (Stricmp(name, "RightMargin") == 0)
+		sprintf(buf, "%lu", (unsigned long)p->rightMargin);
+	else {
+		TTX_ArexxSetResult(app, (STRPTR)"");
+		return FALSE;
+	}
+	TTX_ArexxSetResult(app, buf);
+	return TRUE;
 }
 
 BOOL TTX_Cmd_OpenDefinitions(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Open definition file */
-    Printf("[CMD] TTX_Cmd_OpenDefinitions: not yet implemented\n");
-    return FALSE;
+	STRPTR path;
+	struct Window *win;
+	struct Session *s;
+	BPTR lock;
+	BOOL owned;
+
+	win = (session && session->window) ? session->window : NULL;
+	path = (args && argCount > 0 && args[0]) ? args[0] : NULL;
+	owned = FALSE;
+	if (!path) {
+		path = TTX_RequestFile(win, (STRPTR)"Open Definitions", FALSE,
+			(STRPTR)"TTX_BuiltIn.dfn", (STRPTR)"PROGDIR:Support");
+		if (!path)
+			return FALSE;
+		owned = TRUE;
+	}
+	lock = Lock(path, ACCESS_READ);
+	if (!lock) {
+		if (owned)
+			TTX_Free(path);
+		return FALSE;
+	}
+	UnLock(lock);
+	TTX_SetDefinitionsPath(path);
+	if (owned)
+		TTX_Free(path);
+
+	/* Rebuild menus for every open window. */
+	for (s = app ? app->sessions : NULL; s; s = s->next) {
+		if (!s->window)
+			continue;
+		TTX_FreeMenuStrip(s);
+		TTX_CreateMenuStrip(s);
+	}
+	return TRUE;
 }
 
 BOOL TTX_Cmd_OpenPrefs(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Open preferences requester */
-    Printf("[CMD] TTX_Cmd_OpenPrefs: not yet implemented\n");
-    return FALSE;
-}
+	STRPTR path;
+	struct Window *win;
+	struct TTXPrefs loaded;
+	BOOL owned;
 
-BOOL TTX_Cmd_SaveDefPrefs(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
-{
-    /* TODO: Save default preferences */
-    Printf("[CMD] TTX_Cmd_SaveDefPrefs: not yet implemented\n");
-    return FALSE;
+	win = (session && session->window) ? session->window : NULL;
+	path = (args && argCount > 0 && args[0]) ? args[0] : NULL;
+	owned = FALSE;
+	if (!path) {
+		path = TTX_RequestFile(win, (STRPTR)"Open Prefs", FALSE,
+			(STRPTR)"TTX.prefs", NULL);
+		if (!path)
+			return FALSE;
+		owned = TRUE;
+	}
+	if (!TTX_PrefsLoad(&loaded, path)) {
+		if (owned)
+			TTX_Free(path);
+		return FALSE;
+	}
+	if (owned)
+		TTX_Free(path);
+	TTX_PrefsApply(app, session, &loaded);
+	return TRUE;
 }
 
 BOOL TTX_Cmd_SavePrefs(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Save preferences */
-    Printf("[CMD] TTX_Cmd_SavePrefs: not yet implemented\n");
-    return FALSE;
+	STRPTR path;
+	struct Window *win;
+	BOOL owned;
+
+	(void)app;
+	(void)argCount;
+	win = (session && session->window) ? session->window : NULL;
+	path = (args && args[0]) ? args[0] : NULL;
+	owned = FALSE;
+	if (!path) {
+		path = TTX_RequestFile(win, (STRPTR)"Save Prefs As", TRUE,
+			(STRPTR)"TTX.prefs", NULL);
+		if (!path)
+			return FALSE;
+		owned = TRUE;
+	}
+	if (!TTX_PrefsSave(TTX_PrefsGet(), path)) {
+		if (owned)
+			TTX_Free(path);
+		return FALSE;
+	}
+	if (owned)
+		TTX_Free(path);
+	return TRUE;
+}
+
+BOOL TTX_Cmd_SaveDefPrefs(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
+{
+	(void)app;
+	(void)session;
+	(void)args;
+	(void)argCount;
+	return TTX_PrefsSave(TTX_PrefsGet(), (STRPTR)"PROGDIR:TTX.prefs");
 }
 
 BOOL TTX_Cmd_SetPrefs(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Set preferences */
-    Printf("[CMD] TTX_Cmd_SetPrefs: not yet implemented\n");
-    return FALSE;
+	struct TTXPrefs *p;
+	STRPTR name;
+	STRPTR mode;
+	BOOL *flag;
+	BOOL newVal;
+	LONG n;
+
+	p = TTX_PrefsGet();
+	name = (args && argCount > 0 && args[0]) ? args[0] : NULL;
+	mode = (args && argCount > 1 && args[1]) ? args[1] : (STRPTR)"Toggle";
+	if (!name)
+		return FALSE;
+
+	flag = NULL;
+	if (Stricmp(name, "Overstrike") == 0)
+		flag = &p->overstrike;
+	else if (Stricmp(name, "FreeForm") == 0)
+		flag = &p->freeForm;
+	else if (Stricmp(name, "AutoIndent") == 0 ||
+		 Stricmp(name, "AutoIndentNewLines") == 0)
+		flag = &p->autoIndentNewLines;
+	else if (Stricmp(name, "WordWrap") == 0)
+		flag = &p->wordWrap;
+	else if (Stricmp(name, "LineWrap") == 0)
+		flag = &p->lineWrap;
+	else if (Stricmp(name, "SelectWhenDragging") == 0)
+		flag = &p->selectWhenDragging;
+	else if (Stricmp(name, "AutoCorrectWordCase") == 0)
+		flag = &p->autoCorrectWordCase;
+	else if (Stricmp(name, "AutoEraseSelectedBlocks") == 0)
+		flag = &p->autoEraseSelectedBlocks;
+	else if (Stricmp(name, "ExpandTabs") == 0)
+		flag = &p->expandTabs;
+	else if (Stricmp(name, "TabWidth") == 0) {
+		n = (LONG)p->tabWidth;
+		if (mode && StrToLong(mode, &n) && n > 0)
+			p->tabWidth = (ULONG)n;
+		TTX_PrefsApply(app, session, p);
+		return TRUE;
+	} else if (Stricmp(name, "RightMargin") == 0) {
+		n = (LONG)p->rightMargin;
+		if (mode && StrToLong(mode, &n) && n > 0)
+			p->rightMargin = (ULONG)n;
+		TTX_PrefsApply(app, session, p);
+		return TRUE;
+	} else
+		return FALSE;
+
+	if (Stricmp(mode, "Toggle") == 0)
+		newVal = (BOOL)(!*flag);
+	else if (Stricmp(mode, "ON") == 0 || Stricmp(mode, "YES") == 0 ||
+		 Stricmp(mode, "TRUE") == 0)
+		newVal = TRUE;
+	else if (Stricmp(mode, "OFF") == 0 || Stricmp(mode, "NO") == 0 ||
+		 Stricmp(mode, "FALSE") == 0)
+		newVal = FALSE;
+	else
+		return FALSE;
+	*flag = newVal;
+	TTX_PrefsApply(app, session, p);
+	return TRUE;
 }
 
 /* ============================================================================
@@ -4033,37 +4363,119 @@ BOOL TTX_Cmd_SetPrefs(struct TTXApplication *app, struct Session *session, STRPT
 
 BOOL TTX_Cmd_RequestBool(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Show boolean requester for ARexx */
-    Printf("[CMD] TTX_Cmd_RequestBool: not yet implemented\n");
-    return FALSE;
+	STRPTR title;
+	STRPTR prompt;
+	struct Window *win;
+	BOOL yes;
+
+	title = (args && argCount > 0 && args[0]) ? args[0] : (STRPTR)"TTX";
+	prompt = (args && argCount > 1 && args[1]) ? args[1] : (STRPTR)"OK?";
+	win = (session && session->window) ? session->window : NULL;
+	yes = TTX_RequestBool(win, title, prompt);
+	TTX_ArexxSetResult(app, yes ? (STRPTR)"YES" : (STRPTR)"NO");
+	return TRUE;
 }
 
 BOOL TTX_Cmd_RequestChoice(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Show choice requester for ARexx */
-    Printf("[CMD] TTX_Cmd_RequestChoice: not yet implemented\n");
-    return FALSE;
+	STRPTR title;
+	STRPTR prompt;
+	STRPTR gadgets;
+	struct Window *win;
+	LONG choice;
+	TEXT buf[16];
+
+	title = (args && argCount > 0 && args[0]) ? args[0] : (STRPTR)"TTX";
+	prompt = (args && argCount > 1 && args[1]) ? args[1] : (STRPTR)"?";
+	gadgets = (args && argCount > 2 && args[2]) ? args[2] : (STRPTR)"OK|Cancel";
+	win = (session && session->window) ? session->window : NULL;
+	choice = TTX_RequestChoice(win, title, prompt, gadgets);
+	sprintf(buf, "%ld", (long)choice);
+	TTX_ArexxSetResult(app, buf);
+	return (choice != 0) ? TRUE : FALSE;
 }
 
 BOOL TTX_Cmd_RequestFile(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Show file requester for ARexx */
-    Printf("[CMD] TTX_Cmd_RequestFile: not yet implemented\n");
-    return FALSE;
+	struct Window *win;
+	STRPTR path;
+	STRPTR title;
+
+	(void)argCount;
+	title = (args && args[0]) ? args[0] : (STRPTR)"Select File";
+	win = (session && session->window) ? session->window : NULL;
+	path = TTX_RequestFile(win, title, FALSE, NULL, NULL);
+	if (!path) {
+		TTX_ArexxSetResult(app, (STRPTR)"");
+		return FALSE;
+	}
+	TTX_ArexxSetResult(app, path);
+	TTX_Free(path);
+	return TRUE;
 }
 
 BOOL TTX_Cmd_RequestNum(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Show numeric requester for ARexx */
-    Printf("[CMD] TTX_Cmd_RequestNum: not yet implemented\n");
-    return FALSE;
+	struct Window *win;
+	STRPTR title;
+	LONG defVal;
+	LONG val;
+	BOOL positiveOnly;
+	TEXT buf[32];
+	ULONG i;
+
+	title = (STRPTR)"TTX";
+	defVal = 0;
+	positiveOnly = FALSE;
+	win = (session && session->window) ? session->window : NULL;
+
+	for (i = 0; args && i < argCount; i++) {
+		if (!args[i])
+			continue;
+		if (Stricmp(args[i], "POSITIVE") == 0)
+			positiveOnly = TRUE;
+		else if (Stricmp(args[i], "DEFAULT") == 0 && (i + 1) < argCount) {
+			StrToLong(args[i + 1], &defVal);
+			i++;
+		} else
+			title = args[i];
+	}
+
+	if (!TTX_RequestNum(win, title, defVal, positiveOnly, &val))
+		return FALSE;
+	sprintf(buf, "%ld", (long)val);
+	TTX_ArexxSetResult(app, buf);
+	return TRUE;
 }
 
 BOOL TTX_Cmd_RequestStr(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Show string requester for ARexx */
-    Printf("[CMD] TTX_Cmd_RequestStr: not yet implemented\n");
-    return FALSE;
+	struct Window *win;
+	STRPTR title;
+	STRPTR defStr;
+	STRPTR result;
+	ULONG i;
+
+	title = (STRPTR)"TTX";
+	defStr = (STRPTR)"";
+	win = (session && session->window) ? session->window : NULL;
+
+	for (i = 0; args && i < argCount; i++) {
+		if (!args[i])
+			continue;
+		if (Stricmp(args[i], "PROMPT") == 0 && (i + 1) < argCount) {
+			title = args[i + 1];
+			i++;
+		} else
+			defStr = args[i];
+	}
+
+	if (!TTX_RequestStr(win, title, defStr, &result))
+		return FALSE;
+	TTX_ArexxSetResult(app, result ? result : (STRPTR)"");
+	if (result)
+		TTX_Free(result);
+	return TRUE;
 }
 
 /* ============================================================================

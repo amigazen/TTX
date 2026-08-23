@@ -9,6 +9,7 @@
 #include "ttx_boopsi.h"
 #include "ttx_intui.h"
 #include "ttx_texteditor.h"
+#include "ttx_prefs.h"
 #include "ttx.h"
 
 #include <exec/tasks.h>
@@ -1995,6 +1996,14 @@ BOOL TTX_Init(struct TTXApplication *app) {
   /* Optional ARexx host (ADDRESS TURBOTEXT) for exercise scripts */
   TTX_ArexxInit(app);
 
+  /* Load default prefs if present (Open Prefs / Save As Defaults path). */
+  {
+    struct TTXPrefs *prefs;
+
+    prefs = TTX_PrefsGet();
+    (void)TTX_PrefsLoad(prefs, (STRPTR)"PROGDIR:TTX.prefs");
+  }
+
   /* COMMENTED OUT: Commodities disabled
   // Setup commodity if available
   if (CxBase) {
@@ -2364,6 +2373,15 @@ int main(int argc, char *argv[]) {
 
   /* Open documents via turbotext.library (original TTX driver model) */
   if (parseResult && !ttxArgs.background) {
+    if (ttxArgs.settings) {
+      struct TTXPrefs loaded;
+
+      if (TTX_PrefsLoad(&loaded, ttxArgs.settings))
+        TTX_PrefsApply(&app, NULL, &loaded);
+    }
+    if (ttxArgs.definitions)
+      TTX_SetDefinitionsPath(ttxArgs.definitions);
+
     if (TTX_RunWithArgs(&app, &ttxArgs) < 0) {
       LONG errorCode = IoErr();
       if (errorCode != 0) {

@@ -12,7 +12,19 @@ extern "C" {
 
 #include <libraries/ttxreqs.h>
 
-/* No public LVOs yet. */
+BOOL TR_RequestBool(struct Window * parent, STRPTR title, STRPTR prompt);
+LONG TR_RequestChoice(struct Window * parent, STRPTR title, STRPTR prompt, STRPTR gadgets);
+BOOL TR_RequestStr(struct Window * parent, STRPTR title, STRPTR defStr, STRPTR * outStr);
+BOOL TR_RequestNum(struct Window * parent, STRPTR title, LONG defVal, BOOL positiveOnly, LONG * outNum);
+STRPTR TR_RequestFile(struct Window * parent, STRPTR title, BOOL saveMode, STRPTR initialFile, STRPTR initialDrawer);
+BOOL TR_RequestFind(struct Window * parent, struct TRFindOptions * opts, STRPTR findBuf, ULONG bufLen, LONG * action);
+BOOL TR_RequestFindChange(struct Window * parent, struct TRFindOptions * opts, STRPTR findBuf, STRPTR changeBuf, ULONG bufLen, LONG * action);
+VOID TR_PrefsSetDefaults(struct TRPrefs * p);
+struct TRPrefs * TR_PrefsGet(VOID);
+VOID TR_PrefsSet(struct TRPrefs * p);
+BOOL TR_PrefsLoad(struct TRPrefs * p, STRPTR path);
+BOOL TR_PrefsSave(struct TRPrefs * p, STRPTR path);
+BOOL TR_PrefsRequester(struct Window * parent, struct TRPrefs * p);
 
 #ifdef __cplusplus
 }

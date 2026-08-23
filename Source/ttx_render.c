@@ -7,6 +7,7 @@
 
 #include "ttx_driver.h"
 #include "ttx_boopsi.h"
+#include "ttx_prefs.h"
 
 #define BUF(s) ((s) && (s)->document ? &((s)->document->buffer) : NULL)
 
@@ -42,7 +43,12 @@ ULONG GetLineHeight(struct RastPort *rp) {
 ULONG
 TTX_TabWidth(struct TTTextBuffer *buffer)
 {
+  struct TTXPrefs *p;
+
   (void)buffer;
+  p = TTX_PrefsGet();
+  if (p && p->tabWidth > 0)
+    return p->tabWidth;
   return TT_DEFAULT_TAB_WIDTH;
 }
 

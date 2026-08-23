@@ -16,7 +16,12 @@ CFLAGS = resopt idlen=64 comnest streq strmerge nostkchk \
 	stringsconst nostartup
 LFLAGS = addsym smallcode smalldata noicons batch stripdebug
 
-OBJS = StartUp.o LibInit.o
+OBJS = \
+	StartUp.o \
+	LibInit.o \
+	tr_mem.o \
+	tr_reqsui.o \
+	tr_prefs.o
 
 all: $(NAME)
 
@@ -29,5 +34,14 @@ clean:
 LibInit.o: LibInit.c compiler.h private/tr_build.h Rev.h
 	Sc $(CFLAGS) DEF TR_SHARED_LIB UTILLIB OBJNAME $@ LibInit.c
 
-StartUp.o: StartUp.c compiler.h private/tr_build.h
+StartUp.o: StartUp.c compiler.h private/tr_build.h tr_funcs.h
 	Sc $(CFLAGS) DEF TR_SHARED_LIB UTILLIB OBJNAME $@ StartUp.c
+
+tr_mem.o: tr_mem.c private/tr_internal.h
+	Sc $(CFLAGS) DEF TR_SHARED_LIB UTILLIB OBJNAME $@ tr_mem.c
+
+tr_reqsui.o: tr_reqsui.c private/tr_internal.h tr_funcs.h
+	Sc $(CFLAGS) DEF TR_SHARED_LIB UTILLIB OBJNAME $@ tr_reqsui.c
+
+tr_prefs.o: tr_prefs.c private/tr_internal.h tr_funcs.h
+	Sc $(CFLAGS) DEF TR_SHARED_LIB UTILLIB OBJNAME $@ tr_prefs.c
