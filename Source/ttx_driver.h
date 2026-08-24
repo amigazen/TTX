@@ -177,6 +177,9 @@ struct Session {
 	/* Screen-title status bar (SetStatusBar / live L# C#). */
 	STRPTR statusBarText;
 	BOOL statusBarTemporary;
+	/* Display/input locks (SetDisplayLock / SetInputLock). */
+	BOOL displayLock;
+	BOOL inputLock;
 };
 
 #define TTX_DEFER_NONE            0
@@ -198,6 +201,14 @@ struct TTXApplication {
 	struct Session *previousSession;
 	BOOL running;
 	BOOL backgroundMode;
+	/* ARexx macro cache flag (real cache deferred; NOCACHE honored). */
+	BOOL arexxCacheOn;
+	/* One-shot / sticky keyboard emulation flags. */
+	BOOL quoteMode;
+	BOOL metaPending;
+	BOOL meta2Pending;
+	BOOL modePending;
+	BOOL mode2Pending;
 	ULONG signals;
 	ULONG sigmask;
 	struct MsgPort *appIconPort;
@@ -302,6 +313,8 @@ BOOL TTX_ArexxExec(struct TTXApplication *app, STRPTR command, BOOL isString,
 	BOOL console);
 VOID TTX_SessionInitCurrentDir(struct Session *session, STRPTR fileName);
 BOOL TTX_SessionSetCurrentDir(struct Session *session, STRPTR path);
+/* ON/OFF/TOGGLE helper: updates *flag; returns TRUE if args parsed OK. */
+BOOL TTX_ParseOnOffToggle(STRPTR *args, ULONG argCount, BOOL *flag);
 BOOL TTX_HandleCommandLine(
 	struct TTXApplication *app,
 	struct Session *session,
@@ -381,6 +394,9 @@ BOOL TTX_DFNCommandFromUserData(
 	STRPTR *outCommand,
 	STRPTR **outArgs,
 	ULONG *outArgCount);
+
+/* Push DFN DICTIONARY/TEMPLATES lists into turbotext.library aux tables. */
+VOID TTX_DFNPushAuxToEngine(struct Session *session);
 
 /****************************************************************************/
 

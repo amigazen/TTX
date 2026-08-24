@@ -21,8 +21,6 @@
 #include <proto/gadtools.h>
 #include <proto/asl.h>
 #include <proto/dos.h>
-#include <string.h>
-#include <stdio.h>
 
 #define GID_OK        1
 #define GID_CANCEL    2
@@ -65,6 +63,39 @@ TR_UICopy(STRPTR dst, ULONG dstLen, STRPTR src)
 		i++;
 	}
 	dst[i] = '\0';
+}
+
+static VOID
+TR_UIFormatLong(STRPTR dst, ULONG dstLen, LONG val)
+{
+	TEXT tmp[16];
+	ULONG digits = 0;
+	ULONG pos = 0;
+	ULONG v = 0;
+	BOOL neg = FALSE;
+
+	if (!dst || dstLen == 0)
+		return;
+	dst[0] = '\0';
+	if (val < 0) {
+		neg = TRUE;
+		v = (ULONG)(-val);
+	} else {
+		v = (ULONG)val;
+	}
+	if (v == 0)
+		tmp[digits++] = '0';
+	else {
+		while (v > 0 && digits < 15) {
+			tmp[digits++] = (TEXT)('0' + (v % 10));
+			v /= 10;
+		}
+	}
+	if (neg && pos < dstLen - 1)
+		dst[pos++] = '-';
+	while (digits > 0 && pos < dstLen - 1)
+		dst[pos++] = tmp[--digits];
+	dst[pos] = '\0';
 }
 
 /****************************************************************************/
@@ -409,7 +440,7 @@ TR_UIEditWindow(
 				num = -num;
 			if (outNum)
 				*outNum = num;
-			sprintf(outBuf, "%ld", (long)num);
+			TR_UIFormatLong(outBuf, outLen, num);
 		} else {
 			s = NULL;
 			GT_GetGadgetAttrs(editGad, win, NULL,

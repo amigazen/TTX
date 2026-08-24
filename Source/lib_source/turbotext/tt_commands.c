@@ -75,6 +75,9 @@ TT_DoCommandI(
 		return FALSE;
 	}
 
+	TT_ClearStringResult();
+	TT_SetLastError(TTERR_NONE);
+
 	if (!view)
 		view = doc->activeView;
 
@@ -153,6 +156,10 @@ TT_HandleEngineCommand(
 		doc->state.modified = TRUE;
 		return TRUE;
 	}
+
+	/* Text is an alias for Insert. */
+	if (Stricmp(command, "Text") == 0 && argCount > 0 && args[0])
+		return TT_HandleEngineCommand(doc, view, (STRPTR)"Insert", args, argCount);
 	if (Stricmp(command, "InsertLine") == 0)
 	{
 		BOOL doIndent;
@@ -268,7 +275,8 @@ TT_HandleEngineCommand(
 			}
 		}
 		doc->state.modified = TT_DeleteEOL(buf);
-		return doc->state.modified;
+		/* Always succeed: empty EOL delete is a no-op, not unknown. */
+		return TRUE;
 	}
 	if (Stricmp(command, "DeleteEOW") == 0)
 	{
@@ -369,6 +377,26 @@ TT_HandleEngineCommand(
 		return TT_MoveStartOfLine(buf);
 	if (Stricmp(command, "MoveEOL") == 0)
 		return TT_MoveEndOfLine(buf);
+	if (Stricmp(command, "MoveSOF") == 0)
+	{
+		buf->cursorY = 0;
+		buf->cursorX = 0;
+		return TRUE;
+	}
+	if (Stricmp(command, "MoveEOF") == 0)
+	{
+		if (buf->lineCount > 0)
+		{
+			buf->cursorY = buf->lineCount - 1;
+			buf->cursorX = buf->lines[buf->cursorY].length;
+		}
+		else
+		{
+			buf->cursorY = 0;
+			buf->cursorX = 0;
+		}
+		return TRUE;
+	}
 	if (Stricmp(command, "MovePrevWord") == 0)
 	{
 		TT_MovePrevWord(buf);
@@ -517,14 +545,20 @@ TT_HandleEngineCommand(
 	}
 	if (Stricmp(command, "SaveFile") == 0)
 	{
-		if (doc->state.fileName)
+		/*
+		 * No path yet — leave UNKNOWN so the driver can run SaveAs/ASL.
+		 * A real I/O failure returns FALSE with lastError left non-UNKNOWN.
+		 */
+		if (!doc->state.fileName)
 		{
-			if (TT_SaveFile(doc->state.fileName, buf))
-			{
-				doc->state.modified = FALSE;
-				buf->modified = FALSE;
-				return TRUE;
-			}
+			TT_SetLastError(TTERR_UNKNOWN_COMMAND);
+			return FALSE;
+		}
+		if (TT_SaveFile(doc->state.fileName, buf))
+		{
+			doc->state.modified = FALSE;
+			buf->modified = FALSE;
+			return TRUE;
 		}
 		return FALSE;
 	}
@@ -1252,21 +1286,82 @@ TT_HandleEngineCommand(
 	}
 
 	/*
-	 * GetWord
-	 *
-	 * Returns TRUE when a word exists at the cursor; the engine has no
-	 * string-return channel so callers that need the actual text should
-	 * use TT_GetWordAtCursor() directly via the library API.  The
-	 * allocated string is freed immediately here.
+	 * GetWord / CorrectWord* / CompleteTemplate — see tt_aux.c.
+	 * String RESULT goes to TurboTextBase->lastStringResult.
 	 */
 	if (Stricmp(command, "GetWord") == 0)
+		return TT_Cmd_GetWord(buf);
+
+	if (Stricmp(command, "GetChar") == 0)
 	{
-		STRPTR word = TT_GetWordAtCursor(buf);
-		if (!word)
-			return FALSE;
-		TT_Free(word);
+		UBYTE ch = 0;
+		TEXT one[2];
+
+		ch = TT_GetCharAtCursor(buf);
+		one[0] = (TEXT)ch;
+		one[1] = '\0';
+		TT_SetStringResult(one);
 		return TRUE;
 	}
+
+	if (Stricmp(command, "GetLine") == 0)
+	{
+		STRPTR line = NULL;
+
+		line = TT_GetCurrentLine(buf);
+		if (!line) {
+			TT_SetStringResult((STRPTR)"");
+			return FALSE;
+		}
+		TT_SetStringResult(line);
+		TT_Free(line);
+		return TRUE;
+	}
+
+	if (Stricmp(command, "CorrectWord") == 0)
+		return TT_Cmd_CorrectWord(doc, buf, args, argCount);
+
+	if (Stricmp(command, "CorrectWordCase") == 0)
+		return TT_Cmd_CorrectWordCase(doc, buf, args, argCount);
+
+	if (Stricmp(command, "CompleteTemplate") == 0)
+		return TT_Cmd_CompleteTemplate(doc, view, buf, args, argCount);
+
+	if (Stricmp(command, "ClearAuxDefs") == 0)
+		return TT_Cmd_ClearAuxDefs();
+
+	if (Stricmp(command, "AddDictWord") == 0 && argCount > 0 && args[0])
+		return TT_Cmd_AddDictWord(args[0]);
+
+	if (Stricmp(command, "AddTemplate") == 0 && argCount > 0 && args[0])
+		return TT_Cmd_AddTemplate(args[0]);
+
+	if (Stricmp(command, "RecordMacro") == 0)
+		return TT_Cmd_RecordMacro(args, argCount);
+
+	if (Stricmp(command, "EndMacro") == 0)
+		return TT_Cmd_EndMacro();
+
+	if (Stricmp(command, "GetMacroInfo") == 0)
+		return TT_Cmd_GetMacroInfo();
+
+	if (Stricmp(command, "MacroAppend") == 0 && argCount > 0 && args[0])
+		return TT_Cmd_MacroAppend(args[0]);
+
+	if (Stricmp(command, "MacroClear") == 0)
+		return TT_Cmd_MacroClear();
+
+	if (Stricmp(command, "MacroLoadLine") == 0 && argCount > 0 && args[0])
+		return TT_Cmd_MacroLoadLine(args[0]);
+
+	if (Stricmp(command, "GetMacroLine") == 0)
+		return TT_Cmd_GetMacroLine(args, argCount);
+
+	if (Stricmp(command, "MacroPlayBegin") == 0)
+		return TT_Cmd_MacroPlayBegin();
+
+	if (Stricmp(command, "MacroPlayEnd") == 0)
+		return TT_Cmd_MacroPlayEnd();
 
 	/*
 	 * ReplaceWord args[0]=new-word

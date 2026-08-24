@@ -109,6 +109,10 @@ __ASM__ __SAVE_DS__ LibInit(
 		base->nextDocID = 1;
 		base->nextViewID = 1;
 		base->lastError = TTERR_NONE;
+		base->lastStringResult = NULL;
+		base->macroRecording = FALSE;
+		base->macroPlaying = FALSE;
+		base->macroCount = 0;
 		SegList = seglist;
 		TurboTextBase = base;
 	}
@@ -173,6 +177,9 @@ FreeLib(struct Library *lib)
 	{
 		while (base->documents)
 			TT_CloseDocumentI(base, base->documents);
+		TurboTextBase = base;
+		TT_AuxShutdown();
+		TurboTextBase = NULL;
 	}
 
 	TT_UIHooks = NULL;

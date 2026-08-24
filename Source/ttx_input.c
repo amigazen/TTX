@@ -438,6 +438,8 @@ TTX_InputVanillaKey(
 
 	if (!app || !session || !TT_SessionBuffer(session))
 		return FALSE;
+	if (session->inputLock)
+		return TRUE;
 	if (!session->document || session->document->state.readOnly)
 		return FALSE;
 
@@ -526,12 +528,18 @@ TTX_InputRawKey(
 	if (rawCode & 0x80)
 		return FALSE;
 
-	/*
-	 * DFN KEYBOARD / HOT_KEYS bindings (when a .dfn was loaded for menus)
-	 * override the built-in rawkey handlers below.
-	 */
-	if (TTX_DFNTryKeyCommand(app, session, rawCode, qualifier))
+	if (session->inputLock)
 		return TRUE;
+
+	/*
+	 * Quote mode: next key inserts as text and skips DFN command match.
+	 * DFN KEYBOARD / HOT_KEYS bindings otherwise override built-ins below.
+	 */
+	if (app->quoteMode) {
+		app->quoteMode = FALSE;
+	} else if (TTX_DFNTryKeyCommand(app, session, rawCode, qualifier)) {
+		return TRUE;
+	}
 
 	if (!session->document || session->document->state.readOnly)
 		return FALSE;

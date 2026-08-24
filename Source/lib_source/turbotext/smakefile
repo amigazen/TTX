@@ -34,6 +34,7 @@ OBJS = \
 	tt_document.o \
 	tt_run.o \
 	tt_commands.o \
+	tt_aux.o \
 	tt_text.o \
 	tt_block.o
 
@@ -83,6 +84,9 @@ tt_run.o: tt_run.c include/private/tt_internal.h include/libraries/turbotext.h
 
 tt_commands.o: tt_commands.c include/private/tt_internal.h include/libraries/turbotext.h
 	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ tt_commands.c
+
+tt_aux.o: tt_aux.c include/private/tt_internal.h include/libraries/turbotext.h
+	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ tt_aux.c
 
 tt_text.o: tt_text.c include/private/tt_internal.h include/libraries/turbotext.h
 	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ tt_text.c

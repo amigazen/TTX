@@ -49,23 +49,50 @@ struct DFNKeyBinding {
     struct DFNKeyBinding *next;
 };
 
+/* DICTIONARY: word */
+struct DFNDictWord {
+    STRPTR word;
+    struct DFNDictWord *next;
+};
+
+/* TEMPLATES: expansion string (may contain *n and @ / _) */
+struct DFNTemplate {
+    STRPTR text;
+    struct DFNTemplate *next;
+};
+
 /* Definition file structure */
 struct DFNFile {
     struct DFNMenu *menus;   /* List of menus */
     struct DFNKeyBinding *keys; /* KEYBOARD + HOT_KEYS bindings */
+    struct DFNDictWord *dict;
+    struct DFNTemplate *templates;
 };
+
+#define DFN_LINK_MAX_DEPTH 4
 
 /* Forward declarations */
 static VOID FreeDFNMenuEntry(struct DFNMenuEntry *entry);
 static VOID FreeDFNMenu(struct DFNMenu *menu);
 static VOID FreeDFNKeyBinding(struct DFNKeyBinding *kb);
+static VOID FreeDFNDictWord(struct DFNDictWord *w);
+static VOID FreeDFNTemplate(struct DFNTemplate *t);
 static STRPTR SkipWhitespace(STRPTR line);
 static STRPTR ExtractQuotedString(STRPTR line, STRPTR *outStr);
 static STRPTR ExtractToken(STRPTR line, STRPTR *outStr);
 static BOOL ParseMenuLine(STRPTR line, struct DFNMenuEntry *entry);
 static BOOL ParseDFNMenus(BPTR fileHandle, struct DFNFile *dfn);
 static BOOL ParseDFNKeys(BPTR fileHandle, struct DFNFile *dfn);
+static BOOL ParseDFNDictionary(BPTR fileHandle, struct DFNFile *dfn);
+static BOOL ParseDFNTemplates(BPTR fileHandle, struct DFNFile *dfn);
+static BOOL ParseDFNLinks(BPTR fileHandle, struct DFNFile *dfn, STRPTR parentPath, ULONG depth);
 static BOOL DFN_IsKeyword(STRPTR p, STRPTR word, ULONG wordLen);
+static struct DFNFile *ParseDFNFileDepth(STRPTR fileName, ULONG depth);
+static VOID DFN_AppendDict(struct DFNFile *dst, struct DFNFile *src);
+static VOID DFN_AppendTemplates(struct DFNFile *dst, struct DFNFile *src);
+static VOID DFN_ParentDrawer(STRPTR fileName, STRPTR out, ULONG outLen);
+static VOID DFN_ResolveLinkPath(STRPTR parentPath, STRPTR link, STRPTR out, ULONG outLen);
+static ULONG DFN_StrLen(STRPTR s);
 
 /* Free a menu entry and its allocated strings */
 static VOID FreeDFNMenuEntry(struct DFNMenuEntry *entry)
@@ -141,6 +168,35 @@ static VOID FreeDFNKeyBinding(struct DFNKeyBinding *kb)
         TTX_Free(kb->args);
     }
     TTX_Free(kb);
+}
+
+static VOID FreeDFNDictWord(struct DFNDictWord *w)
+{
+    if (!w)
+        return;
+    if (w->word)
+        TTX_Free(w->word);
+    TTX_Free(w);
+}
+
+static VOID FreeDFNTemplate(struct DFNTemplate *t)
+{
+    if (!t)
+        return;
+    if (t->text)
+        TTX_Free(t->text);
+    TTX_Free(t);
+}
+
+static ULONG DFN_StrLen(STRPTR s)
+{
+    ULONG n = 0;
+
+    if (!s)
+        return 0;
+    while (s[n] != '\0')
+        n++;
+    return n;
 }
 
 /* Skip whitespace at the start of a line */
@@ -546,26 +602,27 @@ static BOOL ParseDFNMenus(BPTR fileHandle, struct DFNFile *dfn)
 /* Parse a .dfn file and return a DFNFile structure */
 struct DFNFile *ParseDFNFile(STRPTR fileName)
 {
+    return ParseDFNFileDepth(fileName, 0);
+}
+
+static struct DFNFile *ParseDFNFileDepth(STRPTR fileName, ULONG depth)
+{
     BPTR fileHandle;
     struct DFNFile *dfn;
-    
-    if (!fileName) {
+
+    if (!fileName)
         return NULL;
-    }
-    
-    /* Open file */
+
     fileHandle = Open(fileName, MODE_OLDFILE);
     if (!fileHandle)
         return NULL;
-    
-    /* Allocate DFN structure */
+
     dfn = (struct DFNFile *)TTX_Alloc(sizeof(struct DFNFile), MEMF_CLEAR);
     if (!dfn) {
         Close(fileHandle);
         return NULL;
     }
-    
-    /* Parse MENUS section */
+
     if (!ParseDFNMenus(fileHandle, dfn)) {
         Printf("[DFN] ParseDFNFile: failed to parse MENUS section\n");
         FreeDFNFile(dfn);
@@ -573,15 +630,24 @@ struct DFNFile *ParseDFNFile(STRPTR fileName)
         return NULL;
     }
 
-    /* Re-scan from start for KEYBOARD: / HOT_KEYS: (menus parser stops early). */
     if (Seek(fileHandle, 0, OFFSET_BEGINNING) >= 0) {
-        if (!ParseDFNKeys(fileHandle, dfn)) {
+        if (!ParseDFNKeys(fileHandle, dfn))
             Printf("[DFN] ParseDFNFile: WARN key section parse failed\n");
-        }
     }
-    
+    if (Seek(fileHandle, 0, OFFSET_BEGINNING) >= 0) {
+        if (!ParseDFNDictionary(fileHandle, dfn))
+            Printf("[DFN] ParseDFNFile: WARN dictionary parse failed\n");
+    }
+    if (Seek(fileHandle, 0, OFFSET_BEGINNING) >= 0) {
+        if (!ParseDFNTemplates(fileHandle, dfn))
+            Printf("[DFN] ParseDFNFile: WARN templates parse failed\n");
+    }
+    if (Seek(fileHandle, 0, OFFSET_BEGINNING) >= 0) {
+        if (!ParseDFNLinks(fileHandle, dfn, fileName, depth))
+            Printf("[DFN] ParseDFNFile: WARN links parse failed\n");
+    }
+
     Close(fileHandle);
-    
     Printf("[DFN] ParseDFNFile: successfully parsed '%s'\n", fileName);
     return dfn;
 }
@@ -593,11 +659,14 @@ VOID FreeDFNFile(struct DFNFile *dfn)
     struct DFNMenu *nextMenu;
     struct DFNKeyBinding *kb;
     struct DFNKeyBinding *nextKb;
-    
-    if (!dfn) {
+    struct DFNDictWord *dw;
+    struct DFNDictWord *nextDw;
+    struct DFNTemplate *tm;
+    struct DFNTemplate *nextTm;
+
+    if (!dfn)
         return;
-    }
-    
+
     menu = dfn->menus;
     while (menu) {
         nextMenu = menu->next;
@@ -611,7 +680,21 @@ VOID FreeDFNFile(struct DFNFile *dfn)
         FreeDFNKeyBinding(kb);
         kb = nextKb;
     }
-    
+
+    dw = dfn->dict;
+    while (dw) {
+        nextDw = dw->next;
+        FreeDFNDictWord(dw);
+        dw = nextDw;
+    }
+
+    tm = dfn->templates;
+    while (tm) {
+        nextTm = tm->next;
+        FreeDFNTemplate(tm);
+        tm = nextTm;
+    }
+
     TTX_Free(dfn);
 }
 
@@ -728,6 +811,346 @@ static BOOL ParseDFNKeys(BPTR fileHandle, struct DFNFile *dfn)
         else
             tail->next = kb;
         tail = kb;
+    }
+
+    TTX_Free(lineBuffer);
+    return TRUE;
+}
+
+static BOOL DFN_SectionEndKeyword(STRPTR p)
+{
+    if (DFN_IsKeyword(p, "MENUS:", 6) ||
+        DFN_IsKeyword(p, "KEYBOARD:", 9) ||
+        DFN_IsKeyword(p, "HOT_KEYS:", 9) ||
+        DFN_IsKeyword(p, "MOUSE_BUTTONS:", 14) ||
+        DFN_IsKeyword(p, "DICTIONARY:", 11) ||
+        DFN_IsKeyword(p, "TEMPLATES:", 10) ||
+        DFN_IsKeyword(p, "LINKS:", 6))
+        return TRUE;
+    return FALSE;
+}
+
+static BOOL ParseDFNDictionary(BPTR fileHandle, struct DFNFile *dfn)
+{
+    STRPTR lineBuffer = NULL;
+    STRPTR line = NULL;
+    STRPTR p = NULL;
+    ULONG lineLen = 0;
+    BOOL inSection = FALSE;
+    struct DFNDictWord *node = NULL;
+    struct DFNDictWord *tail = NULL;
+    STRPTR word = NULL;
+
+    if (!fileHandle || !dfn)
+        return FALSE;
+
+    lineBuffer = TTX_AllocPathBuf();
+    if (!lineBuffer)
+        return FALSE;
+
+    tail = dfn->dict;
+    while (tail && tail->next)
+        tail = tail->next;
+
+    SetIoErr(0);
+    while (FGets(fileHandle, lineBuffer, TTX_PATH_BUF_LEN - 1) != NULL) {
+        line = lineBuffer;
+        lineLen = 0;
+        while (line[lineLen] != '\0' && line[lineLen] != '\n' &&
+               line[lineLen] != '\r' && lineLen < (TTX_PATH_BUF_LEN - 1))
+            lineLen++;
+        line[lineLen] = '\0';
+
+        p = SkipWhitespace(line);
+        if (*p == '\0')
+            continue;
+        if (*p == '*' || *p == '/')
+            continue;
+
+        if (DFN_IsKeyword(p, "DICTIONARY:", 11)) {
+            inSection = TRUE;
+            continue;
+        }
+        if (DFN_SectionEndKeyword(p)) {
+            inSection = FALSE;
+            continue;
+        }
+        if (*p == '#' && inSection) {
+            inSection = FALSE;
+            continue;
+        }
+        if (!inSection)
+            continue;
+
+        word = NULL;
+        ExtractToken(p, &word);
+        if (!word)
+            continue;
+
+        node = (struct DFNDictWord *)TTX_Alloc(sizeof(struct DFNDictWord), MEMF_CLEAR);
+        if (!node) {
+            TTX_Free(word);
+            TTX_Free(lineBuffer);
+            return FALSE;
+        }
+        node->word = word;
+        if (!dfn->dict)
+            dfn->dict = node;
+        else
+            tail->next = node;
+        tail = node;
+    }
+
+    TTX_Free(lineBuffer);
+    return TRUE;
+}
+
+static BOOL ParseDFNTemplates(BPTR fileHandle, struct DFNFile *dfn)
+{
+    STRPTR lineBuffer = NULL;
+    STRPTR line = NULL;
+    STRPTR p = NULL;
+    ULONG lineLen = 0;
+    BOOL inSection = FALSE;
+    struct DFNTemplate *node = NULL;
+    struct DFNTemplate *tail = NULL;
+    STRPTR text = NULL;
+
+    if (!fileHandle || !dfn)
+        return FALSE;
+
+    lineBuffer = TTX_AllocPathBuf();
+    if (!lineBuffer)
+        return FALSE;
+
+    tail = dfn->templates;
+    while (tail && tail->next)
+        tail = tail->next;
+
+    SetIoErr(0);
+    while (FGets(fileHandle, lineBuffer, TTX_PATH_BUF_LEN - 1) != NULL) {
+        line = lineBuffer;
+        lineLen = 0;
+        while (line[lineLen] != '\0' && line[lineLen] != '\n' &&
+               line[lineLen] != '\r' && lineLen < (TTX_PATH_BUF_LEN - 1))
+            lineLen++;
+        line[lineLen] = '\0';
+
+        p = SkipWhitespace(line);
+        if (*p == '\0')
+            continue;
+        if (*p == '*' || *p == '/')
+            continue;
+
+        if (DFN_IsKeyword(p, "TEMPLATES:", 10)) {
+            inSection = TRUE;
+            continue;
+        }
+        if (DFN_SectionEndKeyword(p)) {
+            inSection = FALSE;
+            continue;
+        }
+        if (*p == '#' && inSection) {
+            inSection = FALSE;
+            continue;
+        }
+        if (!inSection)
+            continue;
+
+        text = NULL;
+        if (*p == '"')
+            ExtractQuotedString(p, &text);
+        else
+            ExtractToken(p, &text);
+        if (!text)
+            continue;
+
+        node = (struct DFNTemplate *)TTX_Alloc(sizeof(struct DFNTemplate), MEMF_CLEAR);
+        if (!node) {
+            TTX_Free(text);
+            TTX_Free(lineBuffer);
+            return FALSE;
+        }
+        node->text = text;
+        if (!dfn->templates)
+            dfn->templates = node;
+        else
+            tail->next = node;
+        tail = node;
+    }
+
+    TTX_Free(lineBuffer);
+    return TRUE;
+}
+
+static VOID DFN_ParentDrawer(STRPTR fileName, STRPTR out, ULONG outLen)
+{
+    ULONG len = 0;
+    ULONG lastSep = 0;
+    ULONG i = 0;
+
+    if (!out || outLen < 1)
+        return;
+    out[0] = '\0';
+    if (!fileName)
+        return;
+    while (fileName[len] != '\0') {
+        if (fileName[len] == '/' || fileName[len] == ':')
+            lastSep = len;
+        len++;
+    }
+    if (len == 0)
+        return;
+    /* Include the separator so relative joins work. */
+    for (i = 0; i <= lastSep && i < outLen - 1; i++)
+        out[i] = fileName[i];
+    out[i] = '\0';
+}
+
+static VOID DFN_ResolveLinkPath(STRPTR parentPath, STRPTR link, STRPTR out, ULONG outLen)
+{
+    ULONG i = 0;
+    ULONG j = 0;
+    TEXT drawer[TTX_PATH_BUF_LEN];
+
+    if (!out || outLen < 1)
+        return;
+    out[0] = '\0';
+    if (!link)
+        return;
+
+    /* Absolute Amiga path (contains ':'). */
+    j = 0;
+    while (link[j] != '\0' && link[j] != ':')
+        j++;
+    if (link[j] == ':') {
+        i = 0;
+        while (link[i] != '\0' && i < outLen - 1) {
+            out[i] = link[i];
+            i++;
+        }
+        out[i] = '\0';
+        return;
+    }
+
+    DFN_ParentDrawer(parentPath, drawer, sizeof(drawer));
+    i = 0;
+    while (drawer[i] != '\0' && i < outLen - 1) {
+        out[i] = drawer[i];
+        i++;
+    }
+    j = 0;
+    while (link[j] != '\0' && i < outLen - 1) {
+        out[i] = link[j];
+        i++;
+        j++;
+    }
+    out[i] = '\0';
+}
+
+static VOID DFN_AppendDict(struct DFNFile *dst, struct DFNFile *src)
+{
+    struct DFNDictWord *tail = NULL;
+
+    if (!dst || !src || !src->dict)
+        return;
+    tail = dst->dict;
+    if (!tail) {
+        dst->dict = src->dict;
+        src->dict = NULL;
+        return;
+    }
+    while (tail->next)
+        tail = tail->next;
+    tail->next = src->dict;
+    src->dict = NULL;
+}
+
+static VOID DFN_AppendTemplates(struct DFNFile *dst, struct DFNFile *src)
+{
+    struct DFNTemplate *tail = NULL;
+
+    if (!dst || !src || !src->templates)
+        return;
+    tail = dst->templates;
+    if (!tail) {
+        dst->templates = src->templates;
+        src->templates = NULL;
+        return;
+    }
+    while (tail->next)
+        tail = tail->next;
+    tail->next = src->templates;
+    src->templates = NULL;
+}
+
+static BOOL ParseDFNLinks(BPTR fileHandle, struct DFNFile *dfn, STRPTR parentPath, ULONG depth)
+{
+    STRPTR lineBuffer = NULL;
+    STRPTR line = NULL;
+    STRPTR p = NULL;
+    ULONG lineLen = 0;
+    BOOL inSection = FALSE;
+    STRPTR link = NULL;
+    TEXT resolved[TTX_PATH_BUF_LEN];
+    struct DFNFile *linked = NULL;
+
+    if (!fileHandle || !dfn)
+        return FALSE;
+    if (depth >= DFN_LINK_MAX_DEPTH)
+        return TRUE;
+
+    lineBuffer = TTX_AllocPathBuf();
+    if (!lineBuffer)
+        return FALSE;
+
+    SetIoErr(0);
+    while (FGets(fileHandle, lineBuffer, TTX_PATH_BUF_LEN - 1) != NULL) {
+        line = lineBuffer;
+        lineLen = 0;
+        while (line[lineLen] != '\0' && line[lineLen] != '\n' &&
+               line[lineLen] != '\r' && lineLen < (TTX_PATH_BUF_LEN - 1))
+            lineLen++;
+        line[lineLen] = '\0';
+
+        p = SkipWhitespace(line);
+        if (*p == '\0')
+            continue;
+        if (*p == '*' || *p == '/')
+            continue;
+
+        if (DFN_IsKeyword(p, "LINKS:", 6)) {
+            inSection = TRUE;
+            continue;
+        }
+        if (DFN_SectionEndKeyword(p)) {
+            inSection = FALSE;
+            continue;
+        }
+        if (*p == '#' && inSection) {
+            inSection = FALSE;
+            continue;
+        }
+        if (!inSection)
+            continue;
+
+        link = NULL;
+        if (*p == '"')
+            ExtractQuotedString(p, &link);
+        else
+            ExtractToken(p, &link);
+        if (!link)
+            continue;
+
+        DFN_ResolveLinkPath(parentPath, link, resolved, sizeof(resolved));
+        TTX_Free(link);
+        linked = ParseDFNFileDepth(resolved, depth + 1);
+        if (!linked)
+            continue;
+        /* Keep menus/keys from the primary file; merge dict/templates only. */
+        DFN_AppendDict(dfn, linked);
+        DFN_AppendTemplates(dfn, linked);
+        FreeDFNFile(linked);
     }
 
     TTX_Free(lineBuffer);
@@ -871,6 +1294,9 @@ TTX_DFNTryKeyCommand(
     struct DFNKeyBinding *kb = NULL;
     TEXT seq[64];
     TEXT want[64];
+    TEXT prefixed[80];
+    ULONG i = 0;
+    STRPTR prefix = NULL;
 
     if (!app || !session)
         return FALSE;
@@ -879,6 +1305,39 @@ TTX_DFNTryKeyCommand(
         return FALSE;
     if (!DFN_BuildKeySeq(rawCode, qualifier, seq, sizeof(seq)))
         return FALSE;
+
+    /* One-shot meta/mode prefixes from SetMeta* / SetMode*. */
+    if (app->metaPending)
+        prefix = "META-";
+    else if (app->meta2Pending)
+        prefix = "META2-";
+    else if (app->modePending)
+        prefix = "MODE-";
+    else if (app->mode2Pending)
+        prefix = "MODE2-";
+
+    if (prefix) {
+        i = 0;
+        while (*prefix && i < sizeof(prefixed) - 1)
+            prefixed[i++] = *prefix++;
+        prefix = seq;
+        while (*prefix && i < sizeof(prefixed) - 1)
+            prefixed[i++] = *prefix++;
+        prefixed[i] = '\0';
+        app->metaPending = FALSE;
+        app->meta2Pending = FALSE;
+        app->modePending = FALSE;
+        app->mode2Pending = FALSE;
+        for (kb = dfn->keys; kb; kb = kb->next) {
+            if (!kb->keySeq || !kb->command)
+                continue;
+            DFN_UpperCopy(want, kb->keySeq, sizeof(want));
+            if (Stricmp(want, prefixed) != 0)
+                continue;
+            return TTX_HandleCommand(app, session, kb->command, kb->args, kb->argCount);
+        }
+        return FALSE;
+    }
 
     for (kb = dfn->keys; kb; kb = kb->next) {
         if (!kb->keySeq || !kb->command)
@@ -1099,4 +1558,37 @@ struct NewMenu *ConvertDFNToNewMenu(struct DFNFile *dfn, ULONG *outCount)
     *outCount = idx;
     
     return newMenu;
+}
+
+VOID TTX_DFNPushAuxToEngine(struct Session *session)
+{
+    struct DFNFile *dfn = NULL;
+    struct DFNDictWord *w = NULL;
+    struct DFNTemplate *t = NULL;
+    STRPTR args[1];
+
+    if (!session || !session->document || !TurboTextBase)
+        return;
+
+    TT_DoCommand(session->document, TT_GetActiveView(session->document),
+        (STRPTR)"ClearAuxDefs", NULL, 0);
+
+    dfn = session->menuDFNBacking;
+    if (!dfn)
+        return;
+
+    for (w = dfn->dict; w; w = w->next) {
+        if (!w->word || w->word[0] == '\0')
+            continue;
+        args[0] = w->word;
+        TT_DoCommand(session->document, TT_GetActiveView(session->document),
+            (STRPTR)"AddDictWord", args, 1);
+    }
+    for (t = dfn->templates; t; t = t->next) {
+        if (!t->text || t->text[0] == '\0')
+            continue;
+        args[0] = t->text;
+        TT_DoCommand(session->document, TT_GetActiveView(session->document),
+            (STRPTR)"AddTemplate", args, 1);
+    }
 }

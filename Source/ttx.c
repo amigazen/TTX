@@ -1326,6 +1326,10 @@ BOOL TTX_CreateSessionForDocument(struct TTXApplication *app, struct TTDocument 
   session->paneClipTop = 0;
   session->paneClipBottom = 0;
   session->paneClipActive = FALSE;
+  session->statusBarText = NULL;
+  session->statusBarTemporary = FALSE;
+  session->displayLock = FALSE;
+  session->inputLock = FALSE;
   session->arexxPortName[0] = '\0';
   session->arexxPort = NULL;
   session->currentDir = NULL;
@@ -1992,6 +1996,7 @@ BOOL TTX_Init(struct TTXApplication *app) {
   for (i = 0; i < sizeof(struct TTXApplication); i++) {
     ((UBYTE *)app)[i] = 0;
   }
+  app->arexxCacheOn = TRUE;
 
   /* Initialize libraries */
   if (!TTX_InitLibraries()) {

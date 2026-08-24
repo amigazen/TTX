@@ -285,6 +285,110 @@ IF section = 'ALL' | section = 'MACRO' THEN DO
   CALL BlankLine
 END
 
+IF section = 'ALL' | section = 'CTRL' | section = 'MISC' THEN DO
+  SAY '-- control / misc --'
+  CALL GoReportEnd
+  CALL PutLine '--- CTRL ---'
+
+  CALL DoCmd 'GetBackground'
+  SAY '  GetBackground RESULT=['RESULT']'
+  CALL NoteResult 'CTRL GetBackground', RESULT
+  CALL NoteCmd 'CTRL SetBackground', 'SetBackground ON'
+  CALL DoCmd 'GetBackground'
+  CALL NoteResult 'CTRL GetBackground after ON', RESULT
+  CALL DoCmd 'SetBackground OFF'
+
+  CALL DoCmd 'GetPriority'
+  SAY '  GetPriority RESULT=['RESULT']'
+  CALL NoteResult 'CTRL GetPriority', RESULT
+
+  CALL DoCmd 'GetARexxCache'
+  SAY '  GetARexxCache RESULT=['RESULT']'
+  CALL NoteResult 'CTRL GetARexxCache', RESULT
+  CALL NoteCmd 'CTRL SetARexxCache', 'SetARexxCache OFF'
+  CALL DoCmd 'GetARexxCache'
+  CALL NoteResult 'CTRL GetARexxCache after OFF', RESULT
+  CALL DoCmd 'SetARexxCache ON'
+  CALL NoteCmd 'CTRL FlushARexxCache', 'FlushARexxCache'
+
+  CALL DoCmd 'GetLockInfo'
+  SAY '  GetLockInfo RESULT=['RESULT']'
+  CALL NoteResult 'CTRL GetLockInfo', RESULT
+  CALL NoteCmd 'CTRL SetDisplayLock', 'SetDisplayLock ON'
+  CALL NoteCmd 'CTRL SetInputLock', 'SetInputLock ON'
+  CALL DoCmd 'GetLockInfo'
+  CALL NoteResult 'CTRL GetLockInfo locked', RESULT
+  CALL DoCmd 'SetInputLock OFF'
+  CALL DoCmd 'SetDisplayLock OFF'
+  CALL DoCmd 'GetLockInfo'
+  CALL NoteResult 'CTRL GetLockInfo unlocked', RESULT
+
+  CALL NoteCmd 'CTRL SetQuoteMode', 'SetQuoteMode ON'
+  CALL DoCmd 'SetQuoteMode OFF'
+  CALL NoteCmd 'CTRL SetMeta', 'SetMeta ON'
+  CALL DoCmd 'SetMeta OFF'
+  CALL NoteCmd 'CTRL SetMeta2', 'SetMeta2 ON'
+  CALL DoCmd 'SetMeta2 OFF'
+  CALL NoteCmd 'CTRL SetMode', 'SetMode ON'
+  CALL DoCmd 'SetMode OFF'
+  CALL NoteCmd 'CTRL SetMode2', 'SetMode2 ON'
+  CALL DoCmd 'SetMode2 OFF'
+
+  CALL DoCmd 'GetErrorInfo'
+  SAY '  GetErrorInfo RESULT=['RESULT']'
+  CALL NoteResult 'CTRL GetErrorInfo', RESULT
+
+  /* Macro file round-trip on T: (no ASL). Quote path: ARexx treats T: as a symbol. */
+  CALL DoCmd 'RecordMacro QUIET'
+  CALL DoCmd 'Insert "CTRL_MACRO_LINE"'
+  CALL DoCmd 'InsertLine'
+  CALL DoCmd 'EndMacro'
+  CALL NoteCmd 'CTRL SaveMacro', 'SaveMacro QUIET "T:TTX_CtrlMacro.ttx"'
+  CALL DoCmd 'OpenMacro "T:TTX_CtrlMacro.ttx"'
+  IF RC = 0 THEN CALL PutLine 'PASS CTRL OpenMacro'
+  ELSE CALL PutLine 'FAIL CTRL OpenMacro RC=' || RC
+  CALL DoCmd 'GetMacroInfo'
+  CALL NoteResult 'CTRL GetMacroInfo after OpenMacro', RESULT
+  CALL NoteCmd 'CTRL CloseRequester', 'CloseRequester'
+
+  CALL BlankLine
+END
+
+IF section = 'ALL' | section = 'DICT' | section = 'TMPL' THEN DO
+  SAY '-- dictionary / templates --'
+  CALL GoReportEnd
+  CALL PutLine '--- DICT/TMPL ---'
+
+  CALL DoCmd 'CorrectWordCase "amiga"'
+  SAY '  CorrectWordCase RESULT=['RESULT']'
+  CALL NoteResult 'DICT CorrectWordCase', RESULT
+  IF RESULT = 'Amiga' THEN CALL PutLine 'PASS DICT CorrectWordCase RESULT'
+  ELSE CALL PutLine 'FAIL DICT CorrectWordCase RESULT'
+
+  CALL DoCmd 'CorrectWord "true"'
+  SAY '  CorrectWord true RESULT=['RESULT']'
+  CALL NoteResult 'DICT CorrectWord true', RESULT
+  IF RESULT = 'TRUE' THEN CALL PutLine 'PASS DICT CorrectWord true'
+  ELSE CALL PutLine 'FAIL DICT CorrectWord true'
+
+  CALL DoCmd 'MoveEOF'
+  CALL DoCmd 'InsertLine'
+  CALL DoCmd 'Insert "amiga"'
+  CALL NoteCmd 'DICT CorrectWordCase interactive', 'CorrectWordCase'
+  CALL DoCmd 'GetWord'
+  CALL NoteResult 'DICT GetWord after case', RESULT
+
+  CALL DoCmd 'MoveEOF'
+  CALL DoCmd 'InsertLine'
+  CALL DoCmd 'Insert "if"'
+  CALL NoteCmd 'TMPL CompleteTemplate', 'CompleteTemplate'
+  CALL DoCmd 'CompleteTemplate "if"'
+  SAY '  CompleteTemplate RESULT=['RESULT']'
+  CALL NoteResult 'TMPL CompleteTemplate ARexx', RESULT
+
+  CALL BlankLine
+END
+
 /*
  * PRINT section disabled: PRT: Write often times out / hangs on this setup
  * and stalls the exercise. Commands still exist (PrintFile / PrintClip QUIET).

@@ -136,6 +136,16 @@ struct TurboTextBase {
 	ULONG nextDocID;
 	ULONG nextViewID;
 	ULONG lastError;
+	/*
+	 * String RESULT channel for ARexx (GetWord, CorrectWord*, CompleteTemplate
+	 * with args, GetMacroInfo, GetMacroLine). Owned by the library; valid until
+	 * the next TT_DoCommand. Driver copies into its ARexx RESULT buffer.
+	 */
+	STRPTR lastStringResult;
+	/* Recorded-macro state (lines live in engine; driver plays via GetMacroLine). */
+	BOOL macroRecording;
+	BOOL macroPlaying;
+	ULONG macroCount;
 };
 
 /****************************************************************************/

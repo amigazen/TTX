@@ -147,6 +147,33 @@ VOID TT_SetMarking(
 VOID TT_ClearMarking(struct TTTextBuffer *buffer);
 
 /****************************************************************************/
+/* String RESULT + aux (dict/templates/macros) — see tt_aux.c */
+
+VOID TT_ClearStringResult(VOID);
+VOID TT_SetStringResult(STRPTR s);
+VOID TT_AuxShutdown(VOID);
+
+BOOL TT_Cmd_ClearAuxDefs(VOID);
+BOOL TT_Cmd_AddDictWord(STRPTR word);
+BOOL TT_Cmd_AddTemplate(STRPTR text);
+BOOL TT_Cmd_GetWord(struct TTTextBuffer *buf);
+BOOL TT_Cmd_CorrectWord(struct TTDocument *doc, struct TTTextBuffer *buf,
+	STRPTR *args, ULONG argCount);
+BOOL TT_Cmd_CorrectWordCase(struct TTDocument *doc, struct TTTextBuffer *buf,
+	STRPTR *args, ULONG argCount);
+BOOL TT_Cmd_CompleteTemplate(struct TTDocument *doc, struct TTView *view,
+	struct TTTextBuffer *buf, STRPTR *args, ULONG argCount);
+BOOL TT_Cmd_RecordMacro(STRPTR *args, ULONG argCount);
+BOOL TT_Cmd_EndMacro(VOID);
+BOOL TT_Cmd_GetMacroInfo(VOID);
+BOOL TT_Cmd_MacroAppend(STRPTR line);
+BOOL TT_Cmd_MacroClear(VOID);
+BOOL TT_Cmd_MacroLoadLine(STRPTR line);
+BOOL TT_Cmd_GetMacroLine(STRPTR *args, ULONG argCount);
+BOOL TT_Cmd_MacroPlayBegin(VOID);
+BOOL TT_Cmd_MacroPlayEnd(VOID);
+
+/****************************************************************************/
 /* Command dispatch (engine commands only) */
 
 BOOL TT_HandleEngineCommand(

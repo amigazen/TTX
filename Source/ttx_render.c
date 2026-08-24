@@ -786,6 +786,8 @@ TTX_DrawSession(struct Session *session)
 VOID
 TTX_RequestRedraw(struct Session *session)
 {
+  if (!session || session->displayLock)
+    return;
   TTX_DrawSession(session);
 }
 
