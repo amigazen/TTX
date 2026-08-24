@@ -261,6 +261,72 @@ IF section = 'ALL' | section = 'AREXX' THEN DO
   CALL BlankLine
 END
 
+IF section = 'ALL' | section = 'MACRO' THEN DO
+  SAY '-- recorded macro --'
+  CALL GoReportEnd
+  CALL PutLine '--- MACRO ---'
+  /* DoCmd (not NoteCmd) so PASS PutLine text is not captured into the macro. */
+  CALL DoCmd 'RecordMacro QUIET'
+  IF RC = 0 THEN CALL PutLine 'PASS MACRO RecordMacro'
+  ELSE CALL PutLine 'FAIL MACRO RecordMacro RC=' || RC
+  CALL DoCmd 'Insert "MACRO_REC_A"'
+  CALL DoCmd 'InsertLine'
+  CALL DoCmd 'Insert "MACRO_REC_B"'
+  CALL DoCmd 'InsertLine'
+  CALL DoCmd 'EndMacro'
+  IF RC = 0 THEN CALL PutLine 'PASS MACRO EndMacro'
+  ELSE CALL PutLine 'FAIL MACRO EndMacro RC=' || RC
+  CALL DoCmd 'GetMacroInfo'
+  SAY '  GetMacroInfo RESULT=['RESULT']'
+  CALL NoteResult 'MACRO GetMacroInfo', RESULT
+  CALL DoCmd 'PlayMacro 1'
+  IF RC = 0 THEN CALL PutLine 'PASS MACRO PlayMacro'
+  ELSE CALL PutLine 'FAIL MACRO PlayMacro RC=' || RC
+  CALL BlankLine
+END
+
+/*
+ * PRINT section disabled: PRT: Write often times out / hangs on this setup
+ * and stalls the exercise. Commands still exist (PrintFile / PrintClip QUIET).
+ *
+IF section = 'ALL' | section = 'PRINT' THEN DO
+  SAY '-- print (PRT:) --'
+  CALL GoReportEnd
+  CALL PutLine '--- PRINT ---'
+  CALL DoCmd 'MoveSOF'
+  CALL DoCmd 'Find "BLOCK_COPY_LINE_A"'
+  CALL DoCmd 'MoveSOL'
+  CALL DoCmd 'MarkBlk'
+  CALL DoCmd 'MoveEOL'
+  CALL DoCmd 'MarkBlk'
+  CALL DoCmd 'CopyBlk'
+  CALL DoCmd 'MarkBlk Off'
+  ADDRESS VALUE host
+  INTERPRET 'PrintClip QUIET'
+  IF RC = 0 THEN DO
+    okcount = okcount + 1
+    SAY '  OK    PrintClip QUIET'
+    CALL PutLine 'PASS PRINT PrintClip'
+  END
+  ELSE DO
+    SAY '  SKIP PrintClip QUIET RC=' || RC || ' (PRT: may be unavailable)'
+    CALL PutLine 'NOTE PRINT PrintClip SKIPPED RC=' || RC
+  END
+  ADDRESS VALUE host
+  INTERPRET 'PrintFile QUIET'
+  IF RC = 0 THEN DO
+    okcount = okcount + 1
+    SAY '  OK    PrintFile QUIET'
+    CALL PutLine 'PASS PRINT PrintFile'
+  END
+  ELSE DO
+    SAY '  SKIP PrintFile QUIET RC=' || RC || ' (PRT: may be unavailable)'
+    CALL PutLine 'NOTE PRINT PrintFile SKIPPED RC=' || RC
+  END
+  CALL BlankLine
+END
+ */
+
 CALL GoReportEnd
 CALL DoCmd 'InsertLine'
 CALL PutLine '=== SUMMARY ==='

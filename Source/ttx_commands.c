@@ -150,8 +150,170 @@ TTX_DoEngineCommand(
 	return TRUE;
 }
 
-/* Command dispatcher - routes engine commands to turbotext.library */
-BOOL TTX_HandleCommand(struct TTXApplication *app, struct Session *session, STRPTR command, STRPTR *args, ULONG argCount)
+/* Recorded macro (RecordMacro / PlayMacro / EndMacro). */
+#define TTX_MACRO_MAX_CMDS  256
+#define TTX_MACRO_LINE_LEN  256
+
+static TEXT TTX_MacroLines[TTX_MACRO_MAX_CMDS][TTX_MACRO_LINE_LEN];
+static ULONG TTX_MacroCount = 0;
+static BOOL TTX_MacroRecording = FALSE;
+static BOOL TTX_MacroPlaying = FALSE;
+
+static BOOL
+TTX_MacroIsMetaCommand(STRPTR command)
+{
+	if (!command)
+		return TRUE;
+	if (Stricmp(command, "RecordMacro") == 0)
+		return TRUE;
+	if (Stricmp(command, "EndMacro") == 0)
+		return TRUE;
+	if (Stricmp(command, "PlayMacro") == 0)
+		return TRUE;
+	if (Stricmp(command, "GetMacroInfo") == 0)
+		return TRUE;
+	if (Stricmp(command, "OpenMacro") == 0)
+		return TRUE;
+	if (Stricmp(command, "SaveMacro") == 0)
+		return TRUE;
+	return FALSE;
+}
+
+static VOID
+TTX_MacroMaybeRecord(STRPTR command, STRPTR *args, ULONG argCount)
+{
+	ULONG pos = 0;
+	ULONG i = 0;
+	ULONG n = 0;
+	BOOL needQuote = FALSE;
+	STRPTR dst = NULL;
+
+	if (!TTX_MacroRecording || TTX_MacroPlaying)
+		return;
+	if (TTX_MacroIsMetaCommand(command))
+		return;
+	if (TTX_MacroCount >= TTX_MACRO_MAX_CMDS)
+		return;
+
+	dst = TTX_MacroLines[TTX_MacroCount];
+	dst[0] = '\0';
+	while (command[n] != '\0' && pos < TTX_MACRO_LINE_LEN - 1)
+		dst[pos++] = command[n++];
+	for (i = 0; i < argCount && args && args[i]; i++) {
+		needQuote = FALSE;
+		n = 0;
+		while (args[i][n] != '\0') {
+			if (args[i][n] == ' ' || args[i][n] == '\t' || args[i][n] == '"')
+				needQuote = TRUE;
+			n++;
+		}
+		if (pos < TTX_MACRO_LINE_LEN - 1)
+			dst[pos++] = ' ';
+		if (needQuote && pos < TTX_MACRO_LINE_LEN - 1)
+			dst[pos++] = '"';
+		n = 0;
+		while (args[i][n] != '\0' && pos < TTX_MACRO_LINE_LEN - 1) {
+			if (args[i][n] == '"') {
+				if (pos < TTX_MACRO_LINE_LEN - 2) {
+					dst[pos++] = '"';
+					dst[pos++] = '"';
+				}
+			} else
+				dst[pos++] = args[i][n];
+			n++;
+		}
+		if (needQuote && pos < TTX_MACRO_LINE_LEN - 1)
+			dst[pos++] = '"';
+	}
+	dst[pos] = '\0';
+	TTX_MacroCount++;
+}
+
+/* Write text to PRT: (system printer). QUIET skips confirm. */
+static BOOL
+TTX_ConfirmPrint(struct Session *session, BOOL quiet, STRPTR what)
+{
+	struct EasyStruct es;
+	LONG choice = 0;
+
+	if (quiet)
+		return TRUE;
+	if (!session || !session->window)
+		return TRUE;
+
+	es.es_StructSize = sizeof(struct EasyStruct);
+	es.es_Flags = 0;
+	es.es_Title = (UBYTE *)"TTX Print";
+	es.es_TextFormat = (UBYTE *)"Send %s to PRT:?";
+	es.es_GadgetFormat = (UBYTE *)"Print|Cancel";
+	choice = EasyRequestArgs(session->window, &es, NULL, &what);
+	return (BOOL)(choice == 1);
+}
+
+static BOOL
+TTX_PrintTextToPRT(STRPTR text)
+{
+	BPTR fh = 0;
+	ULONG len = 0;
+	LONG wrote = 0;
+
+	if (!text)
+		return FALSE;
+	while (text[len] != '\0')
+		len++;
+	fh = Open("PRT:", MODE_NEWFILE);
+	if (!fh) {
+		Printf("[CMD] Print: FAIL Open PRT:\n");
+		return FALSE;
+	}
+	if (len > 0) {
+		wrote = Write(fh, text, (LONG)len);
+		if (wrote != (LONG)len) {
+			Close(fh);
+			Printf("[CMD] Print: FAIL Write PRT:\n");
+			return FALSE;
+		}
+	}
+	Close(fh);
+	return TRUE;
+}
+
+static BOOL
+TTX_PrintBufferToPRT(struct TTTextBuffer *buf)
+{
+	BPTR fh = 0;
+	ULONG i = 0;
+	TEXT nl;
+
+	if (!buf || !buf->lines)
+		return FALSE;
+	nl = '\n';
+	fh = Open("PRT:", MODE_NEWFILE);
+	if (!fh) {
+		Printf("[CMD] Print: FAIL Open PRT:\n");
+		return FALSE;
+	}
+	for (i = 0; i < buf->lineCount; i++) {
+		if (buf->lines[i].text && buf->lines[i].length > 0) {
+			if (Write(fh, buf->lines[i].text, (LONG)buf->lines[i].length)
+				!= (LONG)buf->lines[i].length)
+			{
+				Close(fh);
+				return FALSE;
+			}
+		}
+		if (Write(fh, &nl, 1) != 1) {
+			Close(fh);
+			return FALSE;
+		}
+	}
+	Close(fh);
+	return TRUE;
+}
+
+/* Command dispatcher body - routes engine commands to turbotext.library */
+static BOOL
+TTX_DispatchCommand(struct TTXApplication *app, struct Session *session, STRPTR command, STRPTR *args, ULONG argCount)
 {
     BOOL engineResult = FALSE;
 
@@ -549,6 +711,22 @@ BOOL TTX_HandleCommand(struct TTXApplication *app, struct Session *session, STRP
         Printf("[CMD] TTX_HandleCommand: unknown command '%s'\n", command);
         return FALSE;
     }
+}
+
+BOOL
+TTX_HandleCommand(
+	struct TTXApplication *app,
+	struct Session *session,
+	STRPTR command,
+	STRPTR *args,
+	ULONG argCount)
+{
+	BOOL ok = FALSE;
+
+	ok = TTX_DispatchCommand(app, session, command, args, argCount);
+	if (ok)
+		TTX_MacroMaybeRecord(command, args, argCount);
+	return ok;
 }
 
 /* Handle menu pick - convert menu/item numbers to command */
@@ -1826,9 +2004,22 @@ BOOL TTX_Cmd_ClearFile(struct TTXApplication *app, struct Session *session, STRP
 
 BOOL TTX_Cmd_PrintFile(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Implement printing */
-    Printf("[CMD] TTX_Cmd_PrintFile: not yet implemented\n");
-    return FALSE;
+	BOOL quiet = FALSE;
+	ULONG i = 0;
+
+	(void)app;
+	if (!session || !session->document)
+		return FALSE;
+	for (i = 0; i < argCount && args && args[i]; i++) {
+		if (Stricmp(args[i], "QUIET") == 0)
+			quiet = TRUE;
+	}
+	if (!TTX_ConfirmPrint(session, quiet, (STRPTR)"document"))
+		return FALSE;
+	if (!TTX_PrintBufferToPRT(TT_SessionBuffer(session)))
+		return FALSE;
+	Printf("[CMD] TTX_Cmd_PrintFile: SUCCESS\n");
+	return TRUE;
 }
 
 /* Prompt user before closing if document is modified.
@@ -3367,9 +3558,26 @@ BOOL TTX_Cmd_PasteClip(struct TTXApplication *app, struct Session *session, STRP
 
 BOOL TTX_Cmd_PrintClip(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Implement clipboard printing */
-    Printf("[CMD] TTX_Cmd_PrintClip: not yet implemented\n");
-    return FALSE;
+	BOOL quiet = FALSE;
+	ULONG i = 0;
+	STRPTR clip = NULL;
+
+	(void)app;
+	for (i = 0; i < argCount && args && args[i]; i++) {
+		if (Stricmp(args[i], "QUIET") == 0)
+			quiet = TRUE;
+	}
+	clip = TTX_ClipboardGetText();
+	if (!clip || clip[0] == '\0') {
+		Printf("[CMD] TTX_Cmd_PrintClip: FAIL (empty clipboard)\n");
+		return FALSE;
+	}
+	if (!TTX_ConfirmPrint(session, quiet, (STRPTR)"clipboard"))
+		return FALSE;
+	if (!TTX_PrintTextToPRT(clip))
+		return FALSE;
+	Printf("[CMD] TTX_Cmd_PrintClip: SUCCESS\n");
+	return TRUE;
 }
 
 BOOL TTX_Cmd_SaveClip(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -4481,9 +4689,138 @@ BOOL TTX_Cmd_UnmakeFold(struct TTXApplication *app, struct Session *session, STR
 
 BOOL TTX_Cmd_EndMacro(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: End macro recording */
-    Printf("[CMD] TTX_Cmd_EndMacro: not yet implemented\n");
-    return FALSE;
+	(void)app;
+	(void)session;
+	(void)args;
+	(void)argCount;
+	if (!TTX_MacroRecording) {
+		Printf("[CMD] TTX_Cmd_EndMacro: not recording\n");
+		return FALSE;
+	}
+	TTX_MacroRecording = FALSE;
+	Printf("[CMD] TTX_Cmd_EndMacro: stopped (%lu cmds)\n", TTX_MacroCount);
+	return TRUE;
+}
+
+BOOL TTX_Cmd_PlayMacro(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
+{
+	ULONG i = 0;
+	BOOL ok = TRUE;
+	ULONG times = 1;
+	ULONG t = 0;
+
+	(void)args;
+	(void)argCount;
+	if (!app || !session)
+		return FALSE;
+	if (TTX_MacroRecording) {
+		Printf("[CMD] TTX_Cmd_PlayMacro: FAIL (still recording)\n");
+		return FALSE;
+	}
+	if (TTX_MacroCount == 0) {
+		Printf("[CMD] TTX_Cmd_PlayMacro: FAIL (empty macro)\n");
+		return FALSE;
+	}
+	if (args && argCount > 0 && args[0]) {
+		LONG n = 0;
+		/* COUNT/N: omit → 1; 0 → until first failure (capped). */
+		if (StrToLong(args[0], &n)) {
+			if (n == 0)
+				times = 0;
+			else if (n > 0)
+				times = (ULONG)n;
+		}
+	}
+
+	TTX_MacroPlaying = TRUE;
+	if (times == 0) {
+		/* Until error, max 10000 iterations. */
+		for (t = 0; t < 10000 && ok; t++) {
+			for (i = 0; i < TTX_MacroCount && ok; i++) {
+				ok = TTX_HandleCommandLine(app, session, TTX_MacroLines[i]);
+				if (!ok)
+					Printf("[CMD] TTX_Cmd_PlayMacro: stop at '%s'\n",
+						TTX_MacroLines[i]);
+			}
+		}
+		/* Stopping on error is success for count 0. */
+		ok = TRUE;
+	} else {
+		for (t = 0; t < times && ok; t++) {
+			for (i = 0; i < TTX_MacroCount && ok; i++) {
+				ok = TTX_HandleCommandLine(app, session, TTX_MacroLines[i]);
+				if (!ok)
+					Printf("[CMD] TTX_Cmd_PlayMacro: FAIL at '%s'\n",
+						TTX_MacroLines[i]);
+			}
+		}
+	}
+	TTX_MacroPlaying = FALSE;
+	Printf("[CMD] TTX_Cmd_PlayMacro: %s (%lu cmds)\n",
+		ok ? "SUCCESS" : "FAIL", TTX_MacroCount);
+	return ok;
+}
+
+BOOL TTX_Cmd_RecordMacro(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
+{
+	BOOL quiet = FALSE;
+	ULONG i = 0;
+
+	(void)app;
+	(void)session;
+	for (i = 0; i < argCount && args && args[i]; i++) {
+		if (Stricmp(args[i], "QUIET") == 0)
+			quiet = TRUE;
+	}
+	if (TTX_MacroPlaying)
+		return FALSE;
+	TTX_MacroCount = 0;
+	TTX_MacroRecording = TRUE;
+	if (!quiet)
+		Printf("[CMD] TTX_Cmd_RecordMacro: recording started\n");
+	return TRUE;
+}
+
+BOOL TTX_Cmd_GetMacroInfo(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
+{
+	TEXT buf[64];
+	ULONG pos = 0;
+	STRPTR state = NULL;
+	ULONG n = 0;
+	ULONG digits = 0;
+	TEXT tmp[12];
+	ULONG v = 0;
+
+	(void)session;
+	(void)args;
+	(void)argCount;
+	if (!app)
+		return FALSE;
+	if (TTX_MacroPlaying)
+		state = (STRPTR)"PLAYING";
+	else if (TTX_MacroRecording)
+		state = (STRPTR)"RECORDING";
+	else
+		state = (STRPTR)"IDLE";
+	while (state[n] != '\0' && pos < sizeof(buf) - 1)
+		buf[pos++] = state[n++];
+	if (pos < sizeof(buf) - 1)
+		buf[pos++] = ' ';
+	v = TTX_MacroCount;
+	digits = 0;
+	if (v == 0)
+		tmp[digits++] = '0';
+	else {
+		while (v > 0 && digits < 11) {
+			tmp[digits++] = (TEXT)('0' + (v % 10));
+			v /= 10;
+		}
+	}
+	while (digits > 0 && pos < sizeof(buf) - 1)
+		buf[pos++] = tmp[--digits];
+	buf[pos] = '\0';
+	TTX_ArexxSetResult(app, buf);
+	return TRUE;
 }
 
 BOOL TTX_Cmd_ExecARexxMacro(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -4597,31 +4934,10 @@ BOOL TTX_Cmd_GetARexxCache(struct TTXApplication *app, struct Session *session, 
     return FALSE;
 }
 
-BOOL TTX_Cmd_GetMacroInfo(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
-{
-    /* TODO: Return macro info for ARexx */
-    Printf("[CMD] TTX_Cmd_GetMacroInfo: not yet implemented\n");
-    return FALSE;
-}
-
 BOOL TTX_Cmd_OpenMacro(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
     /* TODO: Open macro file */
     Printf("[CMD] TTX_Cmd_OpenMacro: not yet implemented\n");
-    return FALSE;
-}
-
-BOOL TTX_Cmd_PlayMacro(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
-{
-    /* TODO: Play recorded macro */
-    Printf("[CMD] TTX_Cmd_PlayMacro: not yet implemented\n");
-    return FALSE;
-}
-
-BOOL TTX_Cmd_RecordMacro(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
-{
-    /* TODO: Start macro recording */
-    Printf("[CMD] TTX_Cmd_RecordMacro: not yet implemented\n");
     return FALSE;
 }
 
