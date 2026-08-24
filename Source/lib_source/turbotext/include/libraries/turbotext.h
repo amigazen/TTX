@@ -43,6 +43,30 @@ struct TTTextLine {
 	ULONG allocated;
 };
 
+/****************************************************************************/
+/* View paint model — engine fills; driver only blits Intuition pixels */
+
+#define TT_MAX_PAINT_ROWS 128
+
+#define TTPAINT_NONE    0
+#define TTPAINT_MARKER  1  /* fold marker on header (typically when hidden) */
+#define TTPAINT_GUTTER  2  /* left fold line on shown fold body */
+
+struct TTPaintRow {
+	ULONG docY;
+	STRPTR text;
+	ULONG length;
+	UBYTE chrome;
+};
+
+struct TTViewPaint {
+	struct TTPaintRow rows[TT_MAX_PAINT_ROWS];
+	ULONG rowCount;
+	ULONG cursorRow;   /* index into rows[], or 0xFFFFFFFF if off-screen */
+	ULONG cursorX;
+	ULONG visibleLineCount;
+};
+
 struct TTTextMarking {
 	BOOL enabled;
 	ULONG startY;
@@ -72,6 +96,11 @@ struct TTTextBuffer {
 	SHORT scrollYShift;
 	BOOL modified;
 	struct TTTextMarking marking;
+	/*
+	 * Fold tree root (struct TTFold *). Owned by the buffer/document;
+	 * engine-only type lives in tt_fold.c. Driver must not interpret this.
+	 */
+	APTR folds;
 };
 
 /****************************************************************************/
@@ -110,6 +139,8 @@ struct TTView {
 	ULONG autoMarkX;
 	ULONG autoMarkY;
 	UBYTE autoMarkValid;
+	/* Engine-built visible rows for the current pageH (see PrepareView). */
+	struct TTViewPaint paint;
 };
 
 /****************************************************************************/

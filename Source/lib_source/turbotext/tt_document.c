@@ -52,6 +52,10 @@ TT_CreateView(struct TTDocument *doc)
 	view->autoMarkX = 0;
 	view->autoMarkY = 0;
 	view->autoMarkValid = 0;
+	view->paint.rowCount = 0;
+	view->paint.cursorRow = 0xFFFFFFFFUL;
+	view->paint.cursorX = 0;
+	view->paint.visibleLineCount = 0;
 
 	doc->views = view;
 	doc->viewCount++;

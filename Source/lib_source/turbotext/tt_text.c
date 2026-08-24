@@ -154,6 +154,7 @@ BOOL TT_InitTextBuffer(struct TTTextBuffer *buffer) {
   buffer->scrollXShift = 0; /* No scaling initially */
   buffer->scrollYShift = 0; /* No scaling initially */
   buffer->modified = FALSE;
+  buffer->folds = NULL;
 
   /* Initialize text selection/marking */
   buffer->marking.enabled = FALSE;
@@ -173,6 +174,7 @@ VOID TT_FreeTextBuffer(struct TTTextBuffer *buffer) {
   }
 
   TT_LineUndoClear(buffer);
+  TT_FoldFreeAll(buffer);
 
   if (buffer->lines) {
     for (i = 0; i < buffer->lineCount; i++) {
@@ -593,6 +595,7 @@ BOOL TT_InsertNewline(struct TTTextBuffer *buffer) {
   buffer->cursorY++;
   buffer->cursorX = 0;
   buffer->modified = TRUE;
+  TT_FoldAdjustInsert(buffer, buffer->cursorY);
 
   return TRUE;
 }
@@ -802,6 +805,7 @@ BOOL TT_DeleteLine(struct TTTextBuffer *buffer) {
   TT_LineUndoClear(buffer);
 
   lineY = buffer->cursorY;
+  TT_FoldAdjustDelete(buffer, lineY);
 
   /* Free line text */
   if (buffer->lines[lineY].text) {

@@ -72,11 +72,6 @@ BOOL TTX_Cmd_Conv2Lower(struct TTXApplication *app, struct Session *session, STR
 BOOL TTX_Cmd_Conv2Spaces(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
 BOOL TTX_Cmd_Conv2Tabs(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
 BOOL TTX_Cmd_Conv2Upper(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
-BOOL TTX_Cmd_HideFold(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
-BOOL TTX_Cmd_MakeFold(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
-BOOL TTX_Cmd_ShowFold(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
-BOOL TTX_Cmd_ToggleFold(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
-BOOL TTX_Cmd_UnmakeFold(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
 BOOL TTX_Cmd_ExecARexxMacro(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
 BOOL TTX_Cmd_ExecARexxString(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);
 BOOL TTX_Cmd_FlushARexxCache(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount);

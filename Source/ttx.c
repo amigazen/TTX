@@ -446,7 +446,7 @@ BOOL TTX_CheckExistingInstance(STRPTR fileName) {
         Printf("[INIT] TTX_CheckExistingInstance: RemPort stale %s\n",
                TTX_MESSAGE_PORT_NAME);
         RemPort(existingPort);
-        existingPort = NULL;
+      existingPort = NULL;
       }
     }
   }
@@ -890,10 +890,10 @@ BOOL TTX_RestoreWindow(struct TTXApplication *app, struct Session *session) {
   }
 
   if (!TTX_IntuiOpenWindow(session, screen)) {
-    UnlockPubScreen(session->windowState.pubScreenName
-                        ? session->windowState.pubScreenName
-                        : (STRPTR) "Workbench",
-                    screen);
+  UnlockPubScreen(session->windowState.pubScreenName
+                      ? session->windowState.pubScreenName
+                      : (STRPTR) "Workbench",
+                  screen);
     Printf("[WINDOW] TTX_RestoreWindow: FAIL (openWindow failed)\n");
     return FALSE;
   }
@@ -1595,7 +1595,7 @@ VOID TTX_DestroySession(struct TTXApplication *app, struct Session *session) {
     Printf("[CLEANUP] TTX_DestroySession: closing window=%lx\n",
            (ULONG)session->window);
     TTX_CloseSessionWindow(app, session, (struct Window *)INVALID_RESOURCE);
-    Printf("[CLEANUP] TTX_DestroySession: closeWindow completed\n");
+      Printf("[CLEANUP] TTX_DestroySession: closeWindow completed\n");
   }
 
   /* Close document via turbotext.library (frees buffer and metadata) */
@@ -1767,7 +1767,7 @@ BOOL TTX_HandleCommodityMessage(struct TTXApplication *app,
 }
 */
 
-BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app,
+    BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app,
                                     struct Session *portSession,
                                     struct IntuiMessage *imsg)
 {
@@ -1924,8 +1924,8 @@ VOID TTX_EventLoop(struct TTXApplication *app) {
     }
 
     /* Each window has its own Intuition UserPort (WA_IDCMP at OpenWindow) */
-    session = app->sessions;
-    while (session) {
+          session = app->sessions;
+          while (session) {
       struct Session *nextSession = session->next;
       struct MsgPort *userPort = NULL;
 

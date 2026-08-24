@@ -696,17 +696,6 @@ TTX_DispatchCommand(struct TTXApplication *app, struct Session *session, STRPTR 
         return TTX_Cmd_Conv2Tabs(app, session, args, argCount);
     } else if (Stricmp(command, "Conv2Upper") == 0) {
         return TTX_Cmd_Conv2Upper(app, session, args, argCount);
-    } /* Fold commands */
-    else if (Stricmp(command, "HideFold") == 0) {
-        return TTX_Cmd_HideFold(app, session, args, argCount);
-    } else if (Stricmp(command, "MakeFold") == 0) {
-        return TTX_Cmd_MakeFold(app, session, args, argCount);
-    } else if (Stricmp(command, "ShowFold") == 0) {
-        return TTX_Cmd_ShowFold(app, session, args, argCount);
-    } else if (Stricmp(command, "ToggleFold") == 0) {
-        return TTX_Cmd_ToggleFold(app, session, args, argCount);
-    } else if (Stricmp(command, "UnmakeFold") == 0) {
-        return TTX_Cmd_UnmakeFold(app, session, args, argCount);
     }
     /* Macro: Record/End/GetMacroInfo in engine; Open/Save/Play need ASL+reentry */
     else if (Stricmp(command, "ExecARexxMacro") == 0) {
@@ -1038,7 +1027,7 @@ BOOL TTX_HandleMenuPick(struct TTXApplication *app, struct Session *session, ULO
     if (!app || !session) {
         return FALSE;
     }
-
+    
     for (i = 0; i < 10; i++)
         args[i] = NULL;
     
@@ -1049,7 +1038,7 @@ BOOL TTX_HandleMenuPick(struct TTXApplication *app, struct Session *session, ULO
     if (menuNumber == 0xFFFF && itemNumber == 0xFFFF) {
         return TRUE;  /* MENUNULL - no action needed */
     }
-
+    
     /* Input lock blocks menu dispatch (ARexx can still unlock). */
     if (session->inputLock) {
         Printf("[MENU] TTX_HandleMenuPick: blocked (input lock)\n");
@@ -1073,10 +1062,10 @@ BOOL TTX_HandleMenuPick(struct TTXApplication *app, struct Session *session, ULO
     }
 
     if (!fromDFN) {
-        if (!GetCommandFromMenuPick(menuNumber, itemNumber, &command, args, &argCount)) {
-            Printf("[MENU] TTX_HandleMenuPick: no command found for menu=%lu, item=%lu\n", menuNumber, itemNumber);
+    if (!GetCommandFromMenuPick(menuNumber, itemNumber, &command, args, &argCount)) {
+        Printf("[MENU] TTX_HandleMenuPick: no command found for menu=%lu, item=%lu\n", menuNumber, itemNumber);
             TTX_MenuFreeHeapArgs();
-            return FALSE;
+        return FALSE;
         }
     }
     
@@ -1127,7 +1116,7 @@ BOOL TTX_CreateMenuStrip(struct Session *session)
     if (!session || !session->window) {
         return FALSE;
     }
-
+    
     dfnPath = TTX_DefinitionsPath;
     
     TTX_MenuTrace("TTX_CreateMenuStrip: START");
@@ -1304,7 +1293,7 @@ TTX_CopyStr(STRPTR dst, ULONG dstLen, STRPTR src)
 	ULONG i = 0;
 
 	if (!dst || dstLen < 1)
-		return;
+        return;
 	dst[0] = '\0';
 	if (!src)
 		return;
@@ -1438,9 +1427,9 @@ TTX_GetAslInitialDrawer(
 
 	if (initialDrawer && initialDrawer[0] != '\0') {
 		TTX_CopyStr(buf, bufLen, initialDrawer);
-		return;
-	}
-
+        return;
+    }
+    
 	if (app && app->lastAslDrawer && app->lastAslDrawer[0] != '\0') {
 		TTX_CopyStr(buf, bufLen, app->lastAslDrawer);
 		return;
@@ -1566,7 +1555,7 @@ static STRPTR TTX_ShowFileRequester(struct TTXApplication *app, struct Session *
                 TTX_SaveAslDrawer(app, drawerSnap, fullPath);
                 Printf("[ASL] TTX_ShowFileRequester: drawer='%s' file='%s' -> '%s'\n",
                     drawerSnap, fileSnap, fullPath);
-            } else {
+                    } else {
                 Printf("[ASL] TTX_ShowFileRequester: WARN path build failed drawer='%s' file='%s'\n",
                     drawerSnap, fileSnap);
             }
@@ -1753,8 +1742,8 @@ BOOL TTX_Cmd_OpenFile(struct TTXApplication *app, struct Session *session, STRPT
                fileName, (ULONG)TT_GetLastError());
         if (selectedFile) {
             TTX_Free(selectedFile);
-        }
-        return FALSE;
+            }
+            return FALSE;
     }
     
     if (selectedFile) {
@@ -1851,21 +1840,21 @@ BOOL TTX_Cmd_InsertFile(struct TTXApplication *app, struct Session *session, STR
     STRPTR selectedFile = NULL;
     STRPTR insArgs[1];
     BOOL result = FALSE;
-
+    
     if (!app || !session || !TT_SessionBuffer(session) || session->document->state.readOnly) {
         return FALSE;
     }
-
+    
     if (args && argCount > 0 && args[0]) {
         fileName = args[0];
     }
-
+    
     if (!fileName) {
         if (!AslBase) {
             Printf("[CMD] TTX_Cmd_InsertFile: FAIL (ASL library not available)\n");
             return FALSE;
         }
-
+        
         selectedFile = TTX_ShowFileRequester(app, session, NULL, NULL);
         if (!selectedFile) {
             Printf("[CMD] TTX_Cmd_InsertFile: cancelled or failed\n");
@@ -1873,7 +1862,7 @@ BOOL TTX_Cmd_InsertFile(struct TTXApplication *app, struct Session *session, STR
         }
         fileName = selectedFile;
     }
-
+    
     insArgs[0] = fileName;
     result = TTX_DoEngineCommand(app, session, "InsertFile", insArgs, 1);
 
@@ -1906,7 +1895,7 @@ BOOL TTX_Cmd_SaveFile(struct TTXApplication *app, struct Session *session, STRPT
     {
         session->document->state.modified = FALSE;
         if (TT_SessionBuffer(session))
-            TT_SessionBuffer(session)->modified = FALSE;
+        TT_SessionBuffer(session)->modified = FALSE;
         Printf("[CMD] TTX_Cmd_SaveFile: SUCCESS\n");
         return TRUE;
     }
@@ -2025,7 +2014,7 @@ BOOL TTX_Cmd_SaveFileAs(struct TTXApplication *app, struct Session *session, STR
         }
         fileName = selectedFile;
     }
-
+    
     /*
      * Engine owns doc->state.fileName (TT_DupStr / TT_Free). Snapshot the
      * old path so SaveFile failure can restore via SetFilePath.
@@ -2044,14 +2033,14 @@ BOOL TTX_Cmd_SaveFileAs(struct TTXApplication *app, struct Session *session, STR
             TTX_Free(initialFile);
         if (initialDrawer)
             TTX_Free(initialDrawer);
-        return FALSE;
+                return FALSE;
     }
     
     /* Save file via engine (uses doc->state.fileName set above) */
     if (TTX_DoEngineCommand(app, session, "SaveFile", NULL, 0)) {
         session->document->state.modified = FALSE;
         if (TT_SessionBuffer(session))
-            TT_SessionBuffer(session)->modified = FALSE;
+        TT_SessionBuffer(session)->modified = FALSE;
         result = TRUE;
         Printf("[CMD] TTX_Cmd_SaveFileAs: SUCCESS (saved to '%s')\n", session->document->state.fileName);
         TTX_UpdateSessionWindowTitle(session);
@@ -2093,11 +2082,11 @@ BOOL TTX_Cmd_SaveFileAs(struct TTXApplication *app, struct Session *session, STR
 BOOL TTX_Cmd_PrintFile(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
 	BOOL quiet = FALSE;
-	ULONG i = 0;
-
+    ULONG i = 0;
+    
 	(void)app;
 	if (!session || !session->document)
-		return FALSE;
+        return FALSE;
 	for (i = 0; i < argCount && args && args[i]; i++) {
 		if (Stricmp(args[i], "QUIET") == 0)
 			quiet = TRUE;
@@ -2122,7 +2111,7 @@ BOOL TTX_PromptSaveBeforeClose(struct TTXApplication *app, struct Session *sessi
         return FALSE;
 
     if (!session->document->state.modified)
-        return TRUE;
+    return TRUE;
 
     es.es_StructSize = sizeof(struct EasyStruct);
     es.es_Flags = 0;
@@ -2222,7 +2211,7 @@ TTX_RefreshStatusBar(struct Session *session)
 
 	if (session->statusBarText && session->statusBarText[0] != '\0') {
 		screenTitle = session->statusBarText;
-	} else {
+        } else {
 		view = TTX_SessionView(session);
 		name = (session->document && session->document->state.fileName)
 			? session->document->state.fileName : (STRPTR)"(untitled)";
@@ -2243,7 +2232,7 @@ TTX_RefreshStatusBar(struct Session *session)
 			digits = 0;
 			if (v == 0) {
 				tmp[digits++] = '0';
-			} else {
+    } else {
 				n = v;
 				while (n && digits < 15) {
 					tmp[digits++] = (TEXT)('0' + (n % 10));
@@ -2505,9 +2494,9 @@ BOOL TTX_Cmd_GetReadOnly(struct TTXApplication *app, struct Session *session, ST
 	(void)args;
 	(void)argCount;
 	if (!session || !session->document)
-		return FALSE;
+        return FALSE;
 	TTX_ArexxSetResult(app, session->document->state.readOnly ? "ON" : "OFF");
-	return TRUE;
+    return TRUE;
 }
 
 
@@ -2518,18 +2507,18 @@ BOOL TTX_Cmd_GetReadOnly(struct TTXApplication *app, struct Session *session, ST
 BOOL TTX_Cmd_ActivateLastDoc(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
     struct Session *lastSession = NULL;
-
+    
     (void)session;
     (void)args;
     (void)argCount;
     if (!app) {
         return FALSE;
     }
-
+    
     lastSession = app->previousSession;
     if (!lastSession || !lastSession->window ||
         lastSession->window == INVALID_RESOURCE)
-        lastSession = app->sessions;
+    lastSession = app->sessions;
 
     if (lastSession && lastSession->window &&
         lastSession->window != INVALID_RESOURCE) {
@@ -2539,7 +2528,7 @@ BOOL TTX_Cmd_ActivateLastDoc(struct TTXApplication *app, struct Session *session
         Printf("[CMD] TTX_Cmd_ActivateLastDoc: SUCCESS\n");
         return TRUE;
     }
-
+    
     Printf("[CMD] TTX_Cmd_ActivateLastDoc: FAIL (no session)\n");
     return FALSE;
 }
@@ -2547,18 +2536,18 @@ BOOL TTX_Cmd_ActivateLastDoc(struct TTXApplication *app, struct Session *session
 BOOL TTX_Cmd_ActivateNextDoc(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
     struct Session *nextSession = NULL;
-
+    
     (void)args;
     (void)argCount;
     if (!app || !session) {
         return FALSE;
     }
-
+    
     nextSession = session->next;
     if (!nextSession) {
         nextSession = app->sessions;
     }
-
+    
     if (nextSession && nextSession->window &&
         nextSession->window != INVALID_RESOURCE) {
         WindowToFront(nextSession->window);
@@ -2567,7 +2556,7 @@ BOOL TTX_Cmd_ActivateNextDoc(struct TTXApplication *app, struct Session *session
         Printf("[CMD] TTX_Cmd_ActivateNextDoc: SUCCESS\n");
         return TRUE;
     }
-
+    
     Printf("[CMD] TTX_Cmd_ActivateNextDoc: FAIL (no next session)\n");
     return FALSE;
 }
@@ -2576,13 +2565,13 @@ BOOL TTX_Cmd_ActivatePrevDoc(struct TTXApplication *app, struct Session *session
 {
     struct Session *prevSession = NULL;
     struct Session *currentSession = NULL;
-
+    
     (void)args;
     (void)argCount;
     if (!app || !session) {
         return FALSE;
     }
-
+    
     prevSession = session->prev;
     if (!prevSession) {
         currentSession = app->sessions;
@@ -2591,7 +2580,7 @@ BOOL TTX_Cmd_ActivatePrevDoc(struct TTXApplication *app, struct Session *session
         }
         prevSession = currentSession;
     }
-
+    
     if (prevSession && prevSession->window &&
         prevSession->window != INVALID_RESOURCE) {
         WindowToFront(prevSession->window);
@@ -2600,7 +2589,7 @@ BOOL TTX_Cmd_ActivatePrevDoc(struct TTXApplication *app, struct Session *session
         Printf("[CMD] TTX_Cmd_ActivatePrevDoc: SUCCESS\n");
         return TRUE;
     }
-
+    
     Printf("[CMD] TTX_Cmd_ActivatePrevDoc: FAIL (no prev session)\n");
     return FALSE;
 }
@@ -2634,11 +2623,11 @@ BOOL TTX_Cmd_CloseRequester(struct TTXApplication *app, struct Session *session,
 BOOL TTX_Cmd_ControlWindow(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
     BOOL openWindow = FALSE;
-
+    
     if (!app || !session) {
         return FALSE;
     }
-
+    
     /* Parse ON/OFF/TOGGLE */
     if (args && argCount > 0) {
         if (Stricmp(args[0], "ON") == 0) {
@@ -2651,12 +2640,12 @@ BOOL TTX_Cmd_ControlWindow(struct TTXApplication *app, struct Session *session, 
     } else {
         openWindow = (session->window == NULL);
     }
-
+    
     if (openWindow && (!session->window ||
         session->window == INVALID_RESOURCE)) {
         if (!TTX_RestoreWindow(app, session)) {
             Printf("[CMD] TTX_Cmd_ControlWindow: restore FAILED\n");
-            return FALSE;
+        return FALSE;
         }
         Printf("[CMD] TTX_Cmd_ControlWindow: window restored\n");
         return TRUE;
@@ -2668,7 +2657,7 @@ BOOL TTX_Cmd_ControlWindow(struct TTXApplication *app, struct Session *session, 
         Printf("[CMD] TTX_Cmd_ControlWindow: window closed\n");
         return TRUE;
     }
-
+    
     Printf("[CMD] TTX_Cmd_ControlWindow: SUCCESS (no change needed)\n");
     return TRUE;
 }
@@ -2692,7 +2681,7 @@ BOOL TTX_Cmd_GetScreenInfo(struct TTXApplication *app, struct Session *session, 
 	(void)args;
 	(void)argCount;
 	if (!session || !session->window || !session->window->WScreen)
-		return FALSE;
+    return FALSE;
 	scr = session->window->WScreen;
 	v = scr->Width;
 	digits = 0;
@@ -2723,7 +2712,7 @@ BOOL TTX_Cmd_GetWindowInfo(struct TTXApplication *app, struct Session *session, 
 	(void)args;
 	(void)argCount;
 	if (!session || !session->window)
-		return FALSE;
+    return FALSE;
 	v = session->window->Width;
 	digits = 0;
 	if (v == 0) tmp[digits++] = '0';
@@ -2747,13 +2736,13 @@ BOOL TTX_Cmd_IconifyWindow(struct TTXApplication *app, struct Session *session, 
 
 	(void)session;
 	if (!app)
-		return FALSE;
+        return FALSE;
 	if (args && argCount > 0 && args[0]) {
 		if (Stricmp(args[0], "Toggle") == 0)
 			doIconify = !app->iconified;
 		else if (Stricmp(args[0], "Off") == 0 || Stricmp(args[0], "FALSE") == 0)
 			doIconify = FALSE;
-	}
+    }
 	TTX_Iconify(app, doIconify);
 	return TRUE;
 }
@@ -2771,7 +2760,7 @@ BOOL TTX_Cmd_MoveSizeWindow(struct TTXApplication *app, struct Session *session,
 		return FALSE;
 	if (!args || argCount < 4) {
 		Printf("[CMD] TTX_Cmd_MoveSizeWindow: need left top width height\n");
-		return FALSE;
+    return FALSE;
 	}
 
 	left = TTX_ParseLongArg(args[0]);
@@ -2800,9 +2789,9 @@ BOOL TTX_Cmd_MoveWindow(struct TTXApplication *app, struct Session *session, STR
 
 	(void)app;
 	if (!session || !session->window || session->window == INVALID_RESOURCE)
-		return FALSE;
-
-	if (args && argCount >= 2) {
+        return FALSE;
+    
+    if (args && argCount >= 2) {
 		left = TTX_ParseLongArg(args[0]);
 		top = TTX_ParseLongArg(args[1]);
 	} else {
@@ -2814,8 +2803,8 @@ BOOL TTX_Cmd_MoveWindow(struct TTXApplication *app, struct Session *session, STR
 		session->window->Width, session->window->Height);
 	session->windowState.leftEdge = left;
 	session->windowState.topEdge = top;
-	Printf("[CMD] TTX_Cmd_MoveWindow: SUCCESS\n");
-	return TRUE;
+    Printf("[CMD] TTX_Cmd_MoveWindow: SUCCESS\n");
+    return TRUE;
 }
 
 BOOL TTX_Cmd_OpenRequester(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -2903,14 +2892,38 @@ BOOL TTX_Cmd_OpenRequester(struct TTXApplication *app, struct Session *session, 
 	}
 
 	Printf("[CMD] TTX_Cmd_OpenRequester: type '%s' not implemented\n", which);
-	return FALSE;
+    return FALSE;
 }
 
 BOOL TTX_Cmd_RemakeScreen(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Implement screen remaking */
-    Printf("[CMD] TTX_Cmd_RemakeScreen: not yet implemented\n");
-    return FALSE;
+	struct Session *s;
+	struct TTXPrefs *prefs;
+	BOOL wasLocked;
+
+	(void)session;
+	(void)args;
+	(void)argCount;
+
+	prefs = TTX_PrefsGet();
+	if (prefs)
+		TTX_PrefsApply(app, NULL, prefs);
+
+	for (s = app ? app->sessions : NULL; s; s = s->next) {
+		if (!s->window || s->window == INVALID_RESOURCE)
+			continue;
+		CalculateMaxScroll(s, s->window);
+		UpdateScrollBars(s);
+		wasLocked = s->displayLock;
+		s->displayLock = FALSE;
+		s->render.needsFullRedraw = TRUE;
+		RenderText(s->window, s);
+		UpdateCursor(s->window, s);
+		s->displayLock = wasLocked;
+		TTX_RefreshStatusBar(s);
+	}
+	Printf("[CMD] TTX_Cmd_RemakeScreen: SUCCESS\n");
+	return TRUE;
 }
 
 BOOL TTX_Cmd_Screen2Back(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -2946,7 +2959,7 @@ BOOL TTX_Cmd_SetCursor(struct TTXApplication *app, struct Session *session, STRP
 	view = TTX_SessionView(session);
 	buf = TT_SessionBuffer(session);
 	if (!view || !buf)
-		return FALSE;
+    return FALSE;
 	if (args && argCount >= 1)
 		line = (ULONG)TTX_ParseLongArg(args[0]);
 	if (args && argCount >= 2)
@@ -2984,7 +2997,7 @@ BOOL TTX_Cmd_SetStatusBar(struct TTXApplication *app, struct Session *session, S
 
 	(void)app;
 	if (!session)
-		return FALSE;
+    return FALSE;
 
 	if (args && argCount > 0 && args[0] &&
 	    (Stricmp(args[0], "TEMPORARY") == 0 ||
@@ -3036,7 +3049,7 @@ BOOL TTX_Cmd_SizeWindow(struct TTXApplication *app, struct Session *session, STR
 
 	(void)app;
 	if (!session || !session->window)
-		return FALSE;
+    return FALSE;
 
 	if (args && argCount >= 2) {
 		dw = TTX_ParseLongArg(args[0]);
@@ -3064,7 +3077,7 @@ BOOL TTX_Cmd_UsurpWindow(struct TTXApplication *app, struct Session *session, ST
 	STRPTR port = NULL;
 
 	if (!app || !session || !args || argCount < 1 || !args[0] || args[0][0] == '\0')
-		return FALSE;
+    return FALSE;
 	port = args[0];
 
 	for (s = app->sessions; s; s = s->next) {
@@ -3141,7 +3154,7 @@ BOOL TTX_Cmd_Window2Front(struct TTXApplication *app, struct Session *session, S
 BOOL TTX_Cmd_CenterView(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
 	if (!TTX_DoEngineCommand(app, session, "CenterView", args, argCount))
-		return FALSE;
+    return FALSE;
 	if (session->window) {
 		UpdateScrollBars(session);
 		TTX_RequestRedraw(session);
@@ -3165,7 +3178,7 @@ BOOL TTX_Cmd_GetViewInfo(struct TTXApplication *app, struct Session *session, ST
 	(void)argCount;
 	view = TTX_SessionView(session);
 	if (!view)
-		return FALSE;
+    return FALSE;
 	/* RESULT: viewID scrollX scrollY cursorX cursorY splitRatio */
 	v = view->viewID;
 	digits = 0;
@@ -3192,42 +3205,42 @@ BOOL TTX_Cmd_GetViewInfo(struct TTXApplication *app, struct Session *session, ST
 
 BOOL TTX_Cmd_ScrollView(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-	LONG deltaX = 0;
-	LONG deltaY = 0;
+    LONG deltaX = 0;
+    LONG deltaY = 0;
 	struct TTView *view;
 	struct TTTextBuffer *buf;
-
+    
 	(void)app;
 	if (!session || !TT_SessionBuffer(session))
-		return FALSE;
+        return FALSE;
 	view = TTX_SessionView(session);
 	buf = TT_SessionBuffer(session);
 	if (!view || !buf)
 		return FALSE;
-
-	if (args && argCount >= 2) {
+    
+    if (args && argCount >= 2) {
 		deltaX = TTX_ParseLongArg(args[0]);
 		deltaY = TTX_ParseLongArg(args[1]);
-	} else if (args && argCount >= 1) {
+    } else if (args && argCount >= 1) {
 		deltaY = TTX_ParseLongArg(args[0]);
-	}
-
-	if (deltaY > 0) {
+    }
+    
+    if (deltaY > 0) {
 		view->scrollY += (ULONG)deltaY;
 		if (view->scrollY > buf->maxScrollY)
 			view->scrollY = buf->maxScrollY;
-	} else if (deltaY < 0) {
+    } else if (deltaY < 0) {
 		if ((ULONG)(-deltaY) > view->scrollY)
 			view->scrollY = 0;
 		else
 			view->scrollY -= (ULONG)(-deltaY);
-	}
-
-	if (deltaX > 0) {
+    }
+    
+    if (deltaX > 0) {
 		view->scrollX += (ULONG)deltaX;
 		if (view->scrollX > buf->maxScrollX)
 			view->scrollX = buf->maxScrollX;
-	} else if (deltaX < 0) {
+    } else if (deltaX < 0) {
 		if ((ULONG)(-deltaX) > view->scrollX)
 			view->scrollX = 0;
 		else
@@ -3236,13 +3249,13 @@ BOOL TTX_Cmd_ScrollView(struct TTXApplication *app, struct Session *session, STR
 
 	buf->scrollX = view->scrollX;
 	buf->scrollY = view->scrollY;
-	UpdateScrollBars(session);
+    UpdateScrollBars(session);
 	if (session->window) {
-		RenderText(session->window, session);
-		UpdateCursor(session->window, session);
+    RenderText(session->window, session);
+    UpdateCursor(session->window, session);
 	}
 	Printf("[CMD] TTX_Cmd_ScrollView: SUCCESS dx=%ld dy=%ld\n", deltaX, deltaY);
-	return TRUE;
+    return TRUE;
 }
 
 
@@ -3255,8 +3268,8 @@ BOOL TTX_Cmd_SizeView(struct TTXApplication *app, struct Session *session, STRPT
 		return FALSE;
 	if (session->splitRatio == 0) {
 		Printf("[CMD] TTX_Cmd_SizeView: not split\n");
-		return FALSE;
-	}
+        return FALSE;
+    }
 	if (args && argCount > 0)
 		delta = TTX_ParseLongArg(args[0]);
 	/* Each step adjusts split by 5 percent. */
@@ -3281,7 +3294,7 @@ BOOL TTX_Cmd_SplitView(struct TTXApplication *app, struct Session *session, STRP
 	BOOL toggle = TRUE;
 
 	if (!session || !session->document)
-		return FALSE;
+        return FALSE;
 
 	if (args && argCount > 0 && args[0] && Stricmp(args[0], "Toggle") == 0)
 		toggle = TRUE;
@@ -3302,11 +3315,11 @@ BOOL TTX_Cmd_SplitView(struct TTXApplication *app, struct Session *session, STRP
 
 	if (session->window) {
 		CalculateMaxScroll(session, session->window);
-		UpdateScrollBars(session);
+        UpdateScrollBars(session);
 		TTX_RequestRedraw(session);
-	}
+    }
 	Printf("[CMD] TTX_Cmd_SplitView: ratio=%lu\n", session->splitRatio);
-	return TRUE;
+    return TRUE;
 }
 
 
@@ -3317,7 +3330,7 @@ BOOL TTX_Cmd_SwapViews(struct TTXApplication *app, struct Session *session, STRP
 	/* Need a visible split before swapping pane state. */
 	if (session->splitRatio == 0) {
 		if (!TTX_Cmd_SplitView(app, session, NULL, 0))
-			return FALSE;
+    return FALSE;
 	}
 	if (!TTX_DoEngineCommand(app, session, "SwapViews", args, argCount))
 		return FALSE;
@@ -3336,7 +3349,7 @@ BOOL TTX_Cmd_SwitchView(struct TTXApplication *app, struct Session *session, STR
 		return FALSE;
 	if (session->splitRatio == 0) {
 		if (!TTX_Cmd_SplitView(app, session, NULL, 0))
-			return FALSE;
+    return FALSE;
 	}
 	if (!TTX_DoEngineCommand(app, session, "SwitchView", args, argCount))
 		return FALSE;
@@ -3361,7 +3374,7 @@ BOOL TTX_Cmd_UpdateView(struct TTXApplication *app, struct Session *session, STR
     if (!session || !session->window || !TT_SessionBuffer(session)) {
         return FALSE;
     }
-
+    
     /* Force redraw even while display is locked. */
     wasLocked = session->displayLock;
     session->displayLock = FALSE;
@@ -3379,7 +3392,7 @@ BOOL TTX_Cmd_UpdateView(struct TTXApplication *app, struct Session *session, STR
 
 BOOL TTX_Cmd_CopyBlk(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-	STRPTR blockText = NULL;
+    STRPTR blockText = NULL;
 	struct TTView *view;
 
 	(void)app;
@@ -3387,17 +3400,17 @@ BOOL TTX_Cmd_CopyBlk(struct TTXApplication *app, struct Session *session, STRPTR
 	(void)argCount;
 	view = TTX_SessionView(session);
 	if (!session || !TT_SessionBuffer(session) || !view || !view->marking.enabled) {
-		Printf("[CMD] TTX_Cmd_CopyBlk: FAIL (no selection)\n");
-		return FALSE;
-	}
-
+        Printf("[CMD] TTX_Cmd_CopyBlk: FAIL (no selection)\n");
+        return FALSE;
+    }
+    
 	TTX_SyncMarkingToBuffer(session);
 	blockText = GetBlock(TT_SessionBuffer(session));
-	if (!blockText) {
-		Printf("[CMD] TTX_Cmd_CopyBlk: FAIL (GetBlock failed)\n");
-		return FALSE;
-	}
-
+    if (!blockText) {
+        Printf("[CMD] TTX_Cmd_CopyBlk: FAIL (GetBlock failed)\n");
+        return FALSE;
+    }
+    
 	TTX_ClipboardSetText(blockText);
 	TTX_Free(blockText);
 	/* Drop selection after copy so the next MarkBlk starts clean. */
@@ -3405,39 +3418,39 @@ BOOL TTX_Cmd_CopyBlk(struct TTXApplication *app, struct Session *session, STRPTR
 	if (TT_SessionBuffer(session))
 		TT_SessionBuffer(session)->marking.enabled = FALSE;
 	Printf("[CMD] TTX_Cmd_CopyBlk: SUCCESS\n");
-	return TRUE;
+    return TRUE;
 }
 
 
 BOOL TTX_Cmd_CutBlk(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-	STRPTR blockText = NULL;
+    STRPTR blockText = NULL;
 	struct TTView *view;
-
+    
 	view = TTX_SessionView(session);
 	if (!session || !TT_SessionBuffer(session) || session->document->state.readOnly)
-		return FALSE;
+        return FALSE;
 	if (!view || !view->marking.enabled) {
-		Printf("[CMD] TTX_Cmd_CutBlk: FAIL (no selection)\n");
-		return FALSE;
-	}
-
+        Printf("[CMD] TTX_Cmd_CutBlk: FAIL (no selection)\n");
+        return FALSE;
+    }
+    
 	TTX_SyncMarkingToBuffer(session);
 	blockText = GetBlock(TT_SessionBuffer(session));
-	if (!blockText) {
-		Printf("[CMD] TTX_Cmd_CutBlk: FAIL (GetBlock failed)\n");
-		return FALSE;
-	}
-
+    if (!blockText) {
+        Printf("[CMD] TTX_Cmd_CutBlk: FAIL (GetBlock failed)\n");
+        return FALSE;
+    }
+    
 	TTX_ClipboardSetText(blockText);
 	TTX_Free(blockText);
 
 	if (!TTX_DoEngineCommand(app, session, "DeleteBlk", NULL, 0)) {
 		Printf("[CMD] TTX_Cmd_CutBlk: FAIL (DeleteBlk failed)\n");
-		return FALSE;
-	}
-	Printf("[CMD] TTX_Cmd_CutBlk: SUCCESS\n");
-	return TRUE;
+        return FALSE;
+    }
+    Printf("[CMD] TTX_Cmd_CutBlk: SUCCESS\n");
+    return TRUE;
 }
 
 
@@ -3452,13 +3465,13 @@ BOOL TTX_Cmd_EncryptBlk(struct TTXApplication *app, struct Session *session, STR
 	(void)argCount;
 	if (!app || !session || !TT_SessionBuffer(session))
 		return FALSE;
-	if (!TT_SessionBuffer(session)->marking.enabled) {
+    if (!TT_SessionBuffer(session)->marking.enabled) {
 		Printf("[CMD] TTX_Cmd_EncryptBlk: FAIL (no selection)\n");
-		return FALSE;
-	}
+        return FALSE;
+    }
 	blockText = GetBlock(TT_SessionBuffer(session));
 	if (!blockText)
-		return FALSE;
+        return FALSE;
 	for (i = 0; blockText[i] != '\0'; i++) {
 		c = (UBYTE)blockText[i];
 		if (c >= (UBYTE)'A' && c <= (UBYTE)'Z')
@@ -3473,7 +3486,7 @@ BOOL TTX_Cmd_EncryptBlk(struct TTXApplication *app, struct Session *session, STR
 	insArgs[0] = blockText;
 	if (!TTX_DoEngineCommand(app, session, "Insert", insArgs, 1)) {
 		TTX_Free(blockText);
-		return FALSE;
+    return FALSE;
 	}
 	TTX_Free(blockText);
 	Printf("[CMD] TTX_Cmd_EncryptBlk: SUCCESS\n");
@@ -3490,7 +3503,7 @@ BOOL TTX_Cmd_GetBlk(struct TTXApplication *app, struct Session *session, STRPTR 
 	view = TTX_SessionView(session);
 	if (!session || !TT_SessionBuffer(session) || !view) {
 		TTX_ArexxSetResult(app, (STRPTR)"");
-		return FALSE;
+    return FALSE;
 	}
 	if (!view->marking.enabled) {
 		TTX_ArexxSetResult(app, (STRPTR)"");
@@ -3526,8 +3539,8 @@ BOOL TTX_Cmd_GetBlkInfo(struct TTXApplication *app, struct Session *session, STR
 	view = TTX_SessionView(session);
 	if (!view) {
 		TTX_ArexxSetResult(app, (STRPTR)"OFF OFF 0 0");
-		return FALSE;
-	}
+    return FALSE;
+}
 
 	/*
 	 * RESULT: blockActive verticalBlock blockLine blockColumn
@@ -3568,7 +3581,7 @@ BOOL TTX_Cmd_GetBlkInfo(struct TTXApplication *app, struct Session *session, STR
 	buf[i] = '\0';
 	TTX_ArexxSetResult(app, buf);
 	Printf("[CMD] TTX_Cmd_GetBlkInfo: %s\n", buf);
-	return TRUE;
+    return TRUE;
 }
 
 
@@ -3588,12 +3601,12 @@ BOOL TTX_Cmd_OpenClip(struct TTXApplication *app, struct Session *session, STRPT
 	(void)session;
 	if (!args || argCount < 1 || !args[0]) {
 		Printf("[CMD] TTX_Cmd_OpenClip: FAIL (need filename)\n");
-		return FALSE;
-	}
+    return FALSE;
+}
 	path = args[0];
 	fh = Open(path, MODE_OLDFILE);
 	if (!fh)
-		return FALSE;
+    return FALSE;
 	Seek(fh, 0, OFFSET_END);
 	size = Seek(fh, 0, OFFSET_BEGINNING);
 	if (size < 0)
@@ -3601,8 +3614,8 @@ BOOL TTX_Cmd_OpenClip(struct TTXApplication *app, struct Session *session, STRPT
 	buf = (STRPTR)TTX_Alloc((ULONG)size + 1, MEMF_CLEAR);
 	if (!buf) {
 		Close(fh);
-		return FALSE;
-	}
+    return FALSE;
+}
 	got = Read(fh, buf, size);
 	Close(fh);
 	if (got < 0)
@@ -3625,13 +3638,13 @@ BOOL TTX_Cmd_PasteClip(struct TTXApplication *app, struct Session *session, STRP
 	(void)args;
 	(void)argCount;
 	if (!session || !TT_SessionBuffer(session) || session->document->state.readOnly)
-		return FALSE;
+    return FALSE;
 
 	clip = TTX_ClipboardGetText();
 	if (!clip || clip[0] == '\0') {
 		Printf("[CMD] TTX_Cmd_PasteClip: FAIL (empty clip)\n");
-		return FALSE;
-	}
+    return FALSE;
+}
 
 	/* Insert clip char-by-char; newlines become InsertLine. */
 	chBuf[1] = '\0';
@@ -3641,22 +3654,22 @@ BOOL TTX_Cmd_PasteClip(struct TTXApplication *app, struct Session *session, STRP
 			if (*p == '\r' && p[1] == '\n')
 				p++;
 			if (!TTX_DoEngineCommand(app, session, "InsertLine", NULL, 0))
-				return FALSE;
+    return FALSE;
 		} else {
 			chBuf[0] = *p;
 			if (!TTX_DoEngineCommand(app, session, "Insert", insertArgs, 1))
-				return FALSE;
-		}
+        return FALSE;
+    }
 	}
 	Printf("[CMD] TTX_Cmd_PasteClip: SUCCESS\n");
-	return TRUE;
+    return TRUE;
 }
 
 
 BOOL TTX_Cmd_PrintClip(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
 	BOOL quiet = FALSE;
-	ULONG i = 0;
+    ULONG i = 0;
 	STRPTR clip = NULL;
 
 	(void)app;
@@ -3667,14 +3680,14 @@ BOOL TTX_Cmd_PrintClip(struct TTXApplication *app, struct Session *session, STRP
 	clip = TTX_ClipboardGetText();
 	if (!clip || clip[0] == '\0') {
 		Printf("[CMD] TTX_Cmd_PrintClip: FAIL (empty clipboard)\n");
-		return FALSE;
-	}
+        return FALSE;
+    }
 	if (!TTX_ConfirmPrint(session, quiet, (STRPTR)"clipboard"))
 		return FALSE;
 	if (!TTX_PrintTextToPRT(clip))
 		return FALSE;
 	Printf("[CMD] TTX_Cmd_PrintClip: SUCCESS\n");
-	return TRUE;
+    return TRUE;
 }
 
 BOOL TTX_Cmd_SaveClip(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -3683,11 +3696,11 @@ BOOL TTX_Cmd_SaveClip(struct TTXApplication *app, struct Session *session, STRPT
 	STRPTR path;
 	STRPTR clip;
 	ULONG len;
-
+    
 	(void)app;
 	(void)session;
 	if (!args || argCount < 1 || !args[0])
-		return FALSE;
+        return FALSE;
 	clip = TTX_ClipboardGetText();
 	if (!clip)
 		return FALSE;
@@ -3731,7 +3744,7 @@ BOOL TTX_Cmd_GetFileInfo(struct TTXApplication *app, struct Session *session, ST
 	info[i++] = session->document->state.readOnly ? '1' : '0';
 	info[i] = '\0';
 	TTX_ArexxSetResult(app, info);
-	return TRUE;
+    return TRUE;
 }
 
 
@@ -3740,14 +3753,14 @@ BOOL TTX_Cmd_GetFilePath(struct TTXApplication *app, struct Session *session, ST
 	(void)args;
 	(void)argCount;
 	if (!session || !session->document)
-		return FALSE;
+        return FALSE;
 	if (session->document->state.fileName)
 		TTX_ArexxSetResult(app, session->document->state.fileName);
 	else
 		TTX_ArexxSetResult(app, (STRPTR)"(untitled)");
-	return TRUE;
-}
-
+        return TRUE;
+    }
+    
 
 /* ============================================================================
  * Cursor Position Commands (stubs)
@@ -3759,7 +3772,7 @@ BOOL TTX_Cmd_Find(struct TTXApplication *app, struct Session *session, STRPTR *a
 	ULONG useCount = 0;
 
 	if (!session)
-		return FALSE;
+        return FALSE;
 
 	if (args && argCount > 0 && args[0] && args[0][0] != '\0') {
 		if (TTX_LastFind)
@@ -3772,8 +3785,8 @@ BOOL TTX_Cmd_Find(struct TTXApplication *app, struct Session *session, STRPTR *a
 		useCount = 1;
 	} else {
 		Printf("[CMD] TTX_Cmd_Find: FAIL (no search string)\n");
-		return FALSE;
-	}
+    return FALSE;
+}
 
 	/* Append last requester flags (and any explicit Find args after str). */
 	if (!TTX_LastFindOpts.ignoreCase)
@@ -3792,10 +3805,10 @@ BOOL TTX_Cmd_Find(struct TTXApplication *app, struct Session *session, STRPTR *a
 
 	if (TTX_DoEngineCommand(app, session, "Find", useArgs, useCount)) {
 		Printf("[CMD] TTX_Cmd_Find: SUCCESS\n");
-		return TRUE;
-	}
+    return TRUE;
+}
 	Printf("[CMD] TTX_Cmd_Find: FAIL\n");
-	return FALSE;
+    return FALSE;
 }
 
 
@@ -3813,7 +3826,7 @@ BOOL TTX_Cmd_GetCursorPos(struct TTXApplication *app, struct Session *session, S
 	(void)argCount;
 	view = TTX_SessionView(session);
 	if (!view)
-		return FALSE;
+        return FALSE;
 
 	/* RESULT "line col" 1-based like TurboText. */
 	i = 0;
@@ -3831,7 +3844,7 @@ BOOL TTX_Cmd_GetCursorPos(struct TTXApplication *app, struct Session *session, S
 	buf[i] = '\0';
 	TTX_ArexxSetResult(app, buf);
 	Printf("[CMD] TTX_Cmd_GetCursorPos: %s\n", buf);
-	return TRUE;
+    return TRUE;
 }
 
 
@@ -3850,7 +3863,7 @@ BOOL TTX_Cmd_FindChange(struct TTXApplication *app, struct Session *session, STR
 	ULONG i;
 
 	if (!session || session->document->state.readOnly)
-		return FALSE;
+        return FALSE;
 	if (!args || argCount < 2 || !args[0] || !args[1])
 		return FALSE;
 
@@ -3877,11 +3890,11 @@ BOOL TTX_Cmd_FindChange(struct TTXApplication *app, struct Session *session, STR
 
 	if (TTX_DoEngineCommand(app, session, "FindChange", useArgs, useCount)) {
 		Printf("[CMD] TTX_Cmd_FindChange: SUCCESS\n");
-		return TRUE;
-	}
-	return FALSE;
+    return TRUE;
 }
-
+        return FALSE;
+    }
+    
 
 BOOL TTX_Cmd_SetChar(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
@@ -3896,18 +3909,18 @@ BOOL TTX_Cmd_SetChar(struct TTXApplication *app, struct Session *session, STRPTR
         if (SetCharAtCursor(TT_SessionBuffer(session), ch)) {
             CalculateMaxScroll(session, session->window);
             ScrollToCursor(session, session->window);
-            UpdateScrollBars(session);
-            RenderText(session->window, session);
-            UpdateCursor(session->window, session);
+    UpdateScrollBars(session);
+    RenderText(session->window, session);
+    UpdateCursor(session->window, session);
             session->document->state.modified = TT_SessionBuffer(session)->modified;
             Printf("[CMD] TTX_Cmd_SetChar: SUCCESS\n");
-            return TRUE;
+    return TRUE;
         }
     }
     
-    return FALSE;
-}
-
+        return FALSE;
+    }
+    
 BOOL TTX_Cmd_InsertLine(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
 	STRPTR useArgs[4];
@@ -3917,9 +3930,9 @@ BOOL TTX_Cmd_InsertLine(struct TTXApplication *app, struct Session *session, STR
 	struct TTXPrefs *p;
 
 	if (!session || !TT_SessionBuffer(session) || session->document->state.readOnly) {
-		return FALSE;
-	}
-
+        return FALSE;
+    }
+    
 	useCount = 0;
 	haveIndent = FALSE;
 	for (i = 0; i < argCount && useCount < 3; i++) {
@@ -3936,10 +3949,10 @@ BOOL TTX_Cmd_InsertLine(struct TTXApplication *app, struct Session *session, STR
 	if (TTX_DoEngineCommand(app, session, "InsertLine",
 		useCount ? useArgs : NULL, useCount)) {
 		Printf("[CMD] TTX_Cmd_InsertLine: SUCCESS\n");
-		return TRUE;
-	}
+    return TRUE;
+}
 
-	return FALSE;
+    return FALSE;
 }
 
 
@@ -3957,12 +3970,12 @@ BOOL TTX_Cmd_Conv2Lower(struct TTXApplication *app, struct Session *session, STR
     if (!session || !TT_SessionBuffer(session) || session->document->state.readOnly) {
         return FALSE;
     }
-
+    
     if (TTX_DoEngineCommand(app, session, "Conv2Lower", args, argCount)) {
         Printf("[CMD] TTX_Cmd_Conv2Lower: SUCCESS\n");
         return TRUE;
     }
-
+    
     return FALSE;
 }
 
@@ -3973,10 +3986,10 @@ BOOL TTX_Cmd_Conv2Spaces(struct TTXApplication *app, struct Session *session, ST
 	ULONG useCount;
 	struct TTXPrefs *p;
 
-	if (!session || !TT_SessionBuffer(session) || session->document->state.readOnly) {
-		return FALSE;
-	}
-
+    if (!session || !TT_SessionBuffer(session) || session->document->state.readOnly) {
+        return FALSE;
+    }
+    
 	useCount = 0;
 	p = TTX_PrefsGet();
 	if (p && p->tabWidth > 0) {
@@ -3991,10 +4004,10 @@ BOOL TTX_Cmd_Conv2Spaces(struct TTXApplication *app, struct Session *session, ST
 	if (TTX_DoEngineCommand(app, session, "Conv2Spaces",
 				useCount ? useArgs : args, useCount)) {
 		Printf("[CMD] TTX_Cmd_Conv2Spaces: SUCCESS\n");
-		return TRUE;
-	}
-
-	return FALSE;
+        return TRUE;
+    }
+    
+    return FALSE;
 }
 
 BOOL TTX_Cmd_Conv2Tabs(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -4004,10 +4017,10 @@ BOOL TTX_Cmd_Conv2Tabs(struct TTXApplication *app, struct Session *session, STRP
 	ULONG useCount;
 	struct TTXPrefs *p;
 
-	if (!session || !TT_SessionBuffer(session) || session->document->state.readOnly) {
-		return FALSE;
-	}
-
+    if (!session || !TT_SessionBuffer(session) || session->document->state.readOnly) {
+        return FALSE;
+    }
+    
 	useCount = 0;
 	p = TTX_PrefsGet();
 	if (p && p->tabWidth > 0) {
@@ -4022,10 +4035,10 @@ BOOL TTX_Cmd_Conv2Tabs(struct TTXApplication *app, struct Session *session, STRP
 	if (TTX_DoEngineCommand(app, session, "Conv2Tabs",
 				useCount ? useArgs : args, useCount)) {
 		Printf("[CMD] TTX_Cmd_Conv2Tabs: SUCCESS\n");
-		return TRUE;
-	}
-
-	return FALSE;
+        return TRUE;
+    }
+    
+    return FALSE;
 }
 
 BOOL TTX_Cmd_Conv2Upper(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -4033,12 +4046,12 @@ BOOL TTX_Cmd_Conv2Upper(struct TTXApplication *app, struct Session *session, STR
     if (!session || !TT_SessionBuffer(session) || session->document->state.readOnly) {
         return FALSE;
     }
-
+    
     if (TTX_DoEngineCommand(app, session, "Conv2Upper", args, argCount)) {
         Printf("[CMD] TTX_Cmd_Conv2Upper: SUCCESS\n");
         return TRUE;
     }
-
+    
     return FALSE;
 }
 
@@ -4046,41 +4059,6 @@ BOOL TTX_Cmd_Conv2Upper(struct TTXApplication *app, struct Session *session, STR
 /* ============================================================================
  * Fold Commands (stubs)
  * ============================================================================ */
-
-BOOL TTX_Cmd_HideFold(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
-{
-    /* TODO: Implement fold hiding */
-    Printf("[CMD] TTX_Cmd_HideFold: not yet implemented\n");
-    return FALSE;
-}
-
-BOOL TTX_Cmd_MakeFold(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
-{
-    /* TODO: Implement fold creation */
-    Printf("[CMD] TTX_Cmd_MakeFold: not yet implemented\n");
-    return FALSE;
-}
-
-BOOL TTX_Cmd_ShowFold(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
-{
-    /* TODO: Implement fold showing */
-    Printf("[CMD] TTX_Cmd_ShowFold: not yet implemented\n");
-    return FALSE;
-}
-
-BOOL TTX_Cmd_ToggleFold(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
-{
-    /* TODO: Implement fold toggling */
-    Printf("[CMD] TTX_Cmd_ToggleFold: not yet implemented\n");
-    return FALSE;
-}
-
-BOOL TTX_Cmd_UnmakeFold(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
-{
-    /* TODO: Implement fold removal */
-    Printf("[CMD] TTX_Cmd_UnmakeFold: not yet implemented\n");
-    return FALSE;
-}
 
 /* ============================================================================
  * Macro Commands — buffer in engine; Play/Open/Save need driver reentry/ASL.
@@ -4101,17 +4079,17 @@ BOOL TTX_Cmd_PlayMacro(struct TTXApplication *app, struct Session *session, STRP
 	ULONG li = 0;
 
 	if (!app || !session || !session->document || !TurboTextBase)
-		return FALSE;
+        return FALSE;
 	base = (struct TurboTextBase *)TurboTextBase;
 	if (base->macroRecording) {
 		Printf("[CMD] TTX_Cmd_PlayMacro: FAIL (still recording)\n");
-		return FALSE;
-	}
+    return FALSE;
+}
 	if (base->macroCount == 0) {
 		Printf("[CMD] TTX_Cmd_PlayMacro: FAIL (empty macro)\n");
-		return FALSE;
-	}
-	if (args && argCount > 0 && args[0]) {
+        return FALSE;
+    }
+    if (args && argCount > 0 && args[0]) {
 		LONG n = 0;
 		if (StrToLong(args[0], &n)) {
 			if (n == 0)
@@ -4123,7 +4101,7 @@ BOOL TTX_Cmd_PlayMacro(struct TTXApplication *app, struct Session *session, STRP
 
 	if (!TT_DoCommand(session->document, TT_GetActiveView(session->document),
 			(STRPTR)"MacroPlayBegin", NULL, 0))
-		return FALSE;
+    return FALSE;
 
 	count = base->macroCount;
 	if (times == 0) {
@@ -4200,7 +4178,7 @@ BOOL TTX_Cmd_OpenMacro(struct TTXApplication *app, struct Session *session, STRP
 	STRPTR loadArgs[1];
 
 	if (!app || !session || !session->document || !TurboTextBase)
-		return FALSE;
+        return FALSE;
 	if (args && argCount > 0 && args[0] && args[0][0] != '\0')
 		path = args[0];
 	if (!path) {
@@ -4237,9 +4215,9 @@ BOOL TTX_Cmd_OpenMacro(struct TTXApplication *app, struct Session *session, STRP
 		TTX_Free(selected);
 	Printf("[CMD] TTX_Cmd_OpenMacro: loaded %lu cmds\n",
 		((struct TurboTextBase *)TurboTextBase)->macroCount);
-	return TRUE;
-}
-
+        return TRUE;
+    }
+    
 BOOL TTX_Cmd_SaveMacro(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
 	STRPTR path = NULL;
@@ -4255,7 +4233,7 @@ BOOL TTX_Cmd_SaveMacro(struct TTXApplication *app, struct Session *session, STRP
 	STRPTR line = NULL;
 
 	if (!app || !session || !session->document || !TurboTextBase)
-		return FALSE;
+    return FALSE;
 	base = (struct TurboTextBase *)TurboTextBase;
 	for (i = 0; i < argCount && args && args[i]; i++) {
 		if (Stricmp(args[i], "QUIET") == 0)
@@ -4266,20 +4244,20 @@ BOOL TTX_Cmd_SaveMacro(struct TTXApplication *app, struct Session *session, STRP
 	(void)quiet;
 	if (base->macroCount == 0) {
 		Printf("[CMD] TTX_Cmd_SaveMacro: FAIL (empty)\n");
-		return FALSE;
-	}
+    return FALSE;
+}
 	if (!path) {
 		selected = TTX_ShowSaveFileRequester(app, session, NULL, NULL);
 		if (!selected)
-			return FALSE;
+    return FALSE;
 		path = selected;
 	}
 	fh = Open(path, MODE_NEWFILE);
 	if (!fh) {
 		if (selected)
 			TTX_Free(selected);
-		return FALSE;
-	}
+    return FALSE;
+}
 	for (i = 0; i < base->macroCount; i++) {
 		TTX_FormatULong(idxBuf, sizeof(idxBuf), i);
 		lineArgs[0] = idxBuf;
@@ -4288,15 +4266,15 @@ BOOL TTX_Cmd_SaveMacro(struct TTXApplication *app, struct Session *session, STRP
 			Close(fh);
 			if (selected)
 				TTX_Free(selected);
-			return FALSE;
-		}
+    return FALSE;
+}
 		line = base->lastStringResult;
 		if (!line) {
 			Close(fh);
 			if (selected)
 				TTX_Free(selected);
-			return FALSE;
-		}
+        return FALSE;
+    }
 		len = 0;
 		while (line[len] != '\0')
 			len++;
@@ -4304,20 +4282,20 @@ BOOL TTX_Cmd_SaveMacro(struct TTXApplication *app, struct Session *session, STRP
 			Close(fh);
 			if (selected)
 				TTX_Free(selected);
-			return FALSE;
-		}
+    return FALSE;
+}
 		if (Write(fh, &nl, 1) != 1) {
 			Close(fh);
 			if (selected)
 				TTX_Free(selected);
-			return FALSE;
-		}
+        return FALSE;
+    }
 	}
 	Close(fh);
 	if (selected)
 		TTX_Free(selected);
 	Printf("[CMD] TTX_Cmd_SaveMacro: SUCCESS\n");
-	return TRUE;
+            return TRUE;
 }
 
 BOOL TTX_Cmd_ExecARexxMacro(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -4335,7 +4313,7 @@ BOOL TTX_Cmd_ExecARexxMacro(struct TTXApplication *app, struct Session *session,
 	BOOL ok = FALSE;
 
 	if (!app)
-		return FALSE;
+        return FALSE;
 
 	/* Skip CONSOLE / LOCKINPUT / LOCKDISPLAY / NOCACHE switches. */
 	while (i < argCount && args[i]) {
@@ -4381,8 +4359,8 @@ BOOL TTX_Cmd_ExecARexxMacro(struct TTXApplication *app, struct Session *session,
 				session->inputLock = savedInput;
 			if (session && lockDisplay)
 				session->displayLock = savedDisplay;
-			return FALSE;
-		}
+        return FALSE;
+    }
 		ok = TTX_ArexxExec(app, selected, FALSE, console);
 		TTX_Free(selected);
 	} else {
@@ -4413,7 +4391,7 @@ BOOL TTX_Cmd_ExecARexxString(struct TTXApplication *app, struct Session *session
 	BOOL ok = FALSE;
 
 	if (!app)
-		return FALSE;
+        return FALSE;
 
 	while (i < argCount && args[i]) {
 		if (Stricmp(args[i], "CONSOLE") == 0)
@@ -4441,7 +4419,7 @@ BOOL TTX_Cmd_ExecARexxString(struct TTXApplication *app, struct Session *session
 	cmdBuf[pos] = '\0';
 
 	if (cmdBuf[0] == '\0')
-		return FALSE;
+        return FALSE;
 
 	if (session && lockInput) {
 		savedInput = session->inputLock;
@@ -4470,7 +4448,7 @@ BOOL TTX_Cmd_FlushARexxCache(struct TTXApplication *app, struct Session *session
 	(void)args;
 	(void)argCount;
 	if (!app)
-		return FALSE;
+    return FALSE;
 	/* Cache contents deferred; flag stays as-is. */
 	Printf("[CMD] TTX_Cmd_FlushARexxCache: SUCCESS\n");
 	return TRUE;
@@ -4482,19 +4460,19 @@ BOOL TTX_Cmd_GetARexxCache(struct TTXApplication *app, struct Session *session, 
 	(void)args;
 	(void)argCount;
 	if (!app)
-		return FALSE;
+        return FALSE;
 	TTX_ArexxSetResult(app, app->arexxCacheOn ? (STRPTR)"ON" : (STRPTR)"OFF");
-	return TRUE;
-}
-
+        return TRUE;
+    }
+    
 BOOL TTX_Cmd_SetARexxCache(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
 	(void)session;
 	if (!app)
-		return FALSE;
+        return FALSE;
 	TTX_ParseOnOffToggle(args, argCount, &app->arexxCacheOn);
 	Printf("[CMD] TTX_Cmd_SetARexxCache: %s\n", app->arexxCacheOn ? "ON" : "OFF");
-	return TRUE;
+        return TRUE;
 }
 
 /* ============================================================================
@@ -4516,7 +4494,7 @@ BOOL TTX_Cmd_ExecTool(struct TTXApplication *app, struct Session *session, STRPT
 	STRPTR sn = NULL;
 
 	if (!app)
-		return FALSE;
+    return FALSE;
 	for (i = 0; i < argCount && args && args[i]; i++) {
 		if (Stricmp(args[i], "PORT") == 0)
 			wantPort = TRUE;
@@ -4530,7 +4508,7 @@ BOOL TTX_Cmd_ExecTool(struct TTXApplication *app, struct Session *session, STRPT
 	if (!name) {
 		selected = TTX_ShowFileRequester(app, session, NULL, NULL);
 		if (!selected)
-			return FALSE;
+    return FALSE;
 		name = selected;
 	}
 	cmd[0] = '\0';
@@ -4580,8 +4558,8 @@ BOOL TTX_Cmd_GetPrefs(struct TTXApplication *app, struct Session *session, STRPT
 	name = (args && argCount > 0 && args[0]) ? args[0] : NULL;
 	if (!name) {
 		TTX_ArexxSetResult(app, (STRPTR)"");
-		return FALSE;
-	}
+    return FALSE;
+}
 	buf[0] = '\0';
 	if (Stricmp(name, "Overstrike") == 0)
 		TTX_CopyStr(buf, sizeof(buf), (STRPTR)(p->overstrike ? "ON" : "OFF"));
@@ -4608,8 +4586,8 @@ BOOL TTX_Cmd_GetPrefs(struct TTXApplication *app, struct Session *session, STRPT
 		TTX_FormatULong(buf, sizeof(buf), p->rightMargin);
 	else {
 		TTX_ArexxSetResult(app, (STRPTR)"");
-		return FALSE;
-	}
+    return FALSE;
+}
 	TTX_ArexxSetResult(app, buf);
 	return TRUE;
 }
@@ -4629,15 +4607,15 @@ BOOL TTX_Cmd_OpenDefinitions(struct TTXApplication *app, struct Session *session
 		path = TTX_RequestFile(win, (STRPTR)"Open Definitions", FALSE,
 			(STRPTR)"TTX_BuiltIn.dfn", (STRPTR)"PROGDIR:Support");
 		if (!path)
-			return FALSE;
+    return FALSE;
 		owned = TRUE;
 	}
 	lock = Lock(path, ACCESS_READ);
 	if (!lock) {
 		if (owned)
 			TTX_Free(path);
-		return FALSE;
-	}
+    return FALSE;
+}
 	UnLock(lock);
 	TTX_SetDefinitionsPath(path);
 	if (owned)
@@ -4667,14 +4645,14 @@ BOOL TTX_Cmd_OpenPrefs(struct TTXApplication *app, struct Session *session, STRP
 		path = TTX_RequestFile(win, (STRPTR)"Open Prefs", FALSE,
 			(STRPTR)"TTX.prefs", NULL);
 		if (!path)
-			return FALSE;
+    return FALSE;
 		owned = TRUE;
 	}
 	if (!TTX_PrefsLoad(&loaded, path)) {
 		if (owned)
 			TTX_Free(path);
-		return FALSE;
-	}
+    return FALSE;
+}
 	if (owned)
 		TTX_Free(path);
 	TTX_PrefsApply(app, session, &loaded);
@@ -4696,13 +4674,13 @@ BOOL TTX_Cmd_SavePrefs(struct TTXApplication *app, struct Session *session, STRP
 		path = TTX_RequestFile(win, (STRPTR)"Save Prefs As", TRUE,
 			(STRPTR)"TTX.prefs", NULL);
 		if (!path)
-			return FALSE;
+    return FALSE;
 		owned = TRUE;
 	}
 	if (!TTX_PrefsSave(TTX_PrefsGet(), path)) {
 		if (owned)
 			TTX_Free(path);
-		return FALSE;
+    return FALSE;
 	}
 	if (owned)
 		TTX_Free(path);
@@ -4731,7 +4709,7 @@ BOOL TTX_Cmd_SetPrefs(struct TTXApplication *app, struct Session *session, STRPT
 	name = (args && argCount > 0 && args[0]) ? args[0] : NULL;
 	mode = (args && argCount > 1 && args[1]) ? args[1] : (STRPTR)"Toggle";
 	if (!name)
-		return FALSE;
+    return FALSE;
 
 	flag = NULL;
 	if (Stricmp(name, "Overstrike") == 0)
@@ -4766,7 +4744,7 @@ BOOL TTX_Cmd_SetPrefs(struct TTXApplication *app, struct Session *session, STRPT
 		TTX_PrefsApply(app, session, p);
 		return TRUE;
 	} else
-		return FALSE;
+    return FALSE;
 
 	if (Stricmp(mode, "Toggle") == 0)
 		newVal = (BOOL)(!*flag);
@@ -4833,7 +4811,7 @@ BOOL TTX_Cmd_RequestFile(struct TTXApplication *app, struct Session *session, ST
 	path = TTX_RequestFile(win, title, FALSE, NULL, NULL);
 	if (!path) {
 		TTX_ArexxSetResult(app, (STRPTR)"");
-		return FALSE;
+    return FALSE;
 	}
 	TTX_ArexxSetResult(app, path);
 	TTX_Free(path);
@@ -4868,7 +4846,7 @@ BOOL TTX_Cmd_RequestNum(struct TTXApplication *app, struct Session *session, STR
 	}
 
 	if (!TTX_RequestNum(win, title, defVal, positiveOnly, &val))
-		return FALSE;
+    return FALSE;
 	TTX_FormatLong(buf, sizeof(buf), val);
 	TTX_ArexxSetResult(app, buf);
 	return TRUE;
@@ -4897,7 +4875,7 @@ BOOL TTX_Cmd_RequestStr(struct TTXApplication *app, struct Session *session, STR
 	}
 
 	if (!TTX_RequestStr(win, title, defStr, &result))
-		return FALSE;
+    return FALSE;
 	TTX_ArexxSetResult(app, result ? result : (STRPTR)"");
 	if (result)
 		TTX_Free(result);
@@ -4914,7 +4892,7 @@ BOOL TTX_Cmd_GetBackground(struct TTXApplication *app, struct Session *session, 
 	(void)args;
 	(void)argCount;
 	if (!app)
-		return FALSE;
+    return FALSE;
 	TTX_ArexxSetResult(app, app->backgroundMode ? (STRPTR)"ON" : (STRPTR)"OFF");
 	return TRUE;
 }
@@ -4924,7 +4902,7 @@ BOOL TTX_Cmd_GetCurrentDir(struct TTXApplication *app, struct Session *session, 
 	(void)args;
 	(void)argCount;
 	if (!app || !session)
-		return FALSE;
+    return FALSE;
 	/* Untitled / late init: resolve process CWD into the session once. */
 	if (!session->currentDir || session->currentDir[0] == '\0')
 		TTX_SessionInitCurrentDir(session, NULL);
@@ -4948,7 +4926,7 @@ BOOL TTX_Cmd_GetDocuments(struct TTXApplication *app, struct Session *session, S
 	(void)args;
 	(void)argCount;
 	if (!app)
-		return FALSE;
+    return FALSE;
 
 	buf[0] = '\0';
 	s = app->sessions;
@@ -5002,7 +4980,7 @@ BOOL TTX_Cmd_GetErrorInfo(struct TTXApplication *app, struct Session *session, S
 
 	(void)session;
 	if (!app)
-		return FALSE;
+    return FALSE;
 	err = (LONG)TT_GetLastError();
 	for (i = 0; i < argCount && args && args[i]; i++) {
 		if (Stricmp(args[i], "AMIGADOS") == 0)
@@ -5053,7 +5031,7 @@ BOOL TTX_Cmd_GetLockInfo(struct TTXApplication *app, struct Session *session, ST
 	(void)args;
 	(void)argCount;
 	if (!app || !session)
-		return FALSE;
+    return FALSE;
 	/* RESULT: "<input> <display>" e.g. "ON OFF". */
 	if (session->inputLock) {
 		buf[pos++] = 'O'; buf[pos++] = 'N';
@@ -5078,7 +5056,7 @@ BOOL TTX_Cmd_GetPort(struct TTXApplication *app, struct Session *session, STRPTR
 	STRPTR base = NULL;
 
 	if (!app || !session)
-		return FALSE;
+    return FALSE;
 
 	/* Optional NAME/F: look up document by window/file basename. */
 	if (args && argCount > 0 && args[0] && args[0][0] != '\0') {
@@ -5126,7 +5104,7 @@ BOOL TTX_Cmd_GetPriority(struct TTXApplication *app, struct Session *session, ST
 	(void)args;
 	(void)argCount;
 	if (!app)
-		return FALSE;
+    return FALSE;
 	task = FindTask(NULL);
 	pri = task ? (LONG)task->tc_Node.ln_Pri : 0;
 	if (pri < 0) { neg = TRUE; v = (ULONG)(-pri); }
@@ -5145,7 +5123,7 @@ BOOL TTX_Cmd_SetBackground(struct TTXApplication *app, struct Session *session, 
 {
 	(void)session;
 	if (!app)
-		return FALSE;
+    return FALSE;
 	TTX_ParseOnOffToggle(args, argCount, &app->backgroundMode);
 	Printf("[CMD] TTX_Cmd_SetBackground: %s\n", app->backgroundMode ? "ON" : "OFF");
 	return TRUE;
@@ -5157,7 +5135,7 @@ BOOL TTX_Cmd_SetCurrentDir(struct TTXApplication *app, struct Session *session, 
 
 	(void)app;
 	if (!session)
-		return FALSE;
+    return FALSE;
 	if (args && argCount > 0 && args[0] && args[0][0] != '\0')
 		path = args[0];
 	if (!path)
@@ -5169,7 +5147,7 @@ BOOL TTX_Cmd_SetDisplayLock(struct TTXApplication *app, struct Session *session,
 {
 	(void)app;
 	if (!session)
-		return FALSE;
+    return FALSE;
 	TTX_ParseOnOffToggle(args, argCount, &session->displayLock);
 	if (!session->displayLock && session->window)
 		TTX_RequestRedraw(session);
@@ -5181,7 +5159,7 @@ BOOL TTX_Cmd_SetInputLock(struct TTXApplication *app, struct Session *session, S
 {
 	(void)app;
 	if (!session)
-		return FALSE;
+    return FALSE;
 	TTX_ParseOnOffToggle(args, argCount, &session->inputLock);
 	Printf("[CMD] TTX_Cmd_SetInputLock: %s\n", session->inputLock ? "ON" : "OFF");
 	return TRUE;
@@ -5191,7 +5169,7 @@ BOOL TTX_Cmd_SetMeta(struct TTXApplication *app, struct Session *session, STRPTR
 {
 	(void)session;
 	if (!app)
-		return FALSE;
+    return FALSE;
 	TTX_ParseOnOffToggle(args, argCount, &app->metaPending);
 	return TRUE;
 }
@@ -5200,7 +5178,7 @@ BOOL TTX_Cmd_SetMeta2(struct TTXApplication *app, struct Session *session, STRPT
 {
 	(void)session;
 	if (!app)
-		return FALSE;
+    return FALSE;
 	TTX_ParseOnOffToggle(args, argCount, &app->meta2Pending);
 	return TRUE;
 }
@@ -5209,7 +5187,7 @@ BOOL TTX_Cmd_SetMode(struct TTXApplication *app, struct Session *session, STRPTR
 {
 	(void)session;
 	if (!app)
-		return FALSE;
+    return FALSE;
 	TTX_ParseOnOffToggle(args, argCount, &app->modePending);
 	return TRUE;
 }
@@ -5218,7 +5196,7 @@ BOOL TTX_Cmd_SetMode2(struct TTXApplication *app, struct Session *session, STRPT
 {
 	(void)session;
 	if (!app)
-		return FALSE;
+    return FALSE;
 	TTX_ParseOnOffToggle(args, argCount, &app->mode2Pending);
 	return TRUE;
 }
@@ -5230,7 +5208,7 @@ BOOL TTX_Cmd_SetPriority(struct TTXApplication *app, struct Session *session, ST
 
 	(void)session;
 	if (!app || !args || argCount < 1 || !args[0])
-		return FALSE;
+    return FALSE;
 	if (!StrToLong(args[0], &pri))
 		return FALSE;
 	if (pri < -128) pri = -128;
@@ -5247,7 +5225,7 @@ BOOL TTX_Cmd_SetQuoteMode(struct TTXApplication *app, struct Session *session, S
 {
 	(void)session;
 	if (!app)
-		return FALSE;
+    return FALSE;
 	TTX_ParseOnOffToggle(args, argCount, &app->quoteMode);
 	return TRUE;
 }
@@ -5268,7 +5246,7 @@ BOOL TTX_Cmd_Help(struct TTXApplication *app, struct Session *session, STRPTR *a
 
 	(void)session;
 	if (!app)
-		return FALSE;
+    return FALSE;
 	for (i = 0; i < argCount && args && args[i]; i++) {
 		if (Stricmp(args[i], "FILE") == 0 && (i + 1) < argCount) {
 			file = args[i + 1];

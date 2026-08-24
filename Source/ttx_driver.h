@@ -359,6 +359,7 @@ VOID TTX_EraseCursor(struct Window *window, struct Session *session);
 VOID MouseToCursor(struct Session *session, struct Window *window, LONG mouseX, LONG mouseY, ULONG *cursorX, ULONG *cursorY);
 VOID CalculateMaxScroll(struct Session *session, struct Window *window);
 VOID UpdateScrollBars(struct Session *session);
+VOID TTX_PrepareEngineView(struct Session *session, struct Window *window);
 /* Client rect inside title/borders/size+scroll strips (matches text editor gadget). */
 VOID TTX_GetTextClientBounds(
 	struct Window *window,

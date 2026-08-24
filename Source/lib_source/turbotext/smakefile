@@ -35,6 +35,8 @@ OBJS = \
 	tt_run.o \
 	tt_commands.o \
 	tt_aux.o \
+	tt_fold.o \
+	tt_view.o \
 	tt_text.o \
 	tt_block.o
 
@@ -87,6 +89,12 @@ tt_commands.o: tt_commands.c include/private/tt_internal.h include/libraries/tur
 
 tt_aux.o: tt_aux.c include/private/tt_internal.h include/libraries/turbotext.h
 	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ tt_aux.c
+
+tt_fold.o: tt_fold.c include/private/tt_internal.h include/libraries/turbotext.h
+	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ tt_fold.c
+
+tt_view.o: tt_view.c include/private/tt_internal.h include/libraries/turbotext.h
+	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ tt_view.c
 
 tt_text.o: tt_text.c include/private/tt_internal.h include/libraries/turbotext.h
 	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ tt_text.c

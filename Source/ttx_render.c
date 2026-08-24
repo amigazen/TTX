@@ -164,16 +164,83 @@ TTX_DrawChars(
   }
 }
 
+VOID
+TTX_PrepareEngineView(struct Session *session, struct Window *window)
+{
+  struct TTTextBuffer *buffer;
+  struct TTView *view;
+  struct RastPort *rp;
+  ULONG lineHeight;
+  ULONG visibleLines;
+  ULONG charWidth;
+  ULONG textStartX;
+  ULONG textEndX;
+  ULONG textWidth;
+  ULONG maxChars;
+  ULONG maxY;
+  ULONG drawTop;
+
+  if (!session || !session->document || !TurboTextBase)
+    return;
+  buffer = TT_SessionBuffer(session);
+  view = TTX_SessionView(session);
+  if (!buffer || !view)
+    return;
+
+  if (window && window->RPort) {
+    rp = window->RPort;
+    lineHeight = GetLineHeight(rp);
+    if (lineHeight < 1)
+      lineHeight = 8;
+    charWidth = GetCharWidth(rp, 'M');
+    if (charWidth < 1)
+      charWidth = 8;
+
+    drawTop = window->BorderTop;
+    maxY = window->Height - window->BorderBottom;
+    if (session->paneClipActive) {
+      drawTop = session->paneClipTop;
+      maxY = session->paneClipBottom;
+    }
+    if (maxY > drawTop)
+      visibleLines = (maxY - drawTop) / lineHeight;
+    else
+      visibleLines = 1;
+    if (visibleLines < 1)
+      visibleLines = 1;
+    buffer->pageH = visibleLines;
+
+    textStartX = window->BorderLeft + buffer->leftMargin + 1;
+    textEndX = window->Width - window->BorderRight - 1;
+    if (textEndX > textStartX) {
+      textWidth = textEndX - textStartX + 1;
+      maxChars = textWidth / charWidth;
+      if (maxChars > 0)
+        maxChars--;
+      if (maxChars < 1)
+        maxChars = 1;
+      buffer->pageW = maxChars;
+    }
+  }
+  if (buffer->pageH < 1)
+    buffer->pageH = 1;
+
+  buffer->scrollX = view->scrollX;
+  buffer->scrollY = view->scrollY;
+  buffer->cursorX = view->cursorX;
+  buffer->cursorY = view->cursorY;
+  buffer->marking = view->marking;
+
+  TT_DoCommand(session->document, view, (STRPTR)"PrepareView", NULL, 0);
+}
+
 VOID ScrollToCursor(struct Session *session, struct Window *window) {
   struct TTTextBuffer *buffer = NULL;
   struct TTView *view = NULL;
   struct RastPort *rp = NULL;
-  ULONG lineHeight = 0;
-  ULONG visibleLines = 0;
   ULONG charWidth = 0;
   ULONG visibleChars = 0;
   LONG cursorScreenX = 0;
-  LONG cursorScreenY = 0;
 
   if (!session || !window) {
     return;
@@ -190,17 +257,10 @@ VOID ScrollToCursor(struct Session *session, struct Window *window) {
     return;
   }
 
-  lineHeight = GetLineHeight(rp);
-  if (lineHeight == 0) {
-    return;
-  }
-  visibleLines =
-      (window->Height - window->BorderTop - window->BorderBottom) / lineHeight;
-  if (visibleLines == 0) {
-    visibleLines = 1;
-  }
-  charWidth = GetCharWidth(rp, 'M');
+  /* Vertical: engine PrepareView / EnsureCursorVisible. */
+  TTX_PrepareEngineView(session, window);
 
+  charWidth = GetCharWidth(rp, 'M');
   {
     ULONG textStartX = window->BorderLeft + buffer->leftMargin + 1;
     ULONG textEndX = window->Width - (window->BorderRight + 1);
@@ -208,7 +268,6 @@ VOID ScrollToCursor(struct Session *session, struct Window *window) {
     visibleChars = charWidth ? textWidth / charWidth : 1;
   }
 
-  cursorScreenY = (LONG)view->cursorY - (LONG)view->scrollY;
   if (buffer->lines && view->cursorY < buffer->lineCount) {
     cursorScreenX = (LONG)TTX_MeasureChars(
         rp, buffer->lines[view->cursorY].text, 0, view->cursorX,
@@ -218,21 +277,6 @@ VOID ScrollToCursor(struct Session *session, struct Window *window) {
     cursorScreenX = cursorScreenX / (LONG)charWidth - (LONG)view->scrollX;
   } else {
     cursorScreenX = 0;
-  }
-
-  if (cursorScreenY < 0) {
-    view->scrollY = view->cursorY;
-    if (buffer->maxScrollY > 0 && view->scrollY > buffer->maxScrollY) {
-      view->scrollY = buffer->maxScrollY;
-    }
-  } else if (visibleLines > 0 && cursorScreenY >= (LONG)visibleLines) {
-    view->scrollY = view->cursorY - visibleLines + 1;
-    if (view->scrollY < 0) {
-      view->scrollY = 0;
-    }
-    if (buffer->maxScrollY > 0 && view->scrollY > buffer->maxScrollY) {
-      view->scrollY = buffer->maxScrollY;
-    }
   }
 
   if (cursorScreenX < 0) {
@@ -250,7 +294,6 @@ VOID ScrollToCursor(struct Session *session, struct Window *window) {
     }
   }
 
-  /* Keep buffer mirrors aligned for any legacy buffer scroll readers. */
   buffer->scrollX = view->scrollX;
   buffer->scrollY = view->scrollY;
   buffer->cursorX = view->cursorX;
@@ -283,6 +326,7 @@ VOID RenderText(struct Window *window, struct Session *session) {
   ULONG charWidth = 0;
   ULONG visibleLines = 0;
   ULONG i = 0;
+  ULONG row = 0;
   ULONG y = 0;
   STRPTR lineText = NULL;
   ULONG lineLen = 0;
@@ -306,11 +350,15 @@ VOID RenderText(struct Window *window, struct Session *session) {
   ULONG maxY = 0;
   UBYTE penText = 1;
   UBYTE penBack = 0;
+  UBYTE chrome = 0;
+  ULONG gutterX = 0;
 
   (void)scrollDeltaX;
   (void)scrollDeltaY;
   (void)j;
   (void)useScrollLayer;
+  (void)startY;
+  (void)endY;
 
   if (!window || !session || !session->document) {
     return;
@@ -411,11 +459,10 @@ VOID RenderText(struct Window *window, struct Session *session) {
   }
   buffer->pageH = visibleLines ? visibleLines : 1;
 
-  startY = buffer->scrollY;
-  endY = startY + visibleLines;
-  if (endY > buffer->lineCount) {
-    endY = buffer->lineCount;
-  }
+  /* Engine fills view->paint (visible rows + fold chrome). */
+  TTX_PrepareEngineView(session, window);
+  textStartX = window->BorderLeft + buffer->leftMargin + 1;
+  gutterX = window->BorderLeft + 1;
 
   /* Clear text area with DrawInfo paper colour. */
   TTX_InvalidateCursor(session);
@@ -430,16 +477,34 @@ VOID RenderText(struct Window *window, struct Session *session) {
   SetDrMd(rp, JAM2);
 
   y = drawTop;
-  for (i = startY; i < endY && y < maxY; i++) {
-    if (i < buffer->lineCount) {
+  for (row = 0; view && row < view->paint.rowCount && y < maxY; row++) {
+    chrome = view->paint.rows[row].chrome;
+    i = view->paint.rows[row].docY;
+    if (1) {
       ULONG selectStartX = 0;
       ULONG selectStopX = 0;
       BOOL lineHasSelection = FALSE;
       ULONG selectStartPixel = 0;
       ULONG selectStopPixel = 0;
 
-      lineText = buffer->lines[i].text;
-      lineLen = buffer->lines[i].length;
+      lineText = view->paint.rows[row].text;
+      lineLen = view->paint.rows[row].length;
+
+      if (chrome & TTPAINT_GUTTER) {
+        SetAPen(rp, penText);
+        RectFill(rp, (LONG)gutterX, (LONG)y, (LONG)(gutterX + 1),
+                 (LONG)(y + lineHeight - 1));
+      }
+      if (chrome & TTPAINT_MARKER) {
+        TEXT markCh[2];
+
+        markCh[0] = (TEXT)'>';
+        markCh[1] = (TEXT)'\0';
+        SetAPen(rp, penText);
+        SetBPen(rp, penBack);
+        Move(rp, (LONG)gutterX, (LONG)(y + rp->Font->tf_Baseline));
+        Text(rp, markCh, 1);
+      }
 
       /* Check if this line has selection */
       if (buffer->marking.enabled) {
@@ -667,7 +732,7 @@ VOID RenderText(struct Window *window, struct Session *session) {
   /* Important: Stop before bottom border to avoid painting over horizontal
    * scroll bar */
   {
-    linesRendered = endY - startY;
+    linesRendered = view ? view->paint.rowCount : 0;
     if (linesRendered > 0 && y < maxY) {
       ULONG clearBottom = maxY - 1; /* Stop before scroll bar */
       if (clearBottom >= y) {
@@ -828,6 +893,12 @@ TTX_RequestLineRedraw(struct Session *session, ULONG lineY)
   view = TTX_SessionView(session);
   if (!buffer || !view || !buffer->lines || lineY >= buffer->lineCount)
     return;
+
+  /* Prefer full paint path when folds/visibility may shift screen rows. */
+  if (buffer->folds) {
+    TTX_RequestRedraw(session);
+    return;
+  }
 
   /* Line not visible — nothing to paint. */
   if (lineY < view->scrollY)
@@ -994,9 +1065,16 @@ VOID UpdateCursor(struct Window *window, struct Session *session) {
     charWidth = 8;
 
   textStartX = window->BorderLeft + buffer->leftMargin + 1;
-  screenY = window->BorderTop + (view->cursorY - view->scrollY) * lineHeight;
-  if (session->paneClipActive)
-    screenY = session->paneClipTop + (view->cursorY - view->scrollY) * lineHeight;
+  if (view->paint.cursorRow != 0xFFFFFFFFUL)
+    screenY = window->BorderTop + view->paint.cursorRow * lineHeight;
+  else
+    screenY = window->BorderTop;
+  if (session->paneClipActive) {
+    if (view->paint.cursorRow != 0xFFFFFFFFUL)
+      screenY = session->paneClipTop + view->paint.cursorRow * lineHeight;
+    else
+      screenY = session->paneClipTop;
+  }
   screenX = textStartX;
 
   if (buffer->lines && view->cursorY < buffer->lineCount) {
@@ -1023,7 +1101,7 @@ VOID UpdateCursor(struct Window *window, struct Session *session) {
     cellW = charWidth;
 
   /* Off-screen caret: XOR-erase any previous stamp then forget it. */
-  if (view->cursorY < view->scrollY) {
+  if (view->paint.cursorRow == 0xFFFFFFFFUL) {
     TTX_EraseCursor(window, session);
     return;
   }
@@ -1114,13 +1192,16 @@ VOID MouseToCursor(struct Session *session, struct Window *window,
   }
 
   {
-    LONG calcLine = (LONG)view->scrollY + ((LONG)pixelY / (LONG)lineHeight);
-    if (calcLine < 0) {
+    ULONG visRow;
+
+    TTX_PrepareEngineView(session, window);
+    visRow = lineHeight ? (pixelY / lineHeight) : 0;
+    if (view->paint.rowCount == 0) {
       lineIndex = 0;
-    } else if ((ULONG)calcLine >= buffer->lineCount) {
-      lineIndex = buffer->lineCount > 0 ? buffer->lineCount - 1 : 0;
+    } else if (visRow >= view->paint.rowCount) {
+      lineIndex = view->paint.rows[view->paint.rowCount - 1].docY;
     } else {
-      lineIndex = (ULONG)calcLine;
+      lineIndex = view->paint.rows[visRow].docY;
     }
   }
 
@@ -1252,7 +1333,10 @@ VOID CalculateMaxScroll(struct Session *session, struct Window *window) {
     buffer->pageH = 1;
   }
 
-  if (buffer->lineCount > buffer->pageH) {
+  /* Engine maxScrollY from visible fold-aware line count. */
+  if (session->document && TurboTextBase && view) {
+    TT_DoCommand(session->document, view, (STRPTR)"PrepareView", NULL, 0);
+  } else if (buffer->lineCount > buffer->pageH) {
     buffer->maxScrollY = buffer->lineCount - buffer->pageH;
   } else {
     buffer->maxScrollY = 0;

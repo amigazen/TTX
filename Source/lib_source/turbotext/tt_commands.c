@@ -75,7 +75,13 @@ TT_DoCommandI(
 		return FALSE;
 	}
 
-	TT_ClearStringResult();
+	/*
+	 * PrepareView is paint glue invoked from the driver after other commands.
+	 * Do not clear lastStringResult — that would wipe GetLine/GetWord RESULT
+	 * before the driver copies it to ARexx.
+	 */
+	if (!command || Stricmp(command, "PrepareView") != 0)
+		TT_ClearStringResult();
 	TT_SetLastError(TTERR_NONE);
 
 	if (!view)
@@ -355,9 +361,13 @@ TT_HandleEngineCommand(
 	}
 	if (Stricmp(command, "MoveUp") == 0)
 	{
+		ULONG ny;
+
 		if (buf->cursorY > 0)
 		{
-			buf->cursorY--;
+			ny = TT_FoldPrevVisible(buf, buf->cursorY);
+			if (ny < buf->cursorY)
+				buf->cursorY = ny;
 			if (buf->cursorX > buf->lines[buf->cursorY].length)
 				buf->cursorX = buf->lines[buf->cursorY].length;
 		}
@@ -365,9 +375,13 @@ TT_HandleEngineCommand(
 	}
 	if (Stricmp(command, "MoveDown") == 0)
 	{
+		ULONG ny;
+
 		if (buf->cursorY + 1 < buf->lineCount)
 		{
-			buf->cursorY++;
+			ny = TT_FoldNextVisible(buf, buf->cursorY);
+			if (ny > buf->cursorY)
+				buf->cursorY = ny;
 			if (buf->cursorX > buf->lines[buf->cursorY].length)
 				buf->cursorX = buf->lines[buf->cursorY].length;
 		}
@@ -620,6 +634,7 @@ TT_HandleEngineCommand(
 		buf->marking.enabled = FALSE;
 		s_markAwaitingEnd = FALSE;
 		TT_LineUndoClear(buf);
+		TT_FoldFreeAll(buf);
 		buf->cursorX = 0;
 		buf->cursorY = 0;
 		buf->scrollX = 0;
@@ -1362,6 +1377,19 @@ TT_HandleEngineCommand(
 
 	if (Stricmp(command, "MacroPlayEnd") == 0)
 		return TT_Cmd_MacroPlayEnd();
+
+	if (Stricmp(command, "MakeFold") == 0)
+		return TT_Cmd_MakeFold(doc, buf);
+	if (Stricmp(command, "ShowFold") == 0)
+		return TT_Cmd_ShowFold(buf, args, argCount);
+	if (Stricmp(command, "HideFold") == 0)
+		return TT_Cmd_HideFold(buf, args, argCount);
+	if (Stricmp(command, "ToggleFold") == 0)
+		return TT_Cmd_ToggleFold(buf);
+	if (Stricmp(command, "UnmakeFold") == 0)
+		return TT_Cmd_UnmakeFold(buf, args, argCount);
+	if (Stricmp(command, "PrepareView") == 0)
+		return TT_Cmd_PrepareView(doc, view, buf);
 
 	/*
 	 * ReplaceWord args[0]=new-word

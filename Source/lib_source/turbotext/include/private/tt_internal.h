@@ -174,6 +174,35 @@ BOOL TT_Cmd_MacroPlayBegin(VOID);
 BOOL TT_Cmd_MacroPlayEnd(VOID);
 
 /****************************************************************************/
+/* Folds (tt_fold.c) — tree of ranges; visibility for paint/motion */
+
+VOID TT_FoldFreeAll(struct TTTextBuffer *buf);
+VOID TT_FoldAdjustInsert(struct TTTextBuffer *buf, ULONG atY);
+VOID TT_FoldAdjustDelete(struct TTTextBuffer *buf, ULONG atY);
+BOOL TT_FoldIsLineHidden(struct TTTextBuffer *buf, ULONG lineY);
+BOOL TT_FoldHasAny(struct TTTextBuffer *buf);
+UBYTE TT_FoldChromeForLine(struct TTTextBuffer *buf, ULONG lineY);
+ULONG TT_FoldVisibleCount(struct TTTextBuffer *buf);
+ULONG TT_FoldNextVisible(struct TTTextBuffer *buf, ULONG lineY);
+ULONG TT_FoldPrevVisible(struct TTTextBuffer *buf, ULONG lineY);
+ULONG TT_FoldDocToVisible(struct TTTextBuffer *buf, ULONG docY);
+ULONG TT_FoldVisibleToDoc(struct TTTextBuffer *buf, ULONG visIndex);
+VOID TT_FoldClampCursor(struct TTTextBuffer *buf);
+
+BOOL TT_Cmd_MakeFold(struct TTDocument *doc, struct TTTextBuffer *buf);
+BOOL TT_Cmd_ShowFold(struct TTTextBuffer *buf, STRPTR *args, ULONG argCount);
+BOOL TT_Cmd_HideFold(struct TTTextBuffer *buf, STRPTR *args, ULONG argCount);
+BOOL TT_Cmd_ToggleFold(struct TTTextBuffer *buf);
+BOOL TT_Cmd_UnmakeFold(struct TTTextBuffer *buf, STRPTR *args, ULONG argCount);
+
+/****************************************************************************/
+/* View paint (tt_view.c) — PrepareView builds TTView.paint */
+
+BOOL TT_Cmd_PrepareView(struct TTDocument *doc, struct TTView *view,
+	struct TTTextBuffer *buf);
+VOID TT_EnsureCursorVisible(struct TTView *view, struct TTTextBuffer *buf);
+
+/****************************************************************************/
 /* Command dispatch (engine commands only) */
 
 BOOL TT_HandleEngineCommand(

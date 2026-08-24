@@ -431,6 +431,68 @@ IF section = 'ALL' | section = 'PRINT' THEN DO
 END
  */
 
+IF section = 'ALL' | section = 'FOLD' THEN DO
+  SAY '-- folds --'
+  CALL GoReportEnd
+  CALL PutLine '--- FOLD ---'
+  /*
+   * ARexx host lines lose leading spaces inside Insert (quotes stripped
+   * before TTX_ParseCommandLine), so indent-based MakeFold is unreliable
+   * here. Use a mark block instead (manual's first MakeFold method).
+   */
+  CALL DoCmd 'InsertLine'
+  CALL DoCmd 'Insert "FOLD_HEADER while (x) {"'
+  CALL DoCmd 'InsertLine'
+  CALL DoCmd 'Insert "FOLD_BODY_A"'
+  CALL DoCmd 'InsertLine'
+  CALL DoCmd 'Insert "FOLD_BODY_B"'
+  CALL DoCmd 'InsertLine'
+  CALL DoCmd 'Insert "FOLD_AFTER"'
+  CALL DoCmd 'MoveSOF'
+  CALL DoCmd 'Find "FOLD_HEADER"'
+  CALL DoCmd 'MoveSOL'
+  CALL DoCmd 'MarkBlk'
+  CALL DoCmd 'Find "FOLD_BODY_B"'
+  CALL DoCmd 'MoveEOL'
+  CALL DoCmd 'MarkBlk'
+  CALL NoteCmd 'FOLD MakeFold', 'MakeFold', 'FOLD_HEADER'
+  /* Cursor on header; MoveDown must skip hidden body to FOLD_AFTER. */
+  CALL DoCmd 'MoveDown'
+  CALL DoCmd 'GetLine'
+  foldgot = RESULT
+  CALL NoteResult 'FOLD after hide GetLine', foldgot
+  IF POS('FOLD_AFTER', foldgot) > 0 THEN DO
+    okcount = okcount + 1
+    CALL PutLine 'PASS FOLD MoveDown skipped body'
+  END
+  ELSE DO
+    failed = failed + 1
+    CALL PutLine 'FAIL FOLD MoveDown skipped body got=[' || foldgot || ']'
+  END
+  CALL DoCmd 'MoveSOF'
+  CALL DoCmd 'Find "FOLD_HEADER"'
+  CALL NoteCmd 'FOLD ShowFold', 'ShowFold', 'FOLD_HEADER'
+  CALL NoteCmd 'FOLD ToggleFold', 'ToggleFold', 'FOLD_HEADER'
+  CALL NoteCmd 'FOLD ShowFold2', 'ShowFold', 'FOLD_HEADER'
+  CALL NoteCmd 'FOLD HideFold', 'HideFold', 'FOLD_HEADER'
+  CALL NoteCmd 'FOLD ShowFold All', 'ShowFold All', 'FOLD_HEADER'
+  CALL NoteCmd 'FOLD UnmakeFold', 'UnmakeFold', 'FOLD_HEADER'
+  /* Indent-based MakeFold: ShiftRight creates greater indent after ARexx Insert. */
+  CALL DoCmd 'MoveSOF'
+  CALL DoCmd 'Find "FOLD_BODY_A"'
+  CALL DoCmd 'MoveSOL'
+  CALL NoteCmd 'FOLD ShiftRight A', 'ShiftRight', 'FOLD_BODY_A'
+  CALL DoCmd 'Find "FOLD_BODY_B"'
+  CALL DoCmd 'MoveSOL'
+  CALL NoteCmd 'FOLD ShiftRight B', 'ShiftRight', 'FOLD_BODY_B'
+  CALL DoCmd 'MoveSOF'
+  CALL DoCmd 'Find "FOLD_HEADER"'
+  CALL NoteCmd 'FOLD MakeFold indent', 'MakeFold', 'FOLD_HEADER'
+  CALL NoteCmd 'FOLD UnmakeFold indent', 'UnmakeFold', 'FOLD_HEADER'
+  CALL NoteCmd 'FOLD RemakeScreen', 'RemakeScreen'
+  CALL BlankLine
+END
+
 CALL GoReportEnd
 CALL DoCmd 'InsertLine'
 CALL PutLine '=== SUMMARY ==='
