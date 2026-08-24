@@ -21,7 +21,8 @@ OBJS = \
 	LibInit.o \
 	tr_mem.o \
 	tr_reqsui.o \
-	tr_prefs.o
+	tr_prefs.o \
+	tr_info.o
 
 all: $(NAME)
 
@@ -45,3 +46,6 @@ tr_reqsui.o: tr_reqsui.c private/tr_internal.h tr_funcs.h
 
 tr_prefs.o: tr_prefs.c private/tr_internal.h tr_funcs.h
 	Sc $(CFLAGS) DEF TR_SHARED_LIB UTILLIB OBJNAME $@ tr_prefs.c
+
+tr_info.o: tr_info.c private/tr_internal.h tr_funcs.h
+	Sc $(CFLAGS) DEF TR_SHARED_LIB UTILLIB OBJNAME $@ tr_info.c

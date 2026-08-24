@@ -257,8 +257,14 @@ VOID ScrollToCursor(struct Session *session, struct Window *window) {
     return;
   }
 
-  /* Vertical: engine PrepareView / EnsureCursorVisible. */
+  /*
+   * Vertical: page metrics via PrepareEngineView, then EnsureCursor so
+   * scroll follows the caret. Paint-only paths skip EnsureCursor so
+   * prop-gadget scrolling is not snapped back to the caret.
+   */
   TTX_PrepareEngineView(session, window);
+  if (session->document && TurboTextBase)
+    TT_DoCommand(session->document, view, (STRPTR)"EnsureCursor", NULL, 0);
 
   charWidth = GetCharWidth(rp, 'M');
   {
@@ -894,8 +900,8 @@ TTX_RequestLineRedraw(struct Session *session, ULONG lineY)
   if (!buffer || !view || !buffer->lines || lineY >= buffer->lineCount)
     return;
 
-  /* Prefer full paint path when folds/visibility may shift screen rows. */
-  if (buffer->folds) {
+  /* Full document replace / folds need the complete paint path. */
+  if (session->render.needsFullRedraw || buffer->folds) {
     TTX_RequestRedraw(session);
     return;
   }
@@ -1333,8 +1339,12 @@ VOID CalculateMaxScroll(struct Session *session, struct Window *window) {
     buffer->pageH = 1;
   }
 
-  /* Engine maxScrollY from visible fold-aware line count. */
+  /* Engine maxScrollY from fold-aware visible count (no caret snap). */
   if (session->document && TurboTextBase && view) {
+    buffer->scrollX = view->scrollX;
+    buffer->scrollY = view->scrollY;
+    buffer->cursorX = view->cursorX;
+    buffer->cursorY = view->cursorY;
     TT_DoCommand(session->document, view, (STRPTR)"PrepareView", NULL, 0);
   } else if (buffer->lineCount > buffer->pageH) {
     buffer->maxScrollY = buffer->lineCount - buffer->pageH;

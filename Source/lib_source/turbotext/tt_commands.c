@@ -76,11 +76,13 @@ TT_DoCommandI(
 	}
 
 	/*
-	 * PrepareView is paint glue invoked from the driver after other commands.
-	 * Do not clear lastStringResult — that would wipe GetLine/GetWord RESULT
-	 * before the driver copies it to ARexx.
+	 * PrepareView / EnsureCursor are paint glue invoked from the driver after
+	 * other commands. Do not clear lastStringResult — that would wipe
+	 * GetLine/GetWord RESULT before the driver copies it to ARexx.
 	 */
-	if (!command || Stricmp(command, "PrepareView") != 0)
+	if (!command ||
+	    (Stricmp(command, "PrepareView") != 0 &&
+	     Stricmp(command, "EnsureCursor") != 0))
 		TT_ClearStringResult();
 	TT_SetLastError(TTERR_NONE);
 
@@ -1390,6 +1392,8 @@ TT_HandleEngineCommand(
 		return TT_Cmd_UnmakeFold(buf, args, argCount);
 	if (Stricmp(command, "PrepareView") == 0)
 		return TT_Cmd_PrepareView(doc, view, buf);
+	if (Stricmp(command, "EnsureCursor") == 0)
+		return TT_Cmd_EnsureCursor(doc, view, buf);
 
 	/*
 	 * ReplaceWord args[0]=new-word

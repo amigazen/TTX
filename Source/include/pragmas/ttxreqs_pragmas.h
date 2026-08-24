@@ -42,5 +42,13 @@
 #pragma libcall TTXReqsBase TR_PrefsSave 60 9802
 /* TR_PrefsRequester: SFD (a0,a1) → mask 9802 offset -102 */
 #pragma libcall TTXReqsBase TR_PrefsRequester 66 9802
+/* TR_InfoOpen: SFD (a0,a1) → mask 9802 offset -108 */
+#pragma libcall TTXReqsBase TR_InfoOpen 6C 9802
+/* TR_InfoClose: SFD (a0) → mask 801 offset -114 */
+#pragma libcall TTXReqsBase TR_InfoClose 72 801
+/* TR_InfoUpdate: SFD (a0,a1) → mask 9802 offset -120 */
+#pragma libcall TTXReqsBase TR_InfoUpdate 78 9802
+/* TR_InfoProcessMsg: SFD (a0,a1) → mask 9802 offset -126 */
+#pragma libcall TTXReqsBase TR_InfoProcessMsg 7E 9802
 
 #endif /* PRAGMAS_TTXREQS_PRAGMAS_H */

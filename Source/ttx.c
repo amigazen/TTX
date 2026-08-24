@@ -11,6 +11,7 @@
 #include "ttx_texteditor.h"
 #include "ttx_prefs.h"
 #include "ttx_clipboard.h"
+#include "ttx_reqsui.h"
 #include "ttx.h"
 
 #include <exec/tasks.h>
@@ -1328,9 +1329,10 @@ BOOL TTX_CreateSessionForDocument(struct TTXApplication *app, struct TTDocument 
   session->paneClipActive = FALSE;
   session->statusBarText = NULL;
   session->statusBarTemporary = FALSE;
-  session->displayLock = FALSE;
-  session->inputLock = FALSE;
-  session->arexxPortName[0] = '\0';
+	session->displayLock = FALSE;
+	session->inputLock = FALSE;
+	session->infoWindow = NULL;
+	session->arexxPortName[0] = '\0';
   session->arexxPort = NULL;
   session->currentDir = NULL;
   TTX_ArexxBindSession(app, session);
@@ -1536,6 +1538,9 @@ VOID TTX_CloseSessionWindow(struct TTXApplication *app, struct Session *session,
   if (!session || !session->window || session->window == INVALID_RESOURCE)
     return;
 
+  /* Info is per document window — close it with the parent. */
+  TTX_InfoCloseSession(session);
+
   TTX_IntuiCloseWindow(app, session);
   session->window = closedMark;
 }
@@ -1587,10 +1592,13 @@ VOID TTX_DestroySession(struct TTXApplication *app, struct Session *session) {
     app->previousSession = NULL;
   }
 
-  /* Decrement session count BEFORE freeing */
-  app->sessionCount--;
+	/* Decrement session count BEFORE freeing */
+	app->sessionCount--;
 
-  /* Close window with safe Intuition teardown (menu, gadgets, IDCMP, port) */
+	/* Info window is tied to this document; close before the doc window. */
+	TTX_InfoCloseSession(session);
+
+	/* Close window with safe Intuition teardown (menu, gadgets, IDCMP, port) */
   if (session->window && session->window != INVALID_RESOURCE) {
     Printf("[CLEANUP] TTX_DestroySession: closing window=%lx\n",
            (ULONG)session->window);
@@ -1963,6 +1971,27 @@ VOID TTX_EventLoop(struct TTXApplication *app) {
             app->intuiHandlerDepth++;
             TTX_HandleIntuitionMessage(app, session, &savedMsg);
             app->intuiHandlerDepth--;
+          }
+        }
+      }
+
+      /* Non-modal Info window (ttxreqs) — separate UserPort per session. */
+      if (session->infoWindow && session->infoWindow->UserPort &&
+          (signals & (1UL << session->infoWindow->UserPort->mp_SigBit))) {
+        struct MsgPort *infoPort;
+        ULONG infoRc;
+
+        infoPort = session->infoWindow->UserPort;
+        while ((imsg = (struct IntuiMessage *)GetMsg(infoPort)) != NULL) {
+          struct IntuiMessage savedMsg;
+
+          savedMsg = *imsg;
+          ReplyMsg((struct Message *)imsg);
+          infoRc = TTX_InfoProcessMsg(session->infoWindow, &savedMsg);
+          if (infoRc == TRINFO_CLOSED) {
+            session->infoWindow = NULL;
+            TTX_RebuildSignalMask(app);
+            break;
           }
         }
       }

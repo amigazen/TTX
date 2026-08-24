@@ -200,6 +200,8 @@ BOOL TT_Cmd_UnmakeFold(struct TTTextBuffer *buf, STRPTR *args, ULONG argCount);
 
 BOOL TT_Cmd_PrepareView(struct TTDocument *doc, struct TTView *view,
 	struct TTTextBuffer *buf);
+BOOL TT_Cmd_EnsureCursor(struct TTDocument *doc, struct TTView *view,
+	struct TTTextBuffer *buf);
 VOID TT_EnsureCursorVisible(struct TTView *view, struct TTTextBuffer *buf);
 
 /****************************************************************************/

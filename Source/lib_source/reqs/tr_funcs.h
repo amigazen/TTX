@@ -83,4 +83,23 @@ BOOL TR_LVO TR_PrefsRequester(
 	TR_REG(a0, struct Window *parent),
 	TR_REG(a1, struct TRPrefs *p));
 
+struct Window * TR_LVO TR_InfoOpen(
+	TR_REG(a6, struct Library *TTXReqsBase),
+	TR_REG(a0, struct Window *parent),
+	TR_REG(a1, struct TRInfoStats *stats));
+
+VOID TR_LVO TR_InfoClose(
+	TR_REG(a6, struct Library *TTXReqsBase),
+	TR_REG(a0, struct Window *infoWin));
+
+VOID TR_LVO TR_InfoUpdate(
+	TR_REG(a6, struct Library *TTXReqsBase),
+	TR_REG(a0, struct Window *infoWin),
+	TR_REG(a1, struct TRInfoStats *stats));
+
+ULONG TR_LVO TR_InfoProcessMsg(
+	TR_REG(a6, struct Library *TTXReqsBase),
+	TR_REG(a0, struct Window *infoWin),
+	TR_REG(a1, struct IntuiMessage *imsg));
+
 #endif /* TTXREQS_TR_FUNCS_H */

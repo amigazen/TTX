@@ -21,4 +21,9 @@
 #define TTX_RequestFind       TR_RequestFind
 #define TTX_RequestFindChange TR_RequestFindChange
 
+#define TTX_InfoOpen          TR_InfoOpen
+#define TTX_InfoClose         TR_InfoClose
+#define TTX_InfoUpdate        TR_InfoUpdate
+#define TTX_InfoProcessMsg    TR_InfoProcessMsg
+
 #endif /* TTX_REQSUI_H */

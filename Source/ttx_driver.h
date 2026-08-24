@@ -180,6 +180,8 @@ struct Session {
 	/* Display/input locks (SetDisplayLock / SetInputLock). */
 	BOOL displayLock;
 	BOOL inputLock;
+	/* Non-modal Info window (ttxreqs); one per document window. */
+	struct Window *infoWindow;
 };
 
 #define TTX_DEFER_NONE            0
@@ -289,6 +291,8 @@ VOID TTX_RemoveAppIcon(struct TTXApplication *app);
 VOID TTX_UpdateSessionWindowTitle(struct Session *session);
 VOID TTX_RefreshStatusBar(struct Session *session);
 VOID TTX_NoteSessionActivated(struct TTXApplication *app, struct Session *session);
+VOID TTX_InfoCloseSession(struct Session *session);
+VOID TTX_InfoRefreshSession(struct Session *session);
 
 BOOL TTX_SaveWindowState(struct Session *session);
 VOID TTX_CloseSessionWindow(struct TTXApplication *app, struct Session *session,
