@@ -1473,6 +1473,7 @@ BOOL TTX_Cmd_OpenFile(struct TTXApplication *app, struct Session *session, STRPT
     
     /* Update window title */
     TTX_UpdateSessionWindowTitle(session);
+    TTX_SessionInitCurrentDir(session, session->document->state.fileName);
     
     /* Reset cursor to top and redraw the full document */
     if (TT_SessionBuffer(session)) {
@@ -1764,6 +1765,7 @@ BOOL TTX_Cmd_SaveFileAs(struct TTXApplication *app, struct Session *session, STR
         result = TRUE;
         Printf("[CMD] TTX_Cmd_SaveFileAs: SUCCESS (saved to '%s')\n", session->document->state.fileName);
         TTX_UpdateSessionWindowTitle(session);
+        TTX_SessionInitCurrentDir(session, session->document->state.fileName);
     } else {
         LONG errorCode = IoErr();
         if (errorCode != 0) {
@@ -4486,16 +4488,99 @@ BOOL TTX_Cmd_EndMacro(struct TTXApplication *app, struct Session *session, STRPT
 
 BOOL TTX_Cmd_ExecARexxMacro(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Execute ARexx macro */
-    Printf("[CMD] TTX_Cmd_ExecARexxMacro: not yet implemented\n");
-    return FALSE;
+	ULONG i = 0;
+	BOOL console = FALSE;
+	TEXT cmdBuf[512];
+	ULONG pos = 0;
+	STRPTR selected = NULL;
+	BOOL first = TRUE;
+	BOOL ok = FALSE;
+
+	(void)session;
+	if (!app)
+		return FALSE;
+
+	/* Skip CONSOLE / LOCKINPUT / LOCKDISPLAY / NOCACHE switches. */
+	while (i < argCount && args[i]) {
+		if (Stricmp(args[i], "CONSOLE") == 0)
+			console = TRUE;
+		else if (Stricmp(args[i], "LOCKINPUT") == 0)
+			; /* lock stubs: accepted, not yet enforced */
+		else if (Stricmp(args[i], "LOCKDISPLAY") == 0)
+			;
+		else if (Stricmp(args[i], "NOCACHE") == 0)
+			;
+		else
+			break;
+		i++;
+	}
+
+	cmdBuf[0] = '\0';
+	pos = 0;
+	while (i < argCount && args[i] && pos < sizeof(cmdBuf) - 1) {
+		ULONG n = 0;
+		if (!first && pos < sizeof(cmdBuf) - 1)
+			cmdBuf[pos++] = ' ';
+		first = FALSE;
+		while (args[i][n] != '\0' && pos < sizeof(cmdBuf) - 1)
+			cmdBuf[pos++] = args[i][n++];
+		i++;
+	}
+	cmdBuf[pos] = '\0';
+
+	if (cmdBuf[0] == '\0') {
+		selected = TTX_ShowFileRequester(app, session, NULL, NULL);
+		if (!selected)
+			return FALSE;
+		ok = TTX_ArexxExec(app, selected, FALSE, console);
+		TTX_Free(selected);
+		return ok;
+	}
+
+	return TTX_ArexxExec(app, cmdBuf, FALSE, console);
 }
 
 BOOL TTX_Cmd_ExecARexxString(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Execute ARexx string */
-    Printf("[CMD] TTX_Cmd_ExecARexxString: not yet implemented\n");
-    return FALSE;
+	ULONG i = 0;
+	BOOL console = FALSE;
+	TEXT cmdBuf[512];
+	ULONG pos = 0;
+	BOOL first = TRUE;
+
+	(void)session;
+	if (!app)
+		return FALSE;
+
+	while (i < argCount && args[i]) {
+		if (Stricmp(args[i], "CONSOLE") == 0)
+			console = TRUE;
+		else if (Stricmp(args[i], "LOCKINPUT") == 0)
+			;
+		else if (Stricmp(args[i], "LOCKDISPLAY") == 0)
+			;
+		else
+			break;
+		i++;
+	}
+
+	cmdBuf[0] = '\0';
+	pos = 0;
+	while (i < argCount && args[i] && pos < sizeof(cmdBuf) - 1) {
+		ULONG n = 0;
+		if (!first && pos < sizeof(cmdBuf) - 1)
+			cmdBuf[pos++] = ' ';
+		first = FALSE;
+		while (args[i][n] != '\0' && pos < sizeof(cmdBuf) - 1)
+			cmdBuf[pos++] = args[i][n++];
+		i++;
+	}
+	cmdBuf[pos] = '\0';
+
+	if (cmdBuf[0] == '\0')
+		return FALSE;
+
+	return TTX_ArexxExec(app, cmdBuf, TRUE, console);
 }
 
 BOOL TTX_Cmd_FlushARexxCache(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -4917,16 +5002,72 @@ BOOL TTX_Cmd_GetBackground(struct TTXApplication *app, struct Session *session, 
 
 BOOL TTX_Cmd_GetCurrentDir(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Return current directory for ARexx */
-    Printf("[CMD] TTX_Cmd_GetCurrentDir: not yet implemented\n");
-    return FALSE;
+	(void)args;
+	(void)argCount;
+	if (!app || !session)
+		return FALSE;
+	/* Untitled / late init: resolve process CWD into the session once. */
+	if (!session->currentDir || session->currentDir[0] == '\0')
+		TTX_SessionInitCurrentDir(session, NULL);
+	if (session->currentDir && session->currentDir[0] != '\0')
+		TTX_ArexxSetResult(app, session->currentDir);
+	else
+		TTX_ArexxSetResult(app, (STRPTR)"");
+	return TRUE;
 }
 
 BOOL TTX_Cmd_GetDocuments(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Return document list for ARexx */
-    Printf("[CMD] TTX_Cmd_GetDocuments: not yet implemented\n");
-    return FALSE;
+	struct Session *s = NULL;
+	TEXT buf[TTX_AREXX_RESULT_MAX];
+	ULONG pos = 0;
+	BOOL first = TRUE;
+	STRPTR name = NULL;
+	STRPTR base = NULL;
+
+	(void)session;
+	(void)args;
+	(void)argCount;
+	if (!app)
+		return FALSE;
+
+	buf[0] = '\0';
+	s = app->sessions;
+	while (s) {
+		ULONG n = 0;
+
+		if (s->arexxPortName[0] == '\0')
+			TTX_ArexxBindSession(app, s);
+
+		name = NULL;
+		if (s->document && s->document->state.fileName)
+			name = s->document->state.fileName;
+		base = name ? FilePart(name) : (STRPTR)"Untitled";
+		if (!base || base[0] == '\0')
+			base = (STRPTR)"Untitled";
+
+		if (!first && pos < sizeof(buf) - 1)
+			buf[pos++] = ' ';
+		first = FALSE;
+
+		if (pos < sizeof(buf) - 1)
+			buf[pos++] = '"';
+		n = 0;
+		while (base[n] != '\0' && pos < sizeof(buf) - 2)
+			buf[pos++] = base[n++];
+		if (pos < sizeof(buf) - 1)
+			buf[pos++] = '"';
+		if (pos < sizeof(buf) - 1)
+			buf[pos++] = ' ';
+		n = 0;
+		while (s->arexxPortName[n] != '\0' && pos < sizeof(buf) - 1)
+			buf[pos++] = s->arexxPortName[n++];
+
+		s = s->next;
+	}
+	buf[pos] = '\0';
+	TTX_ArexxSetResult(app, buf);
+	return TRUE;
 }
 
 BOOL TTX_Cmd_GetErrorInfo(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -4945,22 +5086,42 @@ BOOL TTX_Cmd_GetLockInfo(struct TTXApplication *app, struct Session *session, ST
 
 BOOL TTX_Cmd_GetPort(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    (void)args;
-    (void)argCount;
-    if (!app || !session) {
-        return FALSE;
-    }
-    /*
-     * Session names (TURBOTEXTn) are reserved for per-document ports.
-     * Until those ports are AddPort'd, ARexx must keep ADDRESS TURBOTEXT
-     * (the only listening host). Still bind the session name for display.
-     */
-    if (session->arexxPortName[0] == '\0')
-        TTX_ArexxBindSession(app, session);
-    Printf("[CMD] TTX_Cmd_GetPort: host=TURBOTEXT session='%s'\n",
-        session->arexxPortName);
-    TTX_ArexxSetResult(app, "TURBOTEXT");
-    return TRUE;
+	struct Session *s = NULL;
+	STRPTR want = NULL;
+	STRPTR base = NULL;
+
+	if (!app || !session)
+		return FALSE;
+
+	/* Optional NAME/F: look up document by window/file basename. */
+	if (args && argCount > 0 && args[0] && args[0][0] != '\0') {
+		want = args[0];
+		s = app->sessions;
+		while (s) {
+			base = NULL;
+			if (s->document && s->document->state.fileName)
+				base = FilePart(s->document->state.fileName);
+			if (!base || base[0] == '\0')
+				base = (STRPTR)"Untitled";
+			if (Stricmp(base, want) == 0 ||
+			    (s->document && s->document->state.fileName &&
+			     Stricmp(s->document->state.fileName, want) == 0))
+			{
+				if (s->arexxPortName[0] == '\0')
+					TTX_ArexxBindSession(app, s);
+				TTX_ArexxSetResult(app, s->arexxPortName);
+				return TRUE;
+			}
+			s = s->next;
+		}
+		return FALSE;
+	}
+
+	if (session->arexxPortName[0] == '\0')
+		TTX_ArexxBindSession(app, session);
+	Printf("[CMD] TTX_Cmd_GetPort: '%s'\n", session->arexxPortName);
+	TTX_ArexxSetResult(app, session->arexxPortName);
+	return TRUE;
 }
 
 BOOL TTX_Cmd_GetPriority(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -4979,9 +5140,16 @@ BOOL TTX_Cmd_SetBackground(struct TTXApplication *app, struct Session *session, 
 
 BOOL TTX_Cmd_SetCurrentDir(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    /* TODO: Set current directory */
-    Printf("[CMD] TTX_Cmd_SetCurrentDir: not yet implemented\n");
-    return FALSE;
+	STRPTR path = NULL;
+
+	(void)app;
+	if (!session)
+		return FALSE;
+	if (args && argCount > 0 && args[0] && args[0][0] != '\0')
+		path = args[0];
+	if (!path)
+		return FALSE;
+	return TTX_SessionSetCurrentDir(session, path);
 }
 
 BOOL TTX_Cmd_SetDisplayLock(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)

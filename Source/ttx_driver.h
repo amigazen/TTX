@@ -162,8 +162,11 @@ struct Session {
 	BOOL mouseSelecting;
 	ULONG selectStartX;
 	ULONG selectStartY;
-	/* Document ARexx port name (TURBOTEXTn); global host is TURBOTEXT. */
+	/* Document ARexx port (TURBOTEXTn); global host is TURBOTEXT. */
 	TEXT arexxPortName[32];
+	struct MsgPort *arexxPort;
+	/* Per-document current directory (Get/SetCurrentDir). */
+	STRPTR currentDir;
 	/* Horizontal split: 0 = single pane; else pixel Y of split bar. */
 	ULONG splitY;
 	ULONG splitRatio; /* 1..99 percent for top pane; 0 = unsplit */
@@ -289,8 +292,16 @@ LONG TTX_RunWithArgs(struct TTXApplication *app, struct TTXArgs *args);
 BOOL TTX_ArexxInit(struct TTXApplication *app);
 VOID TTX_ArexxShutdown(struct TTXApplication *app);
 VOID TTX_ArexxProcess(struct TTXApplication *app);
+VOID TTX_ArexxProcessPort(struct TTXApplication *app, struct MsgPort *port,
+	struct Session *session);
 VOID TTX_ArexxBindSession(struct TTXApplication *app, struct Session *session);
+VOID TTX_ArexxUnbindSession(struct Session *session);
 VOID TTX_ArexxSetResult(struct TTXApplication *app, STRPTR result);
+/* Sync send to RexxMast (ExecARexxMacro / ExecARexxString). */
+BOOL TTX_ArexxExec(struct TTXApplication *app, STRPTR command, BOOL isString,
+	BOOL console);
+VOID TTX_SessionInitCurrentDir(struct Session *session, STRPTR fileName);
+BOOL TTX_SessionSetCurrentDir(struct Session *session, STRPTR path);
 BOOL TTX_HandleCommandLine(
 	struct TTXApplication *app,
 	struct Session *session,

@@ -1,9 +1,10 @@
 /*
- * TTX driver - minimal ARexx host
+ * TTX driver - ARexx host
  *
- * Global port TURBOTEXT accepts TurboText command strings and routes them
- * through TTX_HandleCommand so external ARexx scripts can exercise the
- * editor while it runs. Document port names are TURBOTEXTn (session id).
+ * Global port TURBOTEXT and per-document ports TURBOTEXTn accept TurboText
+ * command strings and route them through TTX_HandleCommand. ExecARexx*
+ * sends scripts to RexxMast and waits while still servicing host ports
+ * (nested ADDRESS TURBOTEXT from the script).
  *
  * Copyright (c) 2025 amigazen project
  * Licensed under BSD 2-Clause License
@@ -11,7 +12,9 @@
 
 #include "ttx_driver.h"
 #include "ttx_arexx.h"
+#include "ttx_mem.h"
 
+#include <dos/dosextens.h>
 #include <rexx/storage.h>
 #include <rexx/rxslib.h>
 
@@ -23,6 +26,7 @@
 
 #define TTX_AREXX_GLOBAL_PORT "TURBOTEXT"
 #define TTX_AREXX_MAX_ARGS    16
+#define TTX_AREXX_EXTENSION   "TTX"
 
 struct RxsLib *RexxSysBase = NULL;
 
@@ -38,6 +42,23 @@ TTX_ArexxStrLen(STRPTR s)
 	while (s[n] != '\0')
 		n++;
 	return n;
+}
+
+static STRPTR
+TTX_ArexxDupStr(STRPTR src)
+{
+	ULONG len = 0;
+	STRPTR dst = NULL;
+
+	if (!src)
+		return NULL;
+	len = TTX_ArexxStrLen(src);
+	dst = (STRPTR)TTX_Alloc(len + 1, MEMF_CLEAR);
+	if (!dst)
+		return NULL;
+	CopyMem(src, dst, len);
+	dst[len] = '\0';
+	return dst;
 }
 
 static VOID
@@ -250,9 +271,18 @@ VOID
 TTX_ArexxShutdown(struct TTXApplication *app)
 {
 	struct Message *msg = NULL;
+	struct Session *session = NULL;
 
 	if (!app)
 		return;
+
+	/* Drop per-document ports first. */
+	session = app->sessions;
+	while (session)
+	{
+		TTX_ArexxUnbindSession(session);
+		session = session->next;
+	}
 
 	if (app->arexxPort)
 	{
@@ -274,11 +304,47 @@ TTX_ArexxShutdown(struct TTXApplication *app)
 VOID
 TTX_ArexxBindSession(struct TTXApplication *app, struct Session *session)
 {
-	(void)app;
+	struct MsgPort *port = NULL;
+
 	if (!session)
 		return;
+
 	TTX_ArexxBuildSessionPortName(session, session->arexxPortName,
 		(ULONG)sizeof(session->arexxPortName));
+
+	if (session->arexxPort || session->arexxPortName[0] == '\0')
+		return;
+
+	/* Global host can be absent (no rexxsyslib); document ports still useful. */
+	(void)app;
+
+	port = CreateMsgPort();
+	if (!port)
+	{
+		Printf("[AREXX] FAIL CreateMsgPort for %s\n", session->arexxPortName);
+		return;
+	}
+
+	port->mp_Node.ln_Name = session->arexxPortName;
+	port->mp_Node.ln_Pri = 0;
+	AddPort(port);
+	session->arexxPort = port;
+	Printf("[AREXX] Document port %s ready\n", session->arexxPortName);
+}
+
+VOID
+TTX_ArexxUnbindSession(struct Session *session)
+{
+	struct Message *msg = NULL;
+
+	if (!session || !session->arexxPort)
+		return;
+
+	RemPort(session->arexxPort);
+	while ((msg = GetMsg(session->arexxPort)) != NULL)
+		ReplyMsg(msg);
+	DeleteMsgPort(session->arexxPort);
+	session->arexxPort = NULL;
 }
 
 VOID
@@ -310,30 +376,33 @@ TTX_ArexxReply(struct RexxMsg *rmsg, LONG rc, STRPTR result)
 	rmsg->rm_Result2 = 0;
 
 	/*
- * Always attach a RESULT argstring on RC=0 (including empty).
- * Skipping empty strings left ARexx RESULT as the literal "RESULT".
- */
-if (rc == 0 && result && RexxSysBase)
-{
-	len = TTX_ArexxStrLen(result);
-	rmsg->rm_Result2 = (LONG)CreateArgstring(result, (LONG)len);
-}
+	 * Always attach a RESULT argstring on RC=0 (including empty).
+	 * Skipping empty strings left ARexx RESULT as the literal "RESULT".
+	 */
+	if (rc == 0 && result && RexxSysBase)
+	{
+		len = TTX_ArexxStrLen(result);
+		rmsg->rm_Result2 = (LONG)CreateArgstring(result, (LONG)len);
+	}
 
 	ReplyMsg((struct Message *)rmsg);
 }
 
 VOID
-TTX_ArexxProcess(struct TTXApplication *app)
+TTX_ArexxProcessPort(
+	struct TTXApplication *app,
+	struct MsgPort *port,
+	struct Session *session)
 {
 	struct RexxMsg *rmsg = NULL;
 	STRPTR cmd = NULL;
 	BOOL ok = FALSE;
-	struct Session *session = NULL;
+	struct Session *ctx = NULL;
 
-	if (!app || !app->arexxPort || !RexxSysBase)
+	if (!app || !port || !RexxSysBase)
 		return;
 
-	while ((rmsg = (struct RexxMsg *)GetMsg(app->arexxPort)) != NULL)
+	while ((rmsg = (struct RexxMsg *)GetMsg(port)) != NULL)
 	{
 		if (!IsRexxMsg(rmsg))
 		{
@@ -342,18 +411,320 @@ TTX_ArexxProcess(struct TTXApplication *app)
 		}
 
 		cmd = (STRPTR)rmsg->rm_Args[0];
-		Printf("[AREXX] cmd='%s'\n", cmd ? cmd : (STRPTR)"(null)");
+		Printf("[AREXX] port='%s' cmd='%s'\n",
+			port->mp_Node.ln_Name ? port->mp_Node.ln_Name : (STRPTR)"?",
+			cmd ? cmd : (STRPTR)"(null)");
 
 		app->lastArexxResult[0] = '\0';
-		session = app->activeSession;
-		if (!session)
-			session = app->sessions;
+		ctx = session;
+		if (!ctx)
+			ctx = app->activeSession;
+		if (!ctx)
+			ctx = app->sessions;
 
 		ok = FALSE;
-		if (cmd && session)
-			ok = TTX_HandleCommandLine(app, session, cmd);
+		if (cmd && ctx)
+		{
+			if (ctx != app->activeSession)
+				TTX_NoteSessionActivated(app, ctx);
+			ok = TTX_HandleCommandLine(app, ctx, cmd);
+		}
 
-		TTX_ArexxReply(rmsg, ok ? 0 : 10,
-			app->lastArexxResult[0] ? app->lastArexxResult : (STRPTR)NULL);
+		TTX_ArexxReply(rmsg, ok ? 0 : 10, app->lastArexxResult);
 	}
+}
+
+VOID
+TTX_ArexxProcess(struct TTXApplication *app)
+{
+	struct Session *session = NULL;
+
+	if (!app)
+		return;
+
+	if (app->arexxPort)
+		TTX_ArexxProcessPort(app, app->arexxPort, app->activeSession);
+
+	session = app->sessions;
+	while (session)
+	{
+		if (session->arexxPort)
+			TTX_ArexxProcessPort(app, session->arexxPort, session);
+		session = session->next;
+	}
+}
+
+/****************************************************************************/
+/* Drain host ports while waiting on a RexxMast reply (nested ADDRESS). */
+
+static VOID
+TTX_ArexxServiceHosts(struct TTXApplication *app)
+{
+	if (!app)
+		return;
+	TTX_ArexxProcess(app);
+}
+
+static ULONG
+TTX_ArexxHostSigMask(struct TTXApplication *app)
+{
+	ULONG mask = 0;
+	struct Session *session = NULL;
+
+	if (!app)
+		return 0;
+	if (app->arexxPort)
+		mask |= (1UL << app->arexxPort->mp_SigBit);
+	session = app->sessions;
+	while (session)
+	{
+		if (session->arexxPort)
+			mask |= (1UL << session->arexxPort->mp_SigBit);
+		session = session->next;
+	}
+	return mask;
+}
+
+BOOL
+TTX_ArexxExec(
+	struct TTXApplication *app,
+	STRPTR command,
+	BOOL isString,
+	BOOL console)
+{
+	struct MsgPort *reply = NULL;
+	struct MsgPort *rexxPort = NULL;
+	struct RexxMsg *rmsg = NULL;
+	struct RexxMsg *replyMsg = NULL;
+	BOOL ok = FALSE;
+	BOOL done = FALSE;
+	BOOL sent = FALSE;
+	BPTR nilFh = 0;
+	BPTR conFh = 0;
+	ULONG waitMask = 0;
+	LONG action = 0;
+	STRPTR resultStr = NULL;
+
+	if (!app || !command || command[0] == '\0')
+		return FALSE;
+
+	if (!RexxSysBase)
+	{
+		RexxSysBase = (struct RxsLib *)OpenLibrary("rexxsyslib.library", 0);
+		if (!RexxSysBase)
+		{
+			Printf("[AREXX] Exec: rexxsyslib.library missing\n");
+			return FALSE;
+		}
+	}
+
+	reply = CreateMsgPort();
+	if (!reply)
+		return FALSE;
+
+	rmsg = CreateRexxMsg(reply, TTX_AREXX_EXTENSION, TTX_AREXX_GLOBAL_PORT);
+	if (!rmsg)
+	{
+		DeleteMsgPort(reply);
+		return FALSE;
+	}
+
+	action = RXCOMM | RXFF_RESULT;
+	if (isString)
+		action |= RXFF_STRING;
+	rmsg->rm_Action = action;
+
+	if (console)
+	{
+		conFh = Open("CON:////TTX ARexx/CLOSE", MODE_NEWFILE);
+		if (conFh)
+		{
+			rmsg->rm_Stdin = conFh;
+			rmsg->rm_Stdout = conFh;
+		}
+	}
+	else
+	{
+		nilFh = Open("NIL:", MODE_NEWFILE);
+		if (nilFh)
+		{
+			rmsg->rm_Stdin = nilFh;
+			rmsg->rm_Stdout = nilFh;
+		}
+	}
+
+	rmsg->rm_Args[0] = CreateArgstring(command, (LONG)TTX_ArexxStrLen(command));
+	if (!rmsg->rm_Args[0])
+	{
+		DeleteRexxMsg(rmsg);
+		DeleteMsgPort(reply);
+		if (conFh)
+			Close(conFh);
+		if (nilFh)
+			Close(nilFh);
+		return FALSE;
+	}
+
+	Forbid();
+	rexxPort = FindPort(RXSDIR);
+	if (rexxPort)
+	{
+		PutMsg(rexxPort, (struct Message *)rmsg);
+		sent = TRUE;
+	}
+	Permit();
+
+	if (!sent)
+	{
+		Printf("[AREXX] Exec: RexxMast port '%s' not found\n", RXSDIR);
+		DeleteArgstring((UBYTE *)rmsg->rm_Args[0]);
+		DeleteRexxMsg(rmsg);
+		DeleteMsgPort(reply);
+		if (conFh)
+			Close(conFh);
+		if (nilFh)
+			Close(nilFh);
+		return FALSE;
+	}
+
+	waitMask = (1UL << reply->mp_SigBit) | TTX_ArexxHostSigMask(app);
+	while (!done)
+	{
+		Wait(waitMask);
+		TTX_ArexxServiceHosts(app);
+		while ((replyMsg = (struct RexxMsg *)GetMsg(reply)) != NULL)
+		{
+			if (replyMsg != rmsg)
+			{
+				ReplyMsg((struct Message *)replyMsg);
+				continue;
+			}
+			ok = (BOOL)(replyMsg->rm_Result1 == 0);
+			if (replyMsg->rm_Result1 == 0 && replyMsg->rm_Result2)
+			{
+				resultStr = (STRPTR)replyMsg->rm_Result2;
+				TTX_ArexxSetResult(app, resultStr);
+				DeleteArgstring((UBYTE *)replyMsg->rm_Result2);
+				replyMsg->rm_Result2 = 0;
+			}
+			DeleteArgstring((UBYTE *)replyMsg->rm_Args[0]);
+			DeleteRexxMsg(replyMsg);
+			rmsg = NULL;
+			done = TRUE;
+		}
+	}
+
+	DeleteMsgPort(reply);
+	if (conFh)
+		Close(conFh);
+	if (nilFh)
+		Close(nilFh);
+
+	Printf("[AREXX] Exec %s '%s' -> %s\n",
+		isString ? "string" : "macro",
+		command,
+		ok ? "ok" : "fail");
+	return ok;
+}
+
+/****************************************************************************/
+
+VOID
+TTX_SessionInitCurrentDir(struct Session *session, STRPTR fileName)
+{
+	BPTR fileLock = 0;
+	BPTR parentLock = 0;
+	BPTR curLock = 0;
+	STRPTR pathBuf = NULL;
+	struct Process *proc = NULL;
+
+	if (!session)
+		return;
+
+	if (session->currentDir)
+	{
+		TTX_Free(session->currentDir);
+		session->currentDir = NULL;
+	}
+
+	pathBuf = TTX_AllocPathBuf();
+	if (!pathBuf)
+		return;
+
+	if (fileName && fileName[0] != '\0')
+	{
+		fileLock = Lock(fileName, SHARED_LOCK);
+		if (fileLock)
+		{
+			parentLock = ParentDir(fileLock);
+			UnLock(fileLock);
+			if (parentLock)
+			{
+				if (NameFromLock(parentLock, pathBuf, (LONG)TTX_PATH_BUF_LEN) > 0)
+					session->currentDir = TTX_ArexxDupStr(pathBuf);
+				UnLock(parentLock);
+			}
+		}
+	}
+
+	if (!session->currentDir)
+	{
+		proc = (struct Process *)FindTask(NULL);
+		if (proc && proc->pr_CurrentDir)
+		{
+			curLock = DupLock(proc->pr_CurrentDir);
+			if (curLock)
+			{
+				if (NameFromLock(curLock, pathBuf, (LONG)TTX_PATH_BUF_LEN) > 0)
+					session->currentDir = TTX_ArexxDupStr(pathBuf);
+				UnLock(curLock);
+			}
+		}
+	}
+
+	TTX_Free(pathBuf);
+}
+
+BOOL
+TTX_SessionSetCurrentDir(struct Session *session, STRPTR path)
+{
+	BPTR lock = 0;
+	BPTR oldDir = 0;
+	STRPTR pathBuf = NULL;
+	BOOL ok = FALSE;
+
+	if (!session || !path || path[0] == '\0')
+		return FALSE;
+
+	pathBuf = TTX_AllocPathBuf();
+	if (!pathBuf)
+		return FALSE;
+
+	lock = Lock(path, SHARED_LOCK);
+	if (!lock)
+	{
+		TTX_Free(pathBuf);
+		return FALSE;
+	}
+
+	if (NameFromLock(lock, pathBuf, (LONG)TTX_PATH_BUF_LEN) <= 0)
+	{
+		UnLock(lock);
+		TTX_Free(pathBuf);
+		return FALSE;
+	}
+
+	if (session->currentDir)
+		TTX_Free(session->currentDir);
+	session->currentDir = TTX_ArexxDupStr(pathBuf);
+	ok = (BOOL)(session->currentDir != NULL);
+
+	/* Make this the process CWD while the document is active. */
+	oldDir = CurrentDir(lock);
+	if (oldDir)
+		UnLock(oldDir);
+	/* lock is now the process current dir; do not UnLock it. */
+
+	TTX_Free(pathBuf);
+	return ok;
 }

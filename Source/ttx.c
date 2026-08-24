@@ -1327,7 +1327,10 @@ BOOL TTX_CreateSessionForDocument(struct TTXApplication *app, struct TTDocument 
   session->paneClipBottom = 0;
   session->paneClipActive = FALSE;
   session->arexxPortName[0] = '\0';
+  session->arexxPort = NULL;
+  session->currentDir = NULL;
   TTX_ArexxBindSession(app, session);
+  TTX_SessionInitCurrentDir(session, fileName);
   if (doc->activeView)
     doc->activeView->uiBinding = session;
 
@@ -1611,6 +1614,11 @@ VOID TTX_DestroySession(struct TTXApplication *app, struct Session *session) {
     TTX_Free(session->statusBarText);
     session->statusBarText = NULL;
   }
+  if (session->currentDir) {
+    TTX_Free(session->currentDir);
+    session->currentDir = NULL;
+  }
+  TTX_ArexxUnbindSession(session);
 
   Printf("[CLEANUP] TTX_DestroySession: freeing session=%lx\n", (ULONG)session);
   TTX_Free(session);
@@ -1765,6 +1773,7 @@ BOOL TTX_HandleIntuitionMessage(struct TTXApplication *app,
 /* Rebuild signal mask after session list changes */
 VOID TTX_RebuildSignalMask(struct TTXApplication *app) {
   ULONG oldMask;
+  struct Session *session = NULL;
 
   if (!app)
     return;
@@ -1781,6 +1790,12 @@ VOID TTX_RebuildSignalMask(struct TTXApplication *app) {
   }
   if (app->arexxPort) {
     app->sigmask |= (1UL << app->arexxPort->mp_SigBit);
+  }
+  session = app->sessions;
+  while (session) {
+    if (session->arexxPort)
+      app->sigmask |= (1UL << session->arexxPort->mp_SigBit);
+    session = session->next;
   }
   app->sigmask |= SIGBREAKF_CTRL_C;
 
@@ -1847,10 +1862,21 @@ VOID TTX_EventLoop(struct TTXApplication *app) {
       TTX_ProcessAppIcon(app);
     }
 
-    /* ARexx host: TurboText command strings from ADDRESS TURBOTEXT */
-    if (app->arexxPort &&
-        (signals & (1UL << app->arexxPort->mp_SigBit))) {
-      TTX_ArexxProcess(app);
+    /* ARexx hosts: global TURBOTEXT + per-document TURBOTEXTn */
+    {
+      BOOL arexxSig = FALSE;
+      if (app->arexxPort &&
+          (signals & (1UL << app->arexxPort->mp_SigBit)))
+        arexxSig = TRUE;
+      session = app->sessions;
+      while (!arexxSig && session) {
+        if (session->arexxPort &&
+            (signals & (1UL << session->arexxPort->mp_SigBit)))
+          arexxSig = TRUE;
+        session = session->next;
+      }
+      if (arexxSig)
+        TTX_ArexxProcess(app);
     }
 
     /* Check application port (inter-instance messages) */

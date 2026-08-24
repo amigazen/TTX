@@ -243,6 +243,24 @@ IF section = 'ALL' | section = 'BLOCK' THEN DO
   CALL BlankLine
 END
 
+IF section = 'ALL' | section = 'AREXX' THEN DO
+  SAY '-- arexx control --'
+  CALL GoReportEnd
+  CALL PutLine '--- AREXX ---'
+  CALL DoCmd 'GetDocuments'
+  SAY '  GetDocuments RESULT=['RESULT']'
+  CALL NoteResult 'AREXX GetDocuments', RESULT
+  CALL DoCmd 'GetCurrentDir'
+  SAY '  GetCurrentDir RESULT=['RESULT']'
+  CALL NoteResult 'AREXX GetCurrentDir', RESULT
+  CALL DoCmd 'GetPort'
+  SAY '  GetPort RESULT=['RESULT']'
+  CALL NoteResult 'AREXX GetPort', RESULT
+  /* Nested string macro: RexxMast runs it; it talks back to TURBOTEXT. */
+  CALL NoteCmd 'AREXX ExecARexxString', 'ExecARexxString "GetVersion"'
+  CALL BlankLine
+END
+
 CALL GoReportEnd
 CALL DoCmd 'InsertLine'
 CALL PutLine '=== SUMMARY ==='
@@ -351,6 +369,8 @@ NoteCmd: PROCEDURE EXPOSE host okcount failed RC
 NoteResult: PROCEDURE EXPOSE host okcount failed RC
   label = ARG(1)
   value = ARG(2)
+  /* PutLine wraps Insert "..."; strip quotes so RESULT text survives. */
+  value = TRANSLATE(value, '"', "'")
   IF value = '' | UPPER(value) = 'RESULT' THEN
     CALL PutLine 'NOTE ' || label || ' RESULT=(empty)'
   ELSE
