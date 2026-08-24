@@ -10,6 +10,7 @@
 #include "ttx_intui.h"
 #include "ttx_texteditor.h"
 #include "ttx_prefs.h"
+#include "ttx_clipboard.h"
 #include "ttx.h"
 
 #include <exec/tasks.h>
@@ -2041,6 +2042,7 @@ VOID TTX_Cleanup(struct TTXApplication *app) {
 
   /* Tear down ARexx host before sessions / ports */
   TTX_ArexxShutdown(app);
+  TTX_ClipboardShutdown();
 
   if (app->lastAslDrawer) {
     TTX_Free(app->lastAslDrawer);

@@ -9,6 +9,113 @@
 
 #define INITIAL_BUFFER_SIZE 16384
 
+/*
+ * Single-line undo (Extras/Undo Line). Kept in the library — not on
+ * TTTextBuffer — so driver/library struct layouts stay compatible.
+ */
+static STRPTR s_lineUndoText = NULL;
+static ULONG s_lineUndoLen = 0;
+static ULONG s_lineUndoY = 0;
+static BOOL s_lineUndoHave = FALSE;
+
+VOID
+TT_LineUndoClear(struct TTTextBuffer *buffer)
+{
+	(void)buffer;
+	if (s_lineUndoText) {
+		TT_Free(s_lineUndoText);
+		s_lineUndoText = NULL;
+	}
+	s_lineUndoLen = 0;
+	s_lineUndoY = 0;
+	s_lineUndoHave = FALSE;
+}
+
+VOID
+TT_LineUndoTouch(struct TTTextBuffer *buffer)
+{
+	struct TTTextLine *ln;
+	ULONG len;
+
+	if (!buffer || !buffer->lines || buffer->cursorY >= buffer->lineCount)
+		return;
+	if (s_lineUndoHave && s_lineUndoY == buffer->cursorY)
+		return;
+
+	ln = &buffer->lines[buffer->cursorY];
+	if (!ln->text)
+		return;
+	len = ln->length;
+	if (s_lineUndoText)
+		TT_Free(s_lineUndoText);
+	s_lineUndoText = (STRPTR)TT_Alloc(len + 1, MEMF_CLEAR);
+	if (!s_lineUndoText) {
+		s_lineUndoHave = FALSE;
+		return;
+	}
+	if (len > 0)
+		CopyMem(ln->text, s_lineUndoText, len);
+	s_lineUndoText[len] = '\0';
+	s_lineUndoLen = len;
+	s_lineUndoY = buffer->cursorY;
+	s_lineUndoHave = TRUE;
+}
+
+BOOL
+TT_UndoLine(struct TTTextBuffer *buffer)
+{
+	struct TTTextLine *ln;
+	STRPTR curCopy;
+	ULONG curLen;
+	ULONG newAlloc;
+	STRPTR nt;
+
+	if (!buffer || !buffer->lines || !s_lineUndoHave || !s_lineUndoText)
+		return FALSE;
+	if (s_lineUndoY >= buffer->lineCount)
+		return FALSE;
+
+	ln = &buffer->lines[s_lineUndoY];
+	if (!ln->text)
+		return FALSE;
+
+	curLen = ln->length;
+	curCopy = (STRPTR)TT_Alloc(curLen + 1, MEMF_CLEAR);
+	if (!curCopy)
+		return FALSE;
+	if (curLen > 0)
+		CopyMem(ln->text, curCopy, curLen);
+	curCopy[curLen] = '\0';
+
+	newAlloc = s_lineUndoLen + 1;
+	if (newAlloc < 256)
+		newAlloc = 256;
+	if (ln->allocated < newAlloc) {
+		nt = (STRPTR)TT_Alloc(newAlloc, MEMF_CLEAR);
+		if (!nt) {
+			TT_Free(curCopy);
+			return FALSE;
+		}
+		TT_Free(ln->text);
+		ln->text = nt;
+		ln->allocated = newAlloc;
+	}
+	if (s_lineUndoLen > 0)
+		CopyMem(s_lineUndoText, ln->text, s_lineUndoLen);
+	ln->text[s_lineUndoLen] = '\0';
+	ln->length = s_lineUndoLen;
+
+	TT_Free(s_lineUndoText);
+	s_lineUndoText = curCopy;
+	s_lineUndoLen = curLen;
+	s_lineUndoHave = TRUE;
+
+	buffer->cursorY = s_lineUndoY;
+	buffer->cursorX = 0;
+	buffer->modified = TRUE;
+	return TRUE;
+}
+
 BOOL TT_InitTextBuffer(struct TTTextBuffer *buffer) {
   if (!buffer) {
     return FALSE;
@@ -64,6 +171,8 @@ VOID TT_FreeTextBuffer(struct TTTextBuffer *buffer) {
   if (!buffer) {
     return;
   }
+
+  TT_LineUndoClear(buffer);
 
   if (buffer->lines) {
     for (i = 0; i < buffer->lineCount; i++) {
@@ -276,6 +385,8 @@ BOOL TT_InsertChar(struct TTTextBuffer *buffer, UBYTE ch) {
     return FALSE;
   }
 
+  TT_LineUndoTouch(buffer);
+
   line = &buffer->lines[buffer->cursorY];
 
   /* Expand line buffer if needed */
@@ -324,6 +435,8 @@ BOOL TT_DeleteChar(struct TTTextBuffer *buffer) {
   if (!buffer || !buffer->lines || buffer->cursorY >= buffer->lineCount) {
     return FALSE;
   }
+
+  TT_LineUndoTouch(buffer);
 
   line = &buffer->lines[buffer->cursorY];
 
@@ -407,6 +520,19 @@ BOOL TT_InsertNewline(struct TTTextBuffer *buffer) {
     return FALSE;
   }
 
+  TT_LineUndoClear(buffer);
+
+  line = &buffer->lines[buffer->cursorY];
+  if (!line->text) {
+    line->allocated = 256;
+    line->text = (STRPTR)TT_Alloc(line->allocated, MEMF_CLEAR);
+    if (!line->text)
+      return FALSE;
+    line->length = 0;
+  }
+  if (buffer->cursorX > line->length)
+    buffer->cursorX = line->length;
+
   /* Expand line array if needed */
   if (buffer->lineCount >= buffer->maxLines) {
     ULONG newMax = 0;
@@ -422,12 +548,12 @@ BOOL TT_InsertNewline(struct TTTextBuffer *buffer) {
       TT_Free(buffer->lines);
       buffer->lines = newLines;
       buffer->maxLines = newMax;
+      line = &buffer->lines[buffer->cursorY];
     } else {
       return FALSE;
     }
   }
 
-  line = &buffer->lines[buffer->cursorY];
   splitPos = buffer->cursorX;
   remainingLen = line->length - splitPos;
 
@@ -435,6 +561,10 @@ BOOL TT_InsertNewline(struct TTTextBuffer *buffer) {
   for (i = buffer->lineCount; i > buffer->cursorY + 1; i--) {
     buffer->lines[i] = buffer->lines[i - 1];
   }
+  /* Vacated slot must not keep a shallow-copied pointer. */
+  buffer->lines[buffer->cursorY + 1].text = NULL;
+  buffer->lines[buffer->cursorY + 1].length = 0;
+  buffer->lines[buffer->cursorY + 1].allocated = 0;
 
   /* Create new line */
   newLine = &buffer->lines[buffer->cursorY + 1];
@@ -474,6 +604,8 @@ BOOL TT_DeleteForward(struct TTTextBuffer *buffer) {
   if (!buffer || !buffer->lines || buffer->cursorY >= buffer->lineCount) {
     return FALSE;
   }
+
+  TT_LineUndoTouch(buffer);
 
   line = &buffer->lines[buffer->cursorY];
 
@@ -553,6 +685,8 @@ BOOL TT_DeleteEOL(struct TTTextBuffer *buffer) {
     return FALSE;
   }
 
+  TT_LineUndoTouch(buffer);
+
   startX = buffer->cursorX;
   endX = buffer->lines[buffer->cursorY].length;
 
@@ -605,6 +739,8 @@ BOOL TT_DeleteSOL(struct TTTextBuffer *buffer) {
   if (!buffer || buffer->cursorY >= buffer->lineCount ) {
     return FALSE;
   }
+
+  TT_LineUndoTouch(buffer);
 
   endX = buffer->cursorX;
   startX = 0;
@@ -663,6 +799,8 @@ BOOL TT_DeleteLine(struct TTTextBuffer *buffer) {
     return FALSE;
   }
 
+  TT_LineUndoClear(buffer);
+
   lineY = buffer->cursorY;
 
   /* Free line text */
@@ -677,6 +815,11 @@ BOOL TT_DeleteLine(struct TTTextBuffer *buffer) {
   }
 
   buffer->lineCount--;
+  if (buffer->lineCount < buffer->maxLines) {
+    buffer->lines[buffer->lineCount].text = NULL;
+    buffer->lines[buffer->lineCount].length = 0;
+    buffer->lines[buffer->lineCount].allocated = 0;
+  }
 
   /* Ensure at least one empty line */
   if (buffer->lineCount == 0) {
@@ -771,7 +914,11 @@ BOOL TT_SetCharAtCursor(struct TTTextBuffer *buffer, UBYTE ch) {
     return FALSE;
   }
 
+  if (!buffer->lines[buffer->cursorY].text)
+    return FALSE;
+
   if (buffer->cursorX < buffer->lines[buffer->cursorY].length) {
+    TT_LineUndoTouch(buffer);
     buffer->lines[buffer->cursorY].text[buffer->cursorX] = (char)ch;
     buffer->modified = TRUE;
     return TRUE;
@@ -1184,21 +1331,31 @@ BOOL TT_ShiftRight(struct TTTextBuffer *buffer) {
 }
 
 BOOL TT_ConvertTabsToSpaces(struct TTTextBuffer *buffer) {
+  return TT_ConvertTabsToSpacesEx(buffer, 8);
+}
+
+BOOL TT_ConvertTabsToSpacesEx(struct TTTextBuffer *buffer, ULONG tabSize) {
   ULONG startY = 0;
   ULONG startX = 0;
   ULONG stopY = 0;
   ULONG stopX = 0;
   ULONG i = 0;
   ULONG j = 0;
-  ULONG tabSize = 4;
   STRPTR newText = NULL;
   ULONG newAlloc = 0;
   ULONG newLen = 0;
   ULONG tabCount = 0;
+  ULONG temp;
+  ULONG lineStart;
+  ULONG lineEnd;
+  ULONG k;
+  ULONG restLen;
 
   if (!buffer) {
     return FALSE;
   }
+  if (tabSize < 1)
+    tabSize = 8;
 
   if (buffer->marking.enabled) {
     startY = buffer->marking.startY;
@@ -1214,7 +1371,7 @@ BOOL TT_ConvertTabsToSpaces(struct TTTextBuffer *buffer) {
 
   /* Normalize */
   if (stopY < startY || (stopY == startY && stopX < startX)) {
-    ULONG temp = startY;
+    temp = startY;
     startY = stopY;
     stopY = temp;
     temp = startX;
@@ -1224,8 +1381,8 @@ BOOL TT_ConvertTabsToSpaces(struct TTTextBuffer *buffer) {
 
   /* Convert tabs to spaces */
   for (i = startY; i <= stopY && i < buffer->lineCount; i++) {
-    ULONG lineStart = (i == startY) ? startX : 0;
-    ULONG lineEnd = (i == stopY) ? stopX : buffer->lines[i].length;
+    lineStart = (i == startY) ? startX : 0;
+    lineEnd = (i == stopY) ? stopX : buffer->lines[i].length;
 
     /* Count tabs in this range */
     tabCount = 0;
@@ -1258,7 +1415,6 @@ BOOL TT_ConvertTabsToSpaces(struct TTTextBuffer *buffer) {
       newLen = lineStart;
       for (j = lineStart; j < lineEnd && j < buffer->lines[i].length; j++) {
         if (buffer->lines[i].text[j] == '\t') {
-          ULONG k = 0;
           for (k = 0; k < tabSize; k++) {
             newText[newLen++] = ' ';
           }
@@ -1269,7 +1425,6 @@ BOOL TT_ConvertTabsToSpaces(struct TTTextBuffer *buffer) {
 
       /* Copy rest of line */
       if (j < buffer->lines[i].length) {
-        ULONG restLen = 0;
         restLen = buffer->lines[i].length - j;
         CopyMem(&buffer->lines[i].text[j], &newText[newLen], restLen);
         newLen += restLen;
@@ -1292,20 +1447,118 @@ BOOL TT_ConvertTabsToSpaces(struct TTTextBuffer *buffer) {
 }
 
 BOOL TT_ConvertSpacesToTabs(struct TTTextBuffer *buffer) {
-  /* TODO: Implement spaces to tabs conversion */
-  /* This is more complex as it requires detecting tab stops */
-  return FALSE;
+  return TT_ConvertSpacesToTabsEx(buffer, 8);
+}
+
+BOOL TT_ConvertSpacesToTabsEx(struct TTTextBuffer *buffer, ULONG tabSize) {
+  ULONG i;
+  ULONG j;
+  ULONG col;
+  ULONG run;
+  ULONG out;
+  ULONG newLen;
+  ULONG newAlloc;
+  STRPTR newText;
+  STRPTR text;
+  ULONG len;
+  ULONG startY;
+  ULONG stopY;
+  BOOL changed;
+  ULONG toStop;
+  ULONG take;
+  ULONG tmp;
+
+  if (!buffer || !buffer->lines)
+    return FALSE;
+  if (tabSize < 1)
+    tabSize = 8;
+
+  changed = FALSE;
+
+  if (buffer->marking.enabled) {
+    startY = buffer->marking.startY;
+    stopY = buffer->marking.stopY;
+    if (stopY < startY) {
+      tmp = startY;
+      startY = stopY;
+      stopY = tmp;
+    }
+  } else {
+    startY = 0;
+    stopY = buffer->lineCount > 0 ? buffer->lineCount - 1 : 0;
+  }
+
+  for (i = startY; i <= stopY && i < buffer->lineCount; i++) {
+    text = buffer->lines[i].text;
+    len = buffer->lines[i].length;
+    if (!text || len == 0)
+      continue;
+
+    newAlloc = len + 1;
+    newText = (STRPTR)TT_Alloc(newAlloc, MEMF_CLEAR);
+    if (!newText)
+      continue;
+
+    col = 0;
+    out = 0;
+    j = 0;
+    while (j < len) {
+      if (text[j] == ' ') {
+        run = 0;
+        while (j + run < len && text[j + run] == ' ')
+          run++;
+        while (run > 0) {
+          toStop = tabSize - (col % tabSize);
+          if (toStop == 0)
+            toStop = tabSize;
+          if (run >= toStop && toStop > 1) {
+            newText[out++] = '\t';
+            col += toStop;
+            j += toStop;
+            run -= toStop;
+            changed = TRUE;
+          } else {
+            take = run;
+            while (take > 0) {
+              newText[out++] = ' ';
+              col++;
+              j++;
+              take--;
+              run--;
+            }
+          }
+        }
+      } else if (text[j] == '\t') {
+        toStop = tabSize - (col % tabSize);
+        if (toStop == 0)
+          toStop = tabSize;
+        newText[out++] = '\t';
+        col += toStop;
+        j++;
+      } else {
+        newText[out++] = text[j];
+        col++;
+        j++;
+      }
+    }
+    newText[out] = '\0';
+    newLen = out;
+
+    TT_Free(buffer->lines[i].text);
+    buffer->lines[i].text = newText;
+    buffer->lines[i].allocated = newAlloc;
+    buffer->lines[i].length = newLen;
+  }
+
+  if (changed)
+    buffer->modified = TRUE;
+  return changed;
 }
 
 /****************************************************************************/
 /* TT_FindText
  *
- * Case-insensitive forward search from the current cursor (column-inclusive
- * so Find from SOF can match column 0). If the cursor already sits on a
- * match, scanning starts one column past so repeated Find advances.
- * No wrap: caller may re-issue from (0,0) to wrap.
- *
- * Returns TRUE and writes the match start into *outY / *outX on success.
+ * Forward or backward search with optional case fold and whole-word.
  */
 static UBYTE
 TT_FindFoldChar(UBYTE ch)
@@ -1315,18 +1568,59 @@ TT_FindFoldChar(UBYTE ch)
   return ch;
 }
 
+static BOOL
+TT_FindIsWordChar(UBYTE ch)
+{
+  if ((ch >= (UBYTE)'A' && ch <= (UBYTE)'Z') ||
+      (ch >= (UBYTE)'a' && ch <= (UBYTE)'z') ||
+      (ch >= (UBYTE)'0' && ch <= (UBYTE)'9') ||
+      ch == (UBYTE)'_')
+    return TRUE;
+  return FALSE;
+}
+
+static BOOL
+TT_FindCharsEqual(UBYTE a, UBYTE b, BOOL ignoreCase)
+{
+  if (ignoreCase)
+    return (BOOL)(TT_FindFoldChar(a) == TT_FindFoldChar(b));
+  return (BOOL)(a == b);
+}
+
+static BOOL
+TT_FindWholeWordOk(STRPTR lineText, ULONG lineLen, ULONG x, ULONG searchLen)
+{
+  UBYTE before;
+  UBYTE after;
+
+  if (x > 0) {
+    before = (UBYTE)lineText[x - 1];
+    if (TT_FindIsWordChar(before))
+      return FALSE;
+  }
+  if (x + searchLen < lineLen) {
+    after = (UBYTE)lineText[x + searchLen];
+    if (TT_FindIsWordChar(after))
+      return FALSE;
+  }
+  return TRUE;
+}
+
 BOOL
-TT_FindTextAt(struct TTTextBuffer *buffer, STRPTR searchStr,
-              ULONG *outY, ULONG *outX, BOOL skipIfOnMatch)
+TT_FindTextAtEx(struct TTTextBuffer *buffer, STRPTR searchStr,
+                ULONG *outY, ULONG *outX, BOOL skipIfOnMatch,
+                BOOL ignoreCase, BOOL wholeWords, BOOL scanBackwards)
 {
   ULONG searchLen = 0;
-  ULONG startX    = 0;
-  ULONG y         = 0;
-  ULONG x         = 0;
-  ULONG j         = 0;
-  STRPTR lineText  = NULL;
-  ULONG lineLen   = 0;
-  BOOL  match     = FALSE;
+  ULONG startX = 0;
+  ULONG y = 0;
+  ULONG x = 0;
+  ULONG j = 0;
+  STRPTR lineText = NULL;
+  ULONG lineLen = 0;
+  BOOL match = FALSE;
+  LONG yi;
+  LONG xi;
 
   if (!buffer || !searchStr || !outY || !outX)
     return FALSE;
@@ -1341,8 +1635,55 @@ TT_FindTextAt(struct TTTextBuffer *buffer, STRPTR searchStr,
     return FALSE;
 
   startX = buffer->cursorX;
-  if (skipIfOnMatch)
-  {
+
+  if (scanBackwards) {
+    if (skipIfOnMatch && startX > 0)
+      startX--;
+    else if (skipIfOnMatch && startX == 0 && buffer->cursorY > 0) {
+      /* fall through to previous line end in loop */
+    }
+
+    for (yi = (LONG)buffer->cursorY; yi >= 0; yi--) {
+      lineText = buffer->lines[yi].text;
+      lineLen = buffer->lines[yi].length;
+      if (!lineText || lineLen < searchLen)
+        continue;
+
+      if ((ULONG)yi == buffer->cursorY)
+        xi = (LONG)startX;
+      else
+        xi = (LONG)lineLen;
+
+      if (xi > (LONG)lineLen)
+        xi = (LONG)lineLen;
+      if (xi >= (LONG)searchLen)
+        xi = xi - (LONG)searchLen;
+      else
+        continue;
+
+      for (; xi >= 0; xi--) {
+        match = TRUE;
+        for (j = 0; j < searchLen; j++) {
+          if (!TT_FindCharsEqual((UBYTE)lineText[(ULONG)xi + j],
+                                 (UBYTE)searchStr[j], ignoreCase)) {
+            match = FALSE;
+            break;
+          }
+        }
+        if (match && wholeWords &&
+            !TT_FindWholeWordOk(lineText, lineLen, (ULONG)xi, searchLen))
+          match = FALSE;
+        if (match) {
+          *outY = (ULONG)yi;
+          *outX = (ULONG)xi;
+          return TRUE;
+        }
+      }
+    }
+    return FALSE;
+  }
+
+  if (skipIfOnMatch) {
     ULONG k = 0;
     BOOL onMatch = TRUE;
 
@@ -1350,46 +1691,44 @@ TT_FindTextAt(struct TTTextBuffer *buffer, STRPTR searchStr,
     lineLen = buffer->lines[buffer->cursorY].length;
     if (!lineText || startX + searchLen > lineLen)
       onMatch = FALSE;
-    else
-    {
-      for (k = 0; k < searchLen; k++)
-      {
-        if (TT_FindFoldChar((UBYTE)lineText[startX + k]) !=
-            TT_FindFoldChar((UBYTE)searchStr[k]))
-        {
+    else {
+      for (k = 0; k < searchLen; k++) {
+        if (!TT_FindCharsEqual((UBYTE)lineText[startX + k],
+                               (UBYTE)searchStr[k], ignoreCase)) {
           onMatch = FALSE;
           break;
         }
       }
+      if (onMatch && wholeWords &&
+          !TT_FindWholeWordOk(lineText, lineLen, startX, searchLen))
+        onMatch = FALSE;
     }
     if (onMatch)
       startX = buffer->cursorX + 1;
   }
 
-  for (y = buffer->cursorY; y < buffer->lineCount; y++)
-  {
+  for (y = buffer->cursorY; y < buffer->lineCount; y++) {
     lineText = buffer->lines[y].text;
-    lineLen  = buffer->lines[y].length;
+    lineLen = buffer->lines[y].length;
 
     x = (y == buffer->cursorY) ? startX : 0;
 
     if (!lineText || lineLen < searchLen)
       continue;
 
-    for (; x + searchLen <= lineLen; x++)
-    {
+    for (; x + searchLen <= lineLen; x++) {
       match = TRUE;
-      for (j = 0; j < searchLen; j++)
-      {
-        if (TT_FindFoldChar((UBYTE)lineText[x + j]) !=
-            TT_FindFoldChar((UBYTE)searchStr[j]))
-        {
+      for (j = 0; j < searchLen; j++) {
+        if (!TT_FindCharsEqual((UBYTE)lineText[x + j],
+                               (UBYTE)searchStr[j], ignoreCase)) {
           match = FALSE;
           break;
         }
       }
-      if (match)
-      {
+      if (match && wholeWords &&
+          !TT_FindWholeWordOk(lineText, lineLen, x, searchLen))
+        match = FALSE;
+      if (match) {
         *outY = y;
         *outX = x;
         return TRUE;
@@ -1398,6 +1737,14 @@ TT_FindTextAt(struct TTTextBuffer *buffer, STRPTR searchStr,
   }
 
   return FALSE;
+}
+
+BOOL
+TT_FindTextAt(struct TTTextBuffer *buffer, STRPTR searchStr,
+              ULONG *outY, ULONG *outX, BOOL skipIfOnMatch)
+{
+  return TT_FindTextAtEx(buffer, searchStr, outY, outX, skipIfOnMatch,
+                         TRUE, FALSE, FALSE);
 }
 
 BOOL

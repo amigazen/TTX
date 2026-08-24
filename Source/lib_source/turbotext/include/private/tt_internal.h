@@ -90,7 +90,9 @@ BOOL TT_ConvertToLower(struct TTTextBuffer *buffer);
 BOOL TT_ShiftLeft(struct TTTextBuffer *buffer);
 BOOL TT_ShiftRight(struct TTTextBuffer *buffer);
 BOOL TT_ConvertTabsToSpaces(struct TTTextBuffer *buffer);
+BOOL TT_ConvertTabsToSpacesEx(struct TTTextBuffer *buffer, ULONG tabSize);
 BOOL TT_ConvertSpacesToTabs(struct TTTextBuffer *buffer);
+BOOL TT_ConvertSpacesToTabsEx(struct TTTextBuffer *buffer, ULONG tabSize);
 BOOL TT_MoveNextWord(struct TTTextBuffer *buffer);
 BOOL TT_MovePrevWord(struct TTTextBuffer *buffer);
 BOOL TT_MoveEndOfLine(struct TTTextBuffer *buffer);
@@ -108,6 +110,9 @@ BOOL TT_ReplaceWordAtCursor(struct TTTextBuffer *buffer, STRPTR newWord);
  */
 BOOL TT_FindTextAt(struct TTTextBuffer *buffer, STRPTR searchStr,
                    ULONG *outY, ULONG *outX, BOOL skipIfOnMatch);
+BOOL TT_FindTextAtEx(struct TTTextBuffer *buffer, STRPTR searchStr,
+                     ULONG *outY, ULONG *outX, BOOL skipIfOnMatch,
+                     BOOL ignoreCase, BOOL wholeWords, BOOL scanBackwards);
 BOOL TT_FindText(struct TTTextBuffer *buffer, STRPTR searchStr,
                  ULONG *outY, ULONG *outX);
 
@@ -124,6 +129,11 @@ BOOL TT_FindText(struct TTTextBuffer *buffer, STRPTR searchStr,
 BOOL TT_CenterLine(struct TTTextBuffer *buffer);
 BOOL TT_JustifyLine(struct TTTextBuffer *buffer);
 BOOL TT_FormatParagraph(struct TTTextBuffer *buffer);
+
+/* Line-scoped undo (Extras/Undo Line): snapshot before first edit on a line. */
+VOID TT_LineUndoTouch(struct TTTextBuffer *buffer);
+BOOL TT_UndoLine(struct TTTextBuffer *buffer);
+VOID TT_LineUndoClear(struct TTTextBuffer *buffer);
 
 /****************************************************************************/
 /* Block operations */

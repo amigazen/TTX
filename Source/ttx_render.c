@@ -1139,6 +1139,18 @@ VOID MouseToCursor(struct Session *session, struct Window *window,
     }
 
     *cursorX = charIndex;
+
+    /* Free-form: click past EOL places caret in the virtual column. */
+    if (TR_PrefsGet() && TR_PrefsGet()->freeForm && charWidth > 0) {
+      ULONG eolPixel;
+      ULONG past;
+
+      eolPixel = currentX;
+      if (pixelX > eolPixel) {
+        past = (pixelX - eolPixel + charWidth / 2) / charWidth;
+        *cursorX = charIndex + past;
+      }
+    }
   } else {
     *cursorX = 0;
   }

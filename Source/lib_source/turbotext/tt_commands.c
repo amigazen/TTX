@@ -24,6 +24,12 @@
  */
 static STRPTR s_undeleteLine = NULL;
 static ULONG  s_undeleteLen  = 0;
+/*
+ * MarkBlk is two-step (anchor, then end). After a finished mark - or a mark
+ * left by Conv2* - the next MarkBlk clears and starts a new anchor so ARexx
+ * / menus never extend a stale selection across the whole buffer.
+ */
+static BOOL s_markAwaitingEnd = FALSE;
 
 /****************************************************************************/
 
@@ -90,7 +96,7 @@ TT_DoCommandI(
 	}
 
 	/*
-	 * Do not stamp TTERR_UNKNOWN_COMMAND on every FALSE return — many
+	 * Do not stamp TTERR_UNKNOWN_COMMAND on every FALSE return - many
 	 * commands return FALSE for empty find, no mark, SOF, etc. Unknown
 	 * is set only at the end of TT_HandleEngineCommand when no match.
 	 */
@@ -118,7 +124,7 @@ TT_HandleEngineCommand(
 	buf = &doc->buffer;
 
 	/* ------------------------------------------------------------------ */
-	/* Chunk A – basic insert / delete (existing) */
+	/* Chunk A - basic insert / delete (existing) */
 
 	if (Stricmp(command, "Insert") == 0 && argCount > 0 && args[0])
 	{
@@ -149,8 +155,77 @@ TT_HandleEngineCommand(
 	}
 	if (Stricmp(command, "InsertLine") == 0)
 	{
-		doc->state.modified = TT_InsertNewline(buf);
-		return doc->state.modified;
+		BOOL doIndent;
+		ULONG ai;
+		ULONG indentLen;
+		ULONG prevY;
+		STRPTR prevText;
+		struct TTTextLine *newLn;
+		ULONG newAlloc;
+		STRPTR nt;
+		ULONG k;
+
+		doIndent = FALSE;
+		indentLen = 0;
+		prevText = NULL;
+		newLn = NULL;
+		nt = NULL;
+
+		if (doc->state.readOnly)
+			return FALSE;
+
+		for (ai = 0; ai < argCount; ai++) {
+			if (args[ai] && Stricmp(args[ai], "Indent") == 0)
+				doIndent = TRUE;
+		}
+
+		prevY = buf->cursorY;
+		if (!TT_InsertNewline(buf))
+			return FALSE;
+
+		if (doIndent && prevY < buf->lineCount &&
+		    buf->cursorY < buf->lineCount &&
+		    buf->lines[prevY].text) {
+			prevText = buf->lines[prevY].text;
+			indentLen = 0;
+			while (indentLen < buf->lines[prevY].length &&
+			       (prevText[indentLen] == ' ' ||
+			        prevText[indentLen] == '\t'))
+				indentLen++;
+			if (indentLen > 0) {
+				newLn = &buf->lines[buf->cursorY];
+				if (!newLn->text)
+					indentLen = 0;
+			}
+			if (indentLen > 0 && newLn) {
+				if (indentLen + newLn->length + 1 > newLn->allocated) {
+					newAlloc = indentLen + newLn->length + 256;
+					nt = (STRPTR)TT_Alloc(newAlloc, MEMF_CLEAR);
+					if (!nt) {
+						indentLen = 0;
+					} else {
+						if (newLn->length > 0)
+							CopyMem(newLn->text, nt + indentLen,
+								newLn->length);
+						TT_Free(newLn->text);
+						newLn->text = nt;
+						newLn->allocated = newAlloc;
+					}
+				} else if (newLn->length > 0) {
+					for (k = newLn->length; k > 0; k--)
+						newLn->text[k - 1 + indentLen] =
+							newLn->text[k - 1];
+				}
+			}
+			if (indentLen > 0 && newLn && newLn->text) {
+				CopyMem(prevText, newLn->text, indentLen);
+				newLn->length += indentLen;
+				newLn->text[newLn->length] = '\0';
+				buf->cursorX = indentLen;
+			}
+		}
+		doc->state.modified = TRUE;
+		return TRUE;
 	}
 	if (Stricmp(command, "Delete") == 0)
 	{
@@ -212,7 +287,7 @@ TT_HandleEngineCommand(
 	}
 
 	/*
-	 * DeleteLine – save the line content into the undelete ring before
+	 * DeleteLine - save the line content into the undelete ring before
 	 * calling TT_DeleteLine so that UndeleteLine can restore it.
 	 */
 	if (Stricmp(command, "DeleteLine") == 0)
@@ -246,7 +321,7 @@ TT_HandleEngineCommand(
 	}
 
 	/* ------------------------------------------------------------------ */
-	/* Chunk A – cursor movement (existing) */
+	/* Chunk A - cursor movement (existing) */
 
 	if (Stricmp(command, "MoveLeft") == 0)
 	{
@@ -306,16 +381,34 @@ TT_HandleEngineCommand(
 	}
 
 	/* ------------------------------------------------------------------ */
-	/* Chunk A – block / case / shift / file (existing) */
+	/* Chunk A - block / case / shift / file (existing) */
 
 	if (Stricmp(command, "MarkBlk") == 0)
 	{
+		ULONG ai;
+
 		/*
-		 * First MarkBlk: start a selection at the cursor (current line
-		 * if at column 0). Second MarkBlk: set the stop corner to the
-		 * cursor so MoveDown + MarkBlk selects a range. Never MarkAll —
-		 * that made ARexx paste duplicate the whole report.
+		 * First MarkBlk: start a selection at the cursor. Second: set the
+		 * stop corner. Third (or MarkBlk after Conv2x/Copy left a mark):
+		 * clear and start fresh. Never MarkAll - that made ARexx paste
+		 * duplicate the whole report.
 		 */
+		for (ai = 0; ai < argCount; ai++) {
+			if (!args[ai])
+				continue;
+			if (Stricmp(args[ai], "Off") == 0 ||
+			    Stricmp(args[ai], "Clear") == 0 ||
+			    Stricmp(args[ai], "Cancel") == 0) {
+				TT_ClearMarking(buf);
+				s_markAwaitingEnd = FALSE;
+				return TRUE;
+			}
+		}
+
+		if (buf->marking.enabled && !s_markAwaitingEnd) {
+			TT_ClearMarking(buf);
+		}
+
 		if (!buf->marking.enabled)
 		{
 			buf->marking.enabled = TRUE;
@@ -326,53 +419,91 @@ TT_HandleEngineCommand(
 				buf->marking.stopX = buf->lines[buf->cursorY].length;
 			else
 				buf->marking.stopX = buf->cursorX;
+			s_markAwaitingEnd = TRUE;
 		}
 		else
 		{
 			buf->marking.stopY = buf->cursorY;
 			buf->marking.stopX = buf->cursorX;
+			s_markAwaitingEnd = FALSE;
 		}
 		return TRUE;
 	}
 	if (Stricmp(command, "DeleteBlk") == 0)
 	{
 		doc->state.modified = TT_DeleteBlock(buf);
+		s_markAwaitingEnd = FALSE;
 		return doc->state.modified;
 	}
 	if (Stricmp(command, "Conv2Upper") == 0)
 	{
+		BOOL tempMark;
+
 		if (doc->state.readOnly)
 			return FALSE;
-		/* No mark: convert the current line. */
+		tempMark = FALSE;
+		/* No mark: convert the current line, then drop the temp mark. */
 		if (!buf->marking.enabled && buf->cursorY < buf->lineCount)
 		{
 			TT_SetMarking(buf, buf->cursorY, 0, buf->cursorY,
 				buf->lines[buf->cursorY].length);
+			tempMark = TRUE;
 		}
 		doc->state.modified = TT_ConvertToUpper(buf);
+		if (tempMark) {
+			TT_ClearMarking(buf);
+			s_markAwaitingEnd = FALSE;
+		}
 		return doc->state.modified;
 	}
 	if (Stricmp(command, "Conv2Lower") == 0)
 	{
+		BOOL tempMark;
+
 		if (doc->state.readOnly)
 			return FALSE;
+		tempMark = FALSE;
 		if (!buf->marking.enabled && buf->cursorY < buf->lineCount)
 		{
 			TT_SetMarking(buf, buf->cursorY, 0, buf->cursorY,
 				buf->lines[buf->cursorY].length);
+			tempMark = TRUE;
 		}
 		doc->state.modified = TT_ConvertToLower(buf);
+		if (tempMark) {
+			TT_ClearMarking(buf);
+			s_markAwaitingEnd = FALSE;
+		}
 		return doc->state.modified;
 	}
 	if (Stricmp(command, "Conv2Tabs") == 0)
 	{
-		doc->state.modified = TT_ConvertSpacesToTabs(buf);
-		return doc->state.modified;
+		ULONG tabSize = 8;
+		LONG n = 8;
+		BOOL changed;
+
+		if (argCount > 0 && args[0] && StrToLong(args[0], &n) && n > 0)
+			tabSize = (ULONG)n;
+		/* Succeed even when no space-run became a tab (e.g. mark elsewhere). */
+		changed = TT_ConvertSpacesToTabsEx(buf, tabSize);
+		if (changed) {
+			doc->state.modified = TRUE;
+			buf->modified = TRUE;
+		}
+		return TRUE;
 	}
 	if (Stricmp(command, "Conv2Spaces") == 0)
 	{
-		doc->state.modified = TT_ConvertTabsToSpaces(buf);
-		return doc->state.modified;
+		ULONG tabSize = 8;
+		LONG n = 8;
+
+		if (argCount > 0 && args[0] && StrToLong(args[0], &n) && n > 0)
+			tabSize = (ULONG)n;
+		/* Always succeed; Ex sets buf->modified only when tabs expanded. */
+		(void)TT_ConvertTabsToSpacesEx(buf, tabSize);
+		if (buf->modified)
+			doc->state.modified = TRUE;
+		return TRUE;
 	}
 	if (Stricmp(command, "ShiftLeft") == 0)
 	{
@@ -425,7 +556,7 @@ TT_HandleEngineCommand(
 		return FALSE;
 	}
 	/*
-	 * ClearFile — drop all lines except an empty first line. Engine owns
+	 * ClearFile - drop all lines except an empty first line. Engine owns
 	 * line text (TT_Alloc), so free with TT_Free and zero vacated slots.
 	 */
 	if (Stricmp(command, "ClearFile") == 0)
@@ -453,6 +584,8 @@ TT_HandleEngineCommand(
 			buf->lines[0].text[0] = '\0';
 		buf->lines[0].length = 0;
 		buf->marking.enabled = FALSE;
+		s_markAwaitingEnd = FALSE;
+		TT_LineUndoClear(buf);
 		buf->cursorX = 0;
 		buf->cursorY = 0;
 		buf->scrollX = 0;
@@ -557,7 +690,7 @@ TT_HandleEngineCommand(
 	}
 
 	/* ================================================================== */
-	/* Chunk C – search                                                     */
+	/* Chunk C - search                                                     */
 	/* ================================================================== */
 
 	/*
@@ -571,8 +704,28 @@ TT_HandleEngineCommand(
 	{
 		ULONG matchY = 0;
 		ULONG matchX = 0;
+		BOOL ignoreCase = TRUE;
+		BOOL wholeWords = FALSE;
+		BOOL scanBack = FALSE;
+		ULONG ai = 0;
 
-		if (!TT_FindText(buf, args[0], &matchY, &matchX))
+		for (ai = 1; ai < argCount; ai++) {
+			if (!args[ai])
+				continue;
+			if (Stricmp(args[ai], "CaseSensitive") == 0)
+				ignoreCase = FALSE;
+			else if (Stricmp(args[ai], "IgnoreCase") == 0)
+				ignoreCase = TRUE;
+			else if (Stricmp(args[ai], "WholeWord") == 0 ||
+				 Stricmp(args[ai], "WholeWords") == 0)
+				wholeWords = TRUE;
+			else if (Stricmp(args[ai], "Backward") == 0 ||
+				 Stricmp(args[ai], "Backwards") == 0)
+				scanBack = TRUE;
+		}
+
+		if (!TT_FindTextAtEx(buf, args[0], &matchY, &matchX, TRUE,
+				     ignoreCase, wholeWords, scanBack))
 			return FALSE;
 
 		buf->cursorY = matchY;
@@ -601,6 +754,10 @@ TT_HandleEngineCommand(
 		ULONG searchLen   = 0;
 		ULONG replaceLen  = 0;
 		ULONG i           = 0;
+		BOOL ignoreCase = TRUE;
+		BOOL wholeWords = FALSE;
+		BOOL scanBack = FALSE;
+		ULONG ai = 0;
 
 		if (doc->state.readOnly)
 			return FALSE;
@@ -610,8 +767,24 @@ TT_HandleEngineCommand(
 		while (args[1][replaceLen] != '\0')
 			replaceLen++;
 
+		for (ai = 2; ai < argCount; ai++) {
+			if (!args[ai])
+				continue;
+			if (Stricmp(args[ai], "CaseSensitive") == 0)
+				ignoreCase = FALSE;
+			else if (Stricmp(args[ai], "IgnoreCase") == 0)
+				ignoreCase = TRUE;
+			else if (Stricmp(args[ai], "WholeWord") == 0 ||
+				 Stricmp(args[ai], "WholeWords") == 0)
+				wholeWords = TRUE;
+			else if (Stricmp(args[ai], "Backward") == 0 ||
+				 Stricmp(args[ai], "Backwards") == 0)
+				scanBack = TRUE;
+		}
+
 		/* Inclusive: replace the match under the cursor after Find. */
-		if (!TT_FindTextAt(buf, args[0], &matchY, &matchX, FALSE))
+		if (!TT_FindTextAtEx(buf, args[0], &matchY, &matchX, FALSE,
+				     ignoreCase, wholeWords, scanBack))
 			return FALSE;
 
 		buf->cursorY = matchY;
@@ -645,7 +818,7 @@ TT_HandleEngineCommand(
 	}
 
 	/* ================================================================== */
-	/* Chunk C – bookmarks and named positions                             */
+	/* Chunk C - bookmarks and named positions                             */
 	/* ================================================================== */
 
 	/*
@@ -823,14 +996,9 @@ TT_HandleEngineCommand(
 	}
 
 	/*
-	 * GetCursorPos
-	 *
-	 * The engine's cursor is already accurate (the Push/Pull wrappers
-	 * keep it in sync).  The driver reads the position directly from
-	 * TTView after the command returns, so no engine action is needed.
+	 * GetCursorPos is a driver ARexx RESULT command - do not claim it here
+	 * (returning TRUE would skip TTX_Cmd_GetCursorPos and leave RESULT empty).
 	 */
-	if (Stricmp(command, "GetCursorPos") == 0)
-		return TRUE;
 
 	/*
 	 * MoveNextTabStop
@@ -982,19 +1150,14 @@ TT_HandleEngineCommand(
 	}
 
 	/* ================================================================== */
-	/* Chunk C – edit extras                                               */
+	/* Chunk C - edit extras                                               */
 	/* ================================================================== */
 
 	/*
-	 * UndeleteLine  (alias: UndoLine)
-	 *
-	 * Re-inserts the line most recently saved by the DeleteLine handler.
-	 * The saved content is placed at the current cursor row (pushing the
-	 * existing line down), and the cursor is left at column 0 of the
-	 * re-inserted line.
+	 * UndeleteLine - re-insert the last DeleteLine/DeleteEOL scrap as a
+	 * new line at the cursor (Extras/Undelete Line).
 	 */
-	if (Stricmp(command, "UndeleteLine") == 0 ||
-	    Stricmp(command, "UndoLine")     == 0)
+	if (Stricmp(command, "UndeleteLine") == 0)
 	{
 		ULONG savedY = 0;
 		ULONG i      = 0;
@@ -1007,12 +1170,6 @@ TT_HandleEngineCommand(
 
 		savedY = buf->cursorY;
 
-		/*
-		 * Split at column 0: TT_InsertNewline creates an empty line at
-		 * cursorY and moves the existing content (and cursor) to cursorY+1.
-		 * We then step back to the empty slot and fill it with the saved
-		 * line text.
-		 */
 		buf->cursorX = 0;
 		if (!TT_InsertNewline(buf))
 			return FALSE;
@@ -1031,6 +1188,21 @@ TT_HandleEngineCommand(
 		}
 
 		buf->cursorX = 0;
+		doc->state.modified = TRUE;
+		buf->modified = TRUE;
+		return TRUE;
+	}
+
+	/*
+	 * UndoLine - restore the last edited line to its pre-edit snapshot
+	 * (Extras/Undo Line).  A second UndoLine swaps back (redo).
+	 */
+	if (Stricmp(command, "UndoLine") == 0)
+	{
+		if (doc->state.readOnly)
+			return FALSE;
+		if (!TT_UndoLine(buf))
+			return FALSE;
 		doc->state.modified = TRUE;
 		buf->modified = TRUE;
 		return TRUE;
@@ -1110,17 +1282,12 @@ TT_HandleEngineCommand(
 	}
 
 	/* ================================================================== */
-	/* Chunk C – file metadata                                             */
+	/* Chunk C - file metadata                                             */
 	/* ================================================================== */
 
 	/*
-	 * GetFilePath
-	 *
-	 * The driver retrieves the file path directly from doc->state.fileName
-	 * after the command returns; no engine action is required here.
+	 * GetFilePath is a driver ARexx RESULT command - do not claim it here.
 	 */
-	if (Stricmp(command, "GetFilePath") == 0)
-		return TRUE;
 
 	/*
 	 * SetFilePath args[0]=path
@@ -1133,22 +1300,26 @@ TT_HandleEngineCommand(
 		if (doc->state.fileName)
 			TT_Free(doc->state.fileName);
 		doc->state.fileName = TT_DupStr(args[0]);
-		return (doc->state.fileName != NULL);
+		return (BOOL)(doc->state.fileName != NULL);
 	}
 
 	/* ================================================================== */
-	/* Chunk D – multi-view (Split / Switch / Swap / Center)               */
+	/* Chunk D - multi-view (Split / Switch / Swap / Center)               */
 	/* ================================================================== */
 
 	/*
-	 * SplitView — ensure a second TTView exists on this document.
+	 * SplitView - ensure a second TTView exists on this document.
 	 * Driver owns the on-screen split ratio; engine only manages views.
 	 */
 	if (Stricmp(command, "SplitView") == 0)
 	{
 		struct TTView *nv = NULL;
 
-		if (doc->viewCount < 2)
+		/*
+		 * Prefer the linked list over viewCount alone - a stale count
+		 * must not skip creating the second pane view.
+		 */
+		if (!doc->views || !doc->views->next || doc->viewCount < 2)
 		{
 			nv = TT_CreateView(doc);
 			if (!nv)
@@ -1162,35 +1333,72 @@ TT_HandleEngineCommand(
 			}
 			TT_ActivateViewI(doc, nv);
 		}
+		TT_SetLastError(TTERR_NONE);
 		return TRUE;
 	}
 
-	/* SwitchView — cycle to the next view in the document's view list. */
+	/* SwitchView - cycle to the next view in the document's view list. */
 	if (Stricmp(command, "SwitchView") == 0)
 	{
 		struct TTView *cur = NULL;
 		struct TTView *next = NULL;
+		struct TTView *nv = NULL;
+
+		if (!doc->views || !doc->views->next)
+		{
+			nv = TT_CreateView(doc);
+			if (!nv)
+				return FALSE;
+			if (view)
+			{
+				nv->cursorX = view->cursorX;
+				nv->cursorY = view->cursorY;
+				nv->scrollX = view->scrollX;
+				nv->scrollY = view->scrollY;
+			}
+		}
 
 		cur = view ? view : doc->activeView;
-		if (!cur || !doc->views)
+		if (!cur)
+			cur = doc->views;
+		if (!cur)
 			return FALSE;
+
 		next = cur->next;
 		if (!next)
 			next = doc->views;
+		if (!next)
+			return FALSE;
+
 		TT_ActivateViewI(doc, next);
+		TT_SetLastError(TTERR_NONE);
 		return TRUE;
 	}
 
-	/* SwapViews — exchange caret/scroll between the first two views. */
+	/* SwapViews - exchange caret/scroll between the first two views. */
 	if (Stricmp(command, "SwapViews") == 0)
 	{
 		struct TTView *a = NULL;
 		struct TTView *b = NULL;
+		struct TTView *nv = NULL;
 		ULONG tx = 0;
 		ULONG ty = 0;
 		ULONG sx = 0;
 		ULONG sy = 0;
 
+		if (!doc->views || !doc->views->next)
+		{
+			nv = TT_CreateView(doc);
+			if (!nv)
+				return FALSE;
+			if (view)
+			{
+				nv->cursorX = view->cursorX;
+				nv->cursorY = view->cursorY;
+				nv->scrollX = view->scrollX;
+				nv->scrollY = view->scrollY;
+			}
+		}
 		a = doc->views;
 		if (!a || !a->next)
 			return FALSE;
@@ -1201,10 +1409,11 @@ TT_HandleEngineCommand(
 		a->scrollX = b->scrollX; a->scrollY = b->scrollY;
 		b->cursorX = tx; b->cursorY = ty;
 		b->scrollX = sx; b->scrollY = sy;
+		TT_SetLastError(TTERR_NONE);
 		return TRUE;
 	}
 
-	/* CenterView — scroll so the caret is mid-pane (pageH from buffer). */
+	/* CenterView - scroll so the caret is mid-pane (pageH from buffer). */
 	if (Stricmp(command, "CenterView") == 0)
 	{
 		ULONG half = 0;

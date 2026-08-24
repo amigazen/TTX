@@ -310,14 +310,14 @@ TTX_ArexxReply(struct RexxMsg *rmsg, LONG rc, STRPTR result)
 	rmsg->rm_Result2 = 0;
 
 	/*
-	 * Always attach a result argstring when we have one and RC is 0.
-	 * Some ARexx sends omit RXFF_RESULT even with OPTIONS RESULTS.
-	 */
-	if (rc == 0 && result && result[0] != '\0' && RexxSysBase)
-	{
-		len = TTX_ArexxStrLen(result);
-		rmsg->rm_Result2 = (LONG)CreateArgstring(result, (LONG)len);
-	}
+ * Always attach a RESULT argstring on RC=0 (including empty).
+ * Skipping empty strings left ARexx RESULT as the literal "RESULT".
+ */
+if (rc == 0 && result && RexxSysBase)
+{
+	len = TTX_ArexxStrLen(result);
+	rmsg->rm_Result2 = (LONG)CreateArgstring(result, (LONG)len);
+}
 
 	ReplyMsg((struct Message *)rmsg);
 }

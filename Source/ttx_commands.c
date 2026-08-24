@@ -11,12 +11,16 @@
 #include "ttx_reqsui.h"
 #include "ttx_prefs.h"
 #include "ttx_input.h"
+#include "ttx_clipboard.h"
 #include "ttx.h"
 
-/* In-process clipboard used by Copy/Cut/Paste (FTXT device I/O later). */
-static STRPTR TTX_InternalClip = NULL;
+/* Last Find/Replace strings for repeat Find / FindChange. */
 static STRPTR TTX_LastFind = NULL;
 static STRPTR TTX_LastReplace = NULL;
+/* Defaults match original Find: ignore case, forward, not whole-word. */
+static struct TTXFindOptions TTX_LastFindOpts = {
+	FALSE, FALSE, TRUE, FALSE, FALSE
+};
 
 /*
  * Menu handlers sometimes allocate args (bookmark numbers). Those must be
@@ -84,17 +88,6 @@ TTX_DupStr(STRPTR src)
 		dst[i] = src[i];
 	dst[len] = '\0';
 	return dst;
-}
-
-static VOID
-TTX_SetInternalClip(STRPTR text)
-{
-	if (TTX_InternalClip) {
-		TTX_Free(TTX_InternalClip);
-		TTX_InternalClip = NULL;
-	}
-	if (text)
-		TTX_InternalClip = TTX_DupStr(text);
 }
 
 static VOID
@@ -167,6 +160,29 @@ BOOL TTX_HandleCommand(struct TTXApplication *app, struct Session *session, STRP
     }
     
     Printf("[CMD] TTX_HandleCommand: command='%s' (argCount=%lu)\n", command, argCount);
+
+    /*
+     * Multi-view commands must run in the driver first. A bare engine
+     * SplitView success used to return here and skip TTX_Cmd_SplitView,
+     * leaving splitRatio at 0 (one pane) even though a second TTView existed.
+     */
+    if (Stricmp(command, "CenterView") == 0) {
+        return TTX_Cmd_CenterView(app, session, args, argCount);
+    } else if (Stricmp(command, "GetViewInfo") == 0) {
+        return TTX_Cmd_GetViewInfo(app, session, args, argCount);
+    } else if (Stricmp(command, "ScrollView") == 0) {
+        return TTX_Cmd_ScrollView(app, session, args, argCount);
+    } else if (Stricmp(command, "SizeView") == 0) {
+        return TTX_Cmd_SizeView(app, session, args, argCount);
+    } else if (Stricmp(command, "SplitView") == 0) {
+        return TTX_Cmd_SplitView(app, session, args, argCount);
+    } else if (Stricmp(command, "SwapViews") == 0) {
+        return TTX_Cmd_SwapViews(app, session, args, argCount);
+    } else if (Stricmp(command, "SwitchView") == 0) {
+        return TTX_Cmd_SwitchView(app, session, args, argCount);
+    } else if (Stricmp(command, "UpdateView") == 0) {
+        return TTX_Cmd_UpdateView(app, session, args, argCount);
+    }
 
     /* Delegate editing/cursor/file commands to turbotext.library engine */
     if (session->document && TurboTextBase)
@@ -243,24 +259,7 @@ BOOL TTX_HandleCommand(struct TTXApplication *app, struct Session *session, STRP
     } else if (Stricmp(command, "Window2Front") == 0) {
         return TTX_Cmd_Window2Front(app, session, args, argCount);
     }
-    /* View commands */
-    else if (Stricmp(command, "CenterView") == 0) {
-        return TTX_Cmd_CenterView(app, session, args, argCount);
-    } else if (Stricmp(command, "GetViewInfo") == 0) {
-        return TTX_Cmd_GetViewInfo(app, session, args, argCount);
-    } else if (Stricmp(command, "ScrollView") == 0) {
-        return TTX_Cmd_ScrollView(app, session, args, argCount);
-    } else if (Stricmp(command, "SizeView") == 0) {
-        return TTX_Cmd_SizeView(app, session, args, argCount);
-    } else if (Stricmp(command, "SplitView") == 0) {
-        return TTX_Cmd_SplitView(app, session, args, argCount);
-    } else if (Stricmp(command, "SwapViews") == 0) {
-        return TTX_Cmd_SwapViews(app, session, args, argCount);
-    } else if (Stricmp(command, "SwitchView") == 0) {
-        return TTX_Cmd_SwitchView(app, session, args, argCount);
-    } else if (Stricmp(command, "UpdateView") == 0) {
-        return TTX_Cmd_UpdateView(app, session, args, argCount);
-    }
+    /* View commands are handled before engine dispatch above. */
     /* Selection block commands */
     else if (Stricmp(command, "CopyBlk") == 0) {
         return TTX_Cmd_CopyBlk(app, session, args, argCount);
@@ -2418,6 +2417,7 @@ BOOL TTX_Cmd_OpenRequester(struct TTXApplication *app, struct Session *session, 
 	opts.ignoreCase = TRUE;
 	opts.wholeWords = FALSE;
 	opts.scanBackwards = FALSE;
+	opts = TTX_LastFindOpts;
 
 	findBuf[0] = '\0';
 	changeBuf[0] = '\0';
@@ -2441,6 +2441,7 @@ BOOL TTX_Cmd_OpenRequester(struct TTXApplication *app, struct Session *session, 
 	if (Stricmp(which, "Find") == 0) {
 		if (!TTX_RequestFind(win, &opts, findBuf, sizeof(findBuf), &action))
 			return FALSE;
+		TTX_LastFindOpts = opts;
 		if (TTX_LastFind)
 			TTX_Free(TTX_LastFind);
 		TTX_LastFind = TTX_DupStr(findBuf);
@@ -2451,6 +2452,7 @@ BOOL TTX_Cmd_OpenRequester(struct TTXApplication *app, struct Session *session, 
 		if (!TTX_RequestFindChange(win, &opts, findBuf, changeBuf,
 			sizeof(findBuf), &action))
 			return FALSE;
+		TTX_LastFindOpts = opts;
 		if (TTX_LastFind)
 			TTX_Free(TTX_LastFind);
 		if (TTX_LastReplace)
@@ -2770,6 +2772,10 @@ BOOL TTX_Cmd_SplitView(struct TTXApplication *app, struct Session *session, STRP
 		session->splitRatio = 0;
 		session->splitY = 0;
 	} else {
+		/*
+		 * Engine owns TTView list allocation. Do not inspect doc->views from
+		 * the driver (TTDocument layout must stay opaque across the LVO).
+		 */
 		if (!TTX_DoEngineCommand(app, session, "SplitView", args, argCount))
 			return FALSE;
 		session->splitRatio = 50;
@@ -2787,6 +2793,13 @@ BOOL TTX_Cmd_SplitView(struct TTXApplication *app, struct Session *session, STRP
 
 BOOL TTX_Cmd_SwapViews(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
+	if (!session)
+		return FALSE;
+	/* Need a visible split before swapping pane state. */
+	if (session->splitRatio == 0) {
+		if (!TTX_Cmd_SplitView(app, session, NULL, 0))
+			return FALSE;
+	}
 	if (!TTX_DoEngineCommand(app, session, "SwapViews", args, argCount))
 		return FALSE;
 	if (session->window) {
@@ -2800,6 +2813,12 @@ BOOL TTX_Cmd_SwapViews(struct TTXApplication *app, struct Session *session, STRP
 
 BOOL TTX_Cmd_SwitchView(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
+	if (!session)
+		return FALSE;
+	if (session->splitRatio == 0) {
+		if (!TTX_Cmd_SplitView(app, session, NULL, 0))
+			return FALSE;
+	}
 	if (!TTX_DoEngineCommand(app, session, "SwitchView", args, argCount))
 		return FALSE;
 	if (session->window) {
@@ -2852,8 +2871,12 @@ BOOL TTX_Cmd_CopyBlk(struct TTXApplication *app, struct Session *session, STRPTR
 		return FALSE;
 	}
 
-	TTX_SetInternalClip(blockText);
+	TTX_ClipboardSetText(blockText);
 	TTX_Free(blockText);
+	/* Drop selection after copy so the next MarkBlk starts clean. */
+	view->marking.enabled = FALSE;
+	if (TT_SessionBuffer(session))
+		TT_SessionBuffer(session)->marking.enabled = FALSE;
 	Printf("[CMD] TTX_Cmd_CopyBlk: SUCCESS\n");
 	return TRUE;
 }
@@ -2879,7 +2902,7 @@ BOOL TTX_Cmd_CutBlk(struct TTXApplication *app, struct Session *session, STRPTR 
 		return FALSE;
 	}
 
-	TTX_SetInternalClip(blockText);
+	TTX_ClipboardSetText(blockText);
 	TTX_Free(blockText);
 
 	if (!TTX_DoEngineCommand(app, session, "DeleteBlk", NULL, 0)) {
@@ -2982,7 +3005,7 @@ BOOL TTX_Cmd_OpenClip(struct TTXApplication *app, struct Session *session, STRPT
 	if (got < 0)
 		got = 0;
 	buf[got] = '\0';
-	TTX_SetInternalClip(buf);
+	TTX_ClipboardSetText(buf);
 	TTX_Free(buf);
 	Printf("[CMD] TTX_Cmd_OpenClip: SUCCESS\n");
 	return TRUE;
@@ -2992,6 +3015,7 @@ BOOL TTX_Cmd_OpenClip(struct TTXApplication *app, struct Session *session, STRPT
 BOOL TTX_Cmd_PasteClip(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
 	STRPTR p;
+	STRPTR clip;
 	TEXT chBuf[2];
 	STRPTR insertArgs[1];
 
@@ -2999,7 +3023,9 @@ BOOL TTX_Cmd_PasteClip(struct TTXApplication *app, struct Session *session, STRP
 	(void)argCount;
 	if (!session || !TT_SessionBuffer(session) || session->document->state.readOnly)
 		return FALSE;
-	if (!TTX_InternalClip || TTX_InternalClip[0] == '\0') {
+
+	clip = TTX_ClipboardGetText();
+	if (!clip || clip[0] == '\0') {
 		Printf("[CMD] TTX_Cmd_PasteClip: FAIL (empty clip)\n");
 		return FALSE;
 	}
@@ -3007,7 +3033,7 @@ BOOL TTX_Cmd_PasteClip(struct TTXApplication *app, struct Session *session, STRP
 	/* Insert clip char-by-char; newlines become InsertLine. */
 	chBuf[1] = '\0';
 	insertArgs[0] = chBuf;
-	for (p = TTX_InternalClip; *p != '\0'; p++) {
+	for (p = clip; *p != '\0'; p++) {
 		if (*p == '\n' || *p == '\r') {
 			if (*p == '\r' && p[1] == '\n')
 				p++;
@@ -3035,22 +3061,24 @@ BOOL TTX_Cmd_SaveClip(struct TTXApplication *app, struct Session *session, STRPT
 {
 	BPTR fh;
 	STRPTR path;
+	STRPTR clip;
 	ULONG len;
 
 	(void)app;
 	(void)session;
 	if (!args || argCount < 1 || !args[0])
 		return FALSE;
-	if (!TTX_InternalClip)
+	clip = TTX_ClipboardGetText();
+	if (!clip)
 		return FALSE;
 	path = args[0];
 	fh = Open(path, MODE_NEWFILE);
 	if (!fh)
 		return FALSE;
 	len = 0;
-	while (TTX_InternalClip[len] != '\0')
+	while (clip[len] != '\0')
 		len++;
-	Write(fh, TTX_InternalClip, len);
+	Write(fh, clip, len);
 	Close(fh);
 	Printf("[CMD] TTX_Cmd_SaveClip: SUCCESS\n");
 	return TRUE;
@@ -3096,7 +3124,7 @@ BOOL TTX_Cmd_GetFilePath(struct TTXApplication *app, struct Session *session, ST
 	if (session->document->state.fileName)
 		TTX_ArexxSetResult(app, session->document->state.fileName);
 	else
-		TTX_ArexxSetResult(app, "");
+		TTX_ArexxSetResult(app, (STRPTR)"(untitled)");
 	return TRUE;
 }
 
@@ -3113,7 +3141,7 @@ BOOL TTX_Cmd_SetFilePath(struct TTXApplication *app, struct Session *session, ST
 
 BOOL TTX_Cmd_Find(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-	STRPTR useArgs[1];
+	STRPTR useArgs[5];
 	ULONG useCount = 0;
 
 	if (!session)
@@ -3131,6 +3159,21 @@ BOOL TTX_Cmd_Find(struct TTXApplication *app, struct Session *session, STRPTR *a
 	} else {
 		Printf("[CMD] TTX_Cmd_Find: FAIL (no search string)\n");
 		return FALSE;
+	}
+
+	/* Append last requester flags (and any explicit Find args after str). */
+	if (!TTX_LastFindOpts.ignoreCase)
+		useArgs[useCount++] = (STRPTR)"CaseSensitive";
+	if (TTX_LastFindOpts.wholeWords)
+		useArgs[useCount++] = (STRPTR)"WholeWord";
+	if (TTX_LastFindOpts.scanBackwards)
+		useArgs[useCount++] = (STRPTR)"Backward";
+	{
+		ULONG i;
+		for (i = 1; i < argCount && useCount < 5; i++) {
+			if (args[i])
+				useArgs[useCount++] = args[i];
+		}
 	}
 
 	if (TTX_DoEngineCommand(app, session, "Find", useArgs, useCount)) {
@@ -3711,19 +3754,37 @@ BOOL TTX_Cmd_DeleteSOW(struct TTXApplication *app, struct Session *session, STRP
 
 BOOL TTX_Cmd_FindChange(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
+	STRPTR useArgs[8];
+	ULONG useCount;
+	ULONG i;
+
 	if (!session || session->document->state.readOnly)
 		return FALSE;
-	if (args && argCount >= 1 && args[0]) {
-		if (TTX_LastFind)
-			TTX_Free(TTX_LastFind);
-		TTX_LastFind = TTX_DupStr(args[0]);
+	if (!args || argCount < 2 || !args[0] || !args[1])
+		return FALSE;
+
+	if (TTX_LastFind)
+		TTX_Free(TTX_LastFind);
+	TTX_LastFind = TTX_DupStr(args[0]);
+	if (TTX_LastReplace)
+		TTX_Free(TTX_LastReplace);
+	TTX_LastReplace = TTX_DupStr(args[1]);
+
+	useArgs[0] = args[0];
+	useArgs[1] = args[1];
+	useCount = 2;
+	if (!TTX_LastFindOpts.ignoreCase)
+		useArgs[useCount++] = (STRPTR)"CaseSensitive";
+	if (TTX_LastFindOpts.wholeWords)
+		useArgs[useCount++] = (STRPTR)"WholeWord";
+	if (TTX_LastFindOpts.scanBackwards)
+		useArgs[useCount++] = (STRPTR)"Backward";
+	for (i = 2; i < argCount && useCount < 8; i++) {
+		if (args[i])
+			useArgs[useCount++] = args[i];
 	}
-	if (args && argCount >= 2 && args[1]) {
-		if (TTX_LastReplace)
-			TTX_Free(TTX_LastReplace);
-		TTX_LastReplace = TTX_DupStr(args[1]);
-	}
-	if (TTX_DoEngineCommand(app, session, "FindChange", args, argCount)) {
+
+	if (TTX_DoEngineCommand(app, session, "FindChange", useArgs, useCount)) {
 		Printf("[CMD] TTX_Cmd_FindChange: SUCCESS\n");
 		return TRUE;
 	}
@@ -3782,16 +3843,34 @@ BOOL TTX_Cmd_Insert(struct TTXApplication *app, struct Session *session, STRPTR 
 
 BOOL TTX_Cmd_InsertLine(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    if (!session || !TT_SessionBuffer(session) || session->document->state.readOnly) {
-        return FALSE;
-    }
+	STRPTR useArgs[4];
+	ULONG useCount;
+	ULONG i;
+	BOOL haveIndent;
 
-    if (TTX_DoEngineCommand(app, session, "InsertLine", args, argCount)) {
-        Printf("[CMD] TTX_Cmd_InsertLine: SUCCESS\n");
-        return TRUE;
-    }
+	if (!session || !TT_SessionBuffer(session) || session->document->state.readOnly) {
+		return FALSE;
+	}
 
-    return FALSE;
+	useCount = 0;
+	haveIndent = FALSE;
+	for (i = 0; i < argCount && useCount < 3; i++) {
+		if (args[i]) {
+			useArgs[useCount++] = args[i];
+			if (Stricmp(args[i], "Indent") == 0)
+				haveIndent = TRUE;
+		}
+	}
+	if (!haveIndent && TR_PrefsGet() && TR_PrefsGet()->autoIndentNewLines)
+		useArgs[useCount++] = (STRPTR)"Indent";
+
+	if (TTX_DoEngineCommand(app, session, "InsertLine",
+		useCount ? useArgs : NULL, useCount)) {
+		Printf("[CMD] TTX_Cmd_InsertLine: SUCCESS\n");
+		return TRUE;
+	}
+
+	return FALSE;
 }
 
 BOOL TTX_Cmd_SetChar(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
@@ -3928,30 +4007,64 @@ BOOL TTX_Cmd_Conv2Lower(struct TTXApplication *app, struct Session *session, STR
 
 BOOL TTX_Cmd_Conv2Spaces(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    if (!session || !TT_SessionBuffer(session) || session->document->state.readOnly) {
-        return FALSE;
-    }
+	TEXT twBuf[16];
+	STRPTR useArgs[1];
+	ULONG useCount;
+	struct TTXPrefs *p;
 
-    if (TTX_DoEngineCommand(app, session, "Conv2Spaces", args, argCount)) {
-        Printf("[CMD] TTX_Cmd_Conv2Spaces: SUCCESS\n");
-        return TRUE;
-    }
+	if (!session || !TT_SessionBuffer(session) || session->document->state.readOnly) {
+		return FALSE;
+	}
 
-    return FALSE;
+	useCount = 0;
+	p = TTX_PrefsGet();
+	if (p && p->tabWidth > 0) {
+		sprintf(twBuf, "%lu", (unsigned long)p->tabWidth);
+		useArgs[0] = twBuf;
+		useCount = 1;
+	} else if (args && argCount > 0) {
+		useArgs[0] = args[0];
+		useCount = 1;
+	}
+
+	if (TTX_DoEngineCommand(app, session, "Conv2Spaces",
+				useCount ? useArgs : args, useCount)) {
+		Printf("[CMD] TTX_Cmd_Conv2Spaces: SUCCESS\n");
+		return TRUE;
+	}
+
+	return FALSE;
 }
 
 BOOL TTX_Cmd_Conv2Tabs(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-    if (!session || !TT_SessionBuffer(session) || session->document->state.readOnly) {
-        return FALSE;
-    }
+	TEXT twBuf[16];
+	STRPTR useArgs[1];
+	ULONG useCount;
+	struct TTXPrefs *p;
 
-    if (TTX_DoEngineCommand(app, session, "Conv2Tabs", args, argCount)) {
-        Printf("[CMD] TTX_Cmd_Conv2Tabs: SUCCESS\n");
-        return TRUE;
-    }
+	if (!session || !TT_SessionBuffer(session) || session->document->state.readOnly) {
+		return FALSE;
+	}
 
-    return FALSE;
+	useCount = 0;
+	p = TTX_PrefsGet();
+	if (p && p->tabWidth > 0) {
+		sprintf(twBuf, "%lu", (unsigned long)p->tabWidth);
+		useArgs[0] = twBuf;
+		useCount = 1;
+	} else if (args && argCount > 0) {
+		useArgs[0] = args[0];
+		useCount = 1;
+	}
+
+	if (TTX_DoEngineCommand(app, session, "Conv2Tabs",
+				useCount ? useArgs : args, useCount)) {
+		Printf("[CMD] TTX_Cmd_Conv2Tabs: SUCCESS\n");
+		return TRUE;
+	}
+
+	return FALSE;
 }
 
 BOOL TTX_Cmd_Conv2Upper(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)

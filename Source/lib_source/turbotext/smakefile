@@ -72,22 +72,23 @@ TT_GetActiveView.o: TT_GetActiveView.c tt_funcs.h
 TT_GetLastError.o: TT_GetLastError.c tt_funcs.h
 	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ TT_GetLastError.c
 
-tt_mem.o: tt_mem.c include/private/tt_internal.h
+tt_mem.o: tt_mem.c include/private/tt_internal.h include/libraries/turbotext.h
 	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ tt_mem.c
 
-tt_document.o: tt_document.c include/private/tt_internal.h
+tt_document.o: tt_document.c include/private/tt_internal.h include/libraries/turbotext.h
 	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ tt_document.c
 
-tt_run.o: tt_run.c include/private/tt_internal.h
+tt_run.o: tt_run.c include/private/tt_internal.h include/libraries/turbotext.h
 	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ tt_run.c
 
-tt_commands.o: tt_commands.c include/private/tt_internal.h
+tt_commands.o: tt_commands.c include/private/tt_internal.h include/libraries/turbotext.h
 	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ tt_commands.c
 
-tt_text.o: tt_text.c include/private/tt_internal.h
+tt_text.o: tt_text.c include/private/tt_internal.h include/libraries/turbotext.h
 	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ tt_text.c
 
-tt_block.o: tt_block.c include/private/tt_internal.h
+tt_block.o: tt_block.c include/private/tt_internal.h include/libraries/turbotext.h
 	Sc $(CFLAGS) DEF TT_SHARED_LIB UTILLIB OBJNAME $@ tt_block.c
 
-$(OBJS): compiler.h tt_funcs.h include/private/tt_internal.h
+# turbotext.h layout changes must rebuild every object that embeds TTDocument/TTView.
+$(OBJS): compiler.h tt_funcs.h include/private/tt_internal.h include/libraries/turbotext.h

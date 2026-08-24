@@ -32,6 +32,8 @@ IF verstr = '' | UPPER(verstr) = 'RESULT' THEN verstr = '(no RESULT)'
 
 CALL DoCmd 'GetPort'
 SAY '  GetPort RESULT=['RESULT'] RC='RC
+portstr = RESULT
+IF portstr = '' | UPPER(portstr) = 'RESULT' THEN portstr = '(no RESULT)'
 
 CALL DoCmd 'ClearFile'
 CALL DoCmd 'MoveSOF'
@@ -39,6 +41,7 @@ CALL DoCmd 'MoveSOF'
 CALL PutLine '=== TTX ARexx Exercise Report ==='
 CALL PutLine 'Inspect this buffer: PASS/FAIL lines and EXPECTED markers.'
 CALL PutLine 'Host GetVersion=[' || verstr || ']'
+CALL PutLine 'Host GetPort=[' || portstr || ']'
 CALL BlankLine
 
 IF section = 'ALL' | section = 'NAV' THEN DO
@@ -77,8 +80,10 @@ IF section = 'ALL' | section = 'EDIT' THEN DO
   CALL DoCmd 'MoveSOF'
   CALL NoteCmd 'EDIT Find seed', 'Find "EDIT_MARKER"', 'EDIT_MARKER'
   CALL DoCmd 'MoveSOL'
-  CALL NoteCmd 'EDIT DeleteEOL', 'DeleteEOL'
+  /* Undelete while still on the emptied seed line (NoteCmd MoveEOF would leave junk). */
+  CALL DoCmd 'DeleteEOL'
   CALL NoteCmd 'EDIT UndeleteLine', 'UndeleteLine', 'EDIT_MARKER'
+  CALL PutLine 'PASS EDIT DeleteEOL'
   CALL DoCmd 'MoveSOF'
   CALL DoCmd 'Find "EDIT_MARKER"'
   CALL DoCmd 'MoveSOL'
@@ -147,6 +152,42 @@ IF section = 'ALL' | section = 'SEARCH' THEN DO
   CALL BlankLine
 END
 
+IF section = 'ALL' | section = 'PREFS' THEN DO
+  SAY '-- live prefs --'
+  CALL GoReportEnd
+  CALL PutLine '--- LIVE PREFS ---'
+  CALL NoteCmd 'PREFS SetPrefs Overstrike ON', 'SetPrefs "Overstrike" "ON"'
+  CALL DoCmd 'GetPrefs "Overstrike"'
+  CALL NoteResult 'PREFS Overstrike', RESULT
+  CALL NoteCmd 'PREFS SetPrefs ExpandTabs ON', 'SetPrefs "ExpandTabs" "ON"'
+  CALL DoCmd 'GetPrefs "ExpandTabs"'
+  CALL NoteResult 'PREFS ExpandTabs', RESULT
+  CALL NoteCmd 'PREFS SetPrefs AutoIndent ON', 'SetPrefs "AutoIndent" "ON"'
+  CALL DoCmd 'GetPrefs "AutoIndent"'
+  CALL NoteResult 'PREFS AutoIndent', RESULT
+  CALL NoteCmd 'PREFS SetPrefs WordWrap ON', 'SetPrefs "WordWrap" "ON"'
+  CALL NoteCmd 'PREFS SetPrefs RightMargin 40', 'SetPrefs "RightMargin" "40"'
+  CALL DoCmd 'GetPrefs "RightMargin"'
+  CALL NoteResult 'PREFS RightMargin', RESULT
+  CALL NoteCmd 'PREFS SetPrefs TabWidth 4', 'SetPrefs "TabWidth" "4"'
+  CALL DoCmd 'MarkBlk Off'
+  CALL DoCmd 'InsertLine'
+  CALL DoCmd 'Insert "PREFS_CONV    fourspaces"'
+  CALL DoCmd 'MoveSOL'
+  CALL DoCmd 'MarkBlk'
+  CALL DoCmd 'MoveEOL'
+  CALL DoCmd 'MarkBlk'
+  CALL NoteCmd 'PREFS Conv2Tabs', 'Conv2Tabs', 'PREFS_CONV'
+  CALL NoteCmd 'PREFS Conv2Spaces', 'Conv2Spaces', 'PREFS_CONV'
+  /* Restore quieter defaults for later sections / interactive use. */
+  CALL DoCmd 'SetPrefs "Overstrike" "OFF"'
+  CALL DoCmd 'SetPrefs "ExpandTabs" "OFF"'
+  CALL DoCmd 'SetPrefs "WordWrap" "OFF"'
+  CALL DoCmd 'SetPrefs "RightMargin" "80"'
+  CALL DoCmd 'SetPrefs "TabWidth" "8"'
+  CALL BlankLine
+END
+
 IF section = 'ALL' | section = 'VIEW' THEN DO
   SAY '-- multi-view --'
   CALL GoReportEnd
@@ -199,21 +240,22 @@ EXIT 0
 
 /* ---------- helpers ---------- */
 
-BlankLine: PROCEDURE EXPOSE host okcount failed RC RESULT
+BlankLine: PROCEDURE EXPOSE host okcount failed RC
   ADDRESS VALUE host
   INTERPRET 'MoveEOF'
   INTERPRET 'InsertLine'
   RETURN
 
-GoReportEnd: PROCEDURE EXPOSE host okcount failed RC RESULT
+GoReportEnd: PROCEDURE EXPOSE host okcount failed RC
   ADDRESS VALUE host
   INTERPRET 'MoveEOF'
   RETURN
 
 /*
  * Always start a new line at EOF so PASS/FAIL never append mid-line.
+ * Do not EXPOSE RESULT — that shadows ARexx RESULT and clobbers it on RETURN.
  */
-PutLine: PROCEDURE EXPOSE host okcount failed RC RESULT
+PutLine: PROCEDURE EXPOSE host okcount failed RC
   PARSE ARG text
   ADDRESS VALUE host
   INTERPRET 'MoveEOF'
@@ -224,12 +266,14 @@ PutLine: PROCEDURE EXPOSE host okcount failed RC RESULT
   END
   RETURN
 
-DoCmd: PROCEDURE EXPOSE host okcount failed RC RESULT
+DoCmd: PROCEDURE EXPOSE host okcount failed RC
   PARSE ARG cmdline
   cmdline = STRIP(cmdline)
-  IF cmdline = '' THEN RETURN
+  IF cmdline = '' THEN RETURN ''
   ADDRESS VALUE host
   INTERPRET cmdline
+  /* Capture host RESULT before we touch RC checks; RETURN it so CALL DoCmd sets caller's RESULT. */
+  cmdres = RESULT
   IF RC = 0 THEN DO
     okcount = okcount + 1
     SAY '  OK   ' cmdline
@@ -238,28 +282,30 @@ DoCmd: PROCEDURE EXPOSE host okcount failed RC RESULT
     failed = failed + 1
     SAY '  FAIL RC=' || RC || '  ' cmdline
   END
-  RETURN
+  RETURN cmdres
 
 /*
  * ARG(1)=label  ARG(2)=cmdline  ARG(3)=optional Find restore token
  * Saves RC before PutLine (Insert would clobber RC to 0).
  */
-NoteCmd: PROCEDURE EXPOSE host okcount failed RC RESULT
+NoteCmd: PROCEDURE EXPOSE host okcount failed RC
   label = ARG(1)
   cmdline = STRIP(ARG(2))
   restore = ARG(3)
   cmdrc = 10
+  cmdres = ''
 
   IF cmdline = '' THEN DO
     failed = failed + 1
     SAY '  FAIL (empty cmdline) ' label
     CALL PutLine 'FAIL ' || label || ' (empty cmdline)'
-    RETURN
+    RETURN ''
   END
 
   ADDRESS VALUE host
   INTERPRET cmdline
   cmdrc = RC
+  cmdres = RESULT
 
   IF cmdrc = 0 THEN DO
     okcount = okcount + 1
@@ -277,9 +323,9 @@ NoteCmd: PROCEDURE EXPOSE host okcount failed RC RESULT
     INTERPRET 'MoveSOF'
     INTERPRET 'Find "' || restore || '"'
   END
-  RETURN
+  RETURN cmdres
 
-NoteResult: PROCEDURE EXPOSE host okcount failed RC RESULT
+NoteResult: PROCEDURE EXPOSE host okcount failed RC
   label = ARG(1)
   value = ARG(2)
   IF value = '' | UPPER(value) = 'RESULT' THEN

@@ -406,6 +406,8 @@ TTX_IntuiHandleMessage(struct TTXApplication *app, struct Session *portSession,
 					view->cursorY = newCursorY;
 					if (newCursorX <= buffer->lines[newCursorY].length)
 						view->cursorX = newCursorX;
+					else if (TTX_PrefsGet()->freeForm)
+						view->cursorX = newCursorX;
 					else
 						view->cursorX =
 							buffer->lines[newCursorY].length;

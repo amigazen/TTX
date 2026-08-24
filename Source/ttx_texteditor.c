@@ -82,6 +82,8 @@ TTX_TE_ApplyCursor(
 	view->cursorY = newCursorY;
 	if (newCursorX <= buffer->lines[newCursorY].length)
 		view->cursorX = newCursorX;
+	else if (TR_PrefsGet() && TR_PrefsGet()->freeForm)
+		view->cursorX = newCursorX;
 	else
 		view->cursorX = buffer->lines[newCursorY].length;
 	buffer->cursorX = view->cursorX;
