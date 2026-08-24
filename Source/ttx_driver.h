@@ -171,12 +171,18 @@ struct Session {
 	ULONG paneClipTop;
 	ULONG paneClipBottom;
 	BOOL paneClipActive;
+	/* Screen-title status bar (SetStatusBar / live L# C#). */
+	STRPTR statusBarText;
+	BOOL statusBarTemporary;
 };
 
 #define TTX_DEFER_NONE            0
 #define TTX_DEFER_OPENDOC_NEW     1
 #define TTX_DEFER_OPENDOC_FILEREQ 2
 #define TTX_DEFER_OPENFILE_FILEREQ 3
+
+/* ARexx RESULT buffer (GetBlk can be large; scripts parse RESULT). */
+#define TTX_AREXX_RESULT_MAX 2048
 
 struct TTXApplication {
 	struct MsgPort *appPort;
@@ -185,6 +191,8 @@ struct TTXApplication {
 	ULONG sessionCount;
 	ULONG nextSessionID;
 	struct Session *activeSession;
+	/* Previous active session for ActivateLastDoc. */
+	struct Session *previousSession;
 	BOOL running;
 	BOOL backgroundMode;
 	ULONG signals;
@@ -204,7 +212,7 @@ struct TTXApplication {
 	/* ARexx host (global TURBOTEXT port) */
 	struct MsgPort *arexxPort;
 	UBYTE arexxSigBit;
-	TEXT lastArexxResult[256];
+	TEXT lastArexxResult[TTX_AREXX_RESULT_MAX];
 };
 
 /****************************************************************************/
@@ -252,7 +260,7 @@ BOOL TTX_DoEngineCommand(
 	STRPTR command,
 	STRPTR *args,
 	ULONG argCount);
-BOOL TTX_HandleMenuPick(struct TTXApplication *app, struct Session *session, ULONG menuNumber, ULONG itemNumber);
+BOOL TTX_HandleMenuPick(struct TTXApplication *app, struct Session *session, ULONG menuNumber, ULONG itemNumber, APTR userData);
 BOOL TTX_CreateMenuStrip(struct Session *session);
 VOID TTX_FreeMenuStrip(struct Session *session);
 VOID TTX_ResetMenuStrip(struct Session *session);
@@ -264,6 +272,10 @@ VOID TTX_DoIconify(struct TTXApplication *app, BOOL iconify);
 VOID TTX_ProcessAppIcon(struct TTXApplication *app);
 BOOL TTX_SetupAppIcon(struct TTXApplication *app);
 VOID TTX_RemoveAppIcon(struct TTXApplication *app);
+VOID TTX_UpdateSessionWindowTitle(struct Session *session);
+VOID TTX_RefreshStatusBar(struct Session *session);
+VOID TTX_NoteSessionActivated(struct TTXApplication *app, struct Session *session);
+
 BOOL TTX_SaveWindowState(struct Session *session);
 VOID TTX_CloseSessionWindow(struct TTXApplication *app, struct Session *session,
 	struct Window *closedMark);
@@ -345,6 +357,19 @@ struct DFNFile;
 struct DFNFile *ParseDFNFile(STRPTR fileName);
 VOID FreeDFNFile(struct DFNFile *dfn);
 struct NewMenu *ConvertDFNToNewMenu(struct DFNFile *dfn, ULONG *outCount);
+/* Match rawkey+qualifier against DFN KEYBOARD/HOT_KEYS; run command if hit. */
+BOOL TTX_DFNTryKeyCommand(
+	struct TTXApplication *app,
+	struct Session *session,
+	UBYTE rawCode,
+	ULONG qualifier);
+/* Resolve menu pick when UserData is a DFNMenuEntry* from ConvertDFNToNewMenu. */
+BOOL TTX_DFNCommandFromUserData(
+	struct DFNFile *dfn,
+	APTR userData,
+	STRPTR *outCommand,
+	STRPTR **outArgs,
+	ULONG *outArgCount);
 
 /****************************************************************************/
 

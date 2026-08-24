@@ -1576,6 +1576,9 @@ VOID TTX_DestroySession(struct TTXApplication *app, struct Session *session) {
   if (app->activeSession == session) {
     app->activeSession = app->sessions;
   }
+  if (app->previousSession == session) {
+    app->previousSession = NULL;
+  }
 
   /* Decrement session count BEFORE freeing */
   app->sessionCount--;
@@ -1603,6 +1606,10 @@ VOID TTX_DestroySession(struct TTXApplication *app, struct Session *session) {
   if (session->windowState.screenTitle) {
     TTX_Free(session->windowState.screenTitle);
     session->windowState.screenTitle = NULL;
+  }
+  if (session->statusBarText) {
+    TTX_Free(session->statusBarText);
+    session->statusBarText = NULL;
   }
 
   Printf("[CLEANUP] TTX_DestroySession: freeing session=%lx\n", (ULONG)session);

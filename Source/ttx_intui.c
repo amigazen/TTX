@@ -62,6 +62,7 @@ TTX_IntuiHandleMenuPick(struct TTXApplication *app, struct Session *session,
 	struct MenuItem *item;
 	ULONG menuNum;
 	ULONG itemNum;
+	APTR userData;
 
 	if (!app || !session || !imsg || !session->window)
 		return FALSE;
@@ -90,13 +91,20 @@ TTX_IntuiHandleMenuPick(struct TTXApplication *app, struct Session *session,
 
 		menuNum = 0;
 		itemNum = 0;
-		if (!TTX_IntuiDecodeMenuItem(item, &menuNum, &itemNum))
-			break;
+		userData = GTMENUITEM_USERDATA(item);
+		if (!TTX_IntuiDecodeMenuItem(item, &menuNum, &itemNum)) {
+			/*
+			 * DFN menus store an entry pointer in UserData (not a packed
+			 * menu/item index). Still dispatch via the pointer.
+			 */
+			if (!(session->menuDFNBacking && userData))
+				break;
+		}
 
-		Printf("[INTUI] MENUPICK pick=%04lx -> menu=%lu item=%lu\n",
-			menuCode, menuNum, itemNum);
+		Printf("[INTUI] MENUPICK pick=%04lx -> menu=%lu item=%lu ud=%lx\n",
+			menuCode, menuNum, itemNum, (ULONG)userData);
 
-		if (!TTX_HandleMenuPick(app, session, menuNum, itemNum))
+		if (!TTX_HandleMenuPick(app, session, menuNum, itemNum, userData))
 			break;
 
 		menuCode = (ULONG)item->NextSelect;
@@ -473,7 +481,7 @@ TTX_IntuiHandleMessage(struct TTXApplication *app, struct Session *portSession,
 		break;
 
 	case IDCMP_ACTIVEWINDOW:
-		app->activeSession = session;
+		TTX_NoteSessionActivated(app, session);
 		if (TT_SessionBuffer(session))
 			UpdateCursor(session->window, session);
 		result = TRUE;

@@ -217,6 +217,29 @@ IF section = 'ALL' | section = 'META' THEN DO
   CALL NoteResult 'META GetReadOnly', RESULT
   CALL NoteCmd 'META UpdateView', 'UpdateView'
   CALL NoteCmd 'META ScrollView', 'ScrollView 0 1'
+  CALL NoteCmd 'META SetStatusBar', 'SetStatusBar "TTX status ok"'
+  CALL DoCmd 'SetStatusBar'
+  CALL BlankLine
+END
+
+IF section = 'ALL' | section = 'BLOCK' THEN DO
+  /* GetBlk / GetBlkInfo — re-mark a short region after earlier BLOCK section. */
+  SAY '-- getblk --'
+  CALL GoReportEnd
+  CALL PutLine '--- GETBLK ---'
+  CALL DoCmd 'MoveSOF'
+  CALL DoCmd 'Find "BLOCK_COPY_LINE_A"'
+  CALL DoCmd 'MoveSOL'
+  CALL DoCmd 'MarkBlk'
+  CALL DoCmd 'MoveEOL'
+  CALL DoCmd 'MarkBlk'
+  CALL DoCmd 'GetBlkInfo'
+  SAY '  GetBlkInfo RESULT=['RESULT']'
+  CALL NoteResult 'GETBLK GetBlkInfo', RESULT
+  CALL DoCmd 'GetBlk'
+  SAY '  GetBlk RESULT=['RESULT']'
+  CALL NoteResult 'GETBLK GetBlk', RESULT
+  CALL DoCmd 'MarkBlk Off'
   CALL BlankLine
 END
 

@@ -6,3 +6,4 @@ output.txt
 *.info
 seiso.*
 *.debug
+*.txt

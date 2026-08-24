@@ -1050,6 +1050,9 @@ VOID UpdateCursor(struct Window *window, struct Session *session) {
   session->render.cursorPixelY = screenY;
   session->render.cursorPixelW = cellW;
   session->render.cursorPixelH = lineHeight;
+
+  /* Live L#/C# status on the screen title bar. */
+  TTX_RefreshStatusBar(session);
 }
 
 VOID MouseToCursor(struct Session *session, struct Window *window,

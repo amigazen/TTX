@@ -1,0 +1,12 @@
+# TTX preferences (Latin-1)
+AutoCorrectWordCase=NO
+AutoEraseSelectedBlocks=NO
+AutoIndentNewLines=YES
+SelectWhenDragging=YES
+FreeForm=NO
+LineWrap=YES
+Overstrike=NO
+WordWrap=NO
+RightMargin=80
+TabWidth=8
+ExpandTabs=NO

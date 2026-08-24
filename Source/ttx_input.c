@@ -513,8 +513,6 @@ TTX_InputRawKey(
 
 	if (!app || !session || !TT_SessionBuffer(session))
 		return FALSE;
-	if (!session->document || session->document->state.readOnly)
-		return FALSE;
 
 	buffer = TT_SessionBuffer(session);
 	view = TTX_SessionView(session);
@@ -526,6 +524,16 @@ TTX_InputRawKey(
 		return FALSE;
 
 	if (rawCode & 0x80)
+		return FALSE;
+
+	/*
+	 * DFN KEYBOARD / HOT_KEYS bindings (when a .dfn was loaded for menus)
+	 * override the built-in rawkey handlers below.
+	 */
+	if (TTX_DFNTryKeyCommand(app, session, rawCode, qualifier))
+		return TRUE;
+
+	if (!session->document || session->document->state.readOnly)
 		return FALSE;
 
 	if (rawCode == 0x4F) {

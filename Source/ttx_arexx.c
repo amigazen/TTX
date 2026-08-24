@@ -291,7 +291,7 @@ TTX_ArexxSetResult(struct TTXApplication *app, STRPTR result)
 	app->lastArexxResult[0] = '\0';
 	if (!result)
 		return;
-	for (i = 0; i < 255 && result[i] != '\0'; i++)
+	for (i = 0; i < (TTX_AREXX_RESULT_MAX - 1) && result[i] != '\0'; i++)
 		app->lastArexxResult[i] = result[i];
 	app->lastArexxResult[i] = '\0';
 }
