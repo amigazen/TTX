@@ -48,7 +48,26 @@ struct TRPrefs {
 	ULONG rightMargin;
 	ULONG tabWidth;
 	BOOL expandTabs;
+	/* Automatic Saving */
+	BOOL autoSaveDocuments;
+	BOOL askBeforeAutoSave;
+	ULONG autoSaveMinutes;
 };
+
+/* Snapshot for the non-modal Info window (driver fills; library paints). */
+struct TRInfoStats {
+	STRPTR arexxPortName;
+	ULONG visibleLines;
+	ULONG foldedLines;
+	ULONG totalLines;
+	ULONG characters;
+	ULONG avgCharsPerLine;
+};
+
+/* TR_InfoProcessMsg return codes */
+#define TRINFO_NOTMINE  0
+#define TRINFO_HANDLED  1
+#define TRINFO_CLOSED   2
 
 /****************************************************************************/
 /* C prototypes (clients normally use proto/ttxreqs.h + pragmas) */
@@ -75,6 +94,11 @@ VOID TR_PrefsSet(struct TRPrefs *p);
 BOOL TR_PrefsLoad(struct TRPrefs *p, STRPTR path);
 BOOL TR_PrefsSave(struct TRPrefs *p, STRPTR path);
 BOOL TR_PrefsRequester(struct Window *parent, struct TRPrefs *p);
+
+struct Window *TR_InfoOpen(struct Window *parent, struct TRInfoStats *stats);
+VOID TR_InfoClose(struct Window *infoWin);
+VOID TR_InfoUpdate(struct Window *infoWin, struct TRInfoStats *stats);
+ULONG TR_InfoProcessMsg(struct Window *infoWin, struct IntuiMessage *imsg);
 
 #endif /* !TR_SHARED_LIB */
 

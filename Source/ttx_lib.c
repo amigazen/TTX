@@ -257,8 +257,10 @@ TTX_OpenTurboText(struct TTXApplication *app)
 		SetIoErr(err);
 		return FALSE;
 	}
-	Printf("[INIT] ttxreqs.library=%lx ver=%lu\n",
-		(ULONG)TTXReqsBase, (ULONG)TTXReqsBase->lib_Version);
+	Printf("[INIT] ttxreqs.library=%lx ver=%lu rev=%lu\n",
+		(ULONG)TTXReqsBase,
+		(ULONG)TTXReqsBase->lib_Version,
+		(ULONG)TTXReqsBase->lib_Revision);
 
 	return TRUE;
 }

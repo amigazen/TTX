@@ -45,10 +45,11 @@ TTX_InputRefreshSession(struct Session *session)
 
 	/*
 	 * Typing one character must not RectFill the whole text area or poke
-	 * prop gadgets every time — that is the flicker. Full redraw only when
-	 * scroll position or line count changes (newline, delete-line, etc.).
+	 * prop gadgets every time — that is the flicker. Full redraw when the
+	 * caller asked for it (OpenFile etc.), or when scroll/line count moves.
 	 */
-	if (view->scrollX != oldScrollX || view->scrollY != oldScrollY ||
+	if (session->render.needsFullRedraw ||
+	    view->scrollX != oldScrollX || view->scrollY != oldScrollY ||
 	    buf->lineCount != oldLineCount) {
 		UpdateScrollBars(session);
 		TTX_RequestRedraw(session);

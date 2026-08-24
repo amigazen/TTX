@@ -19,4 +19,8 @@ VOID TR_PrefsSet(struct TRPrefs * p) (a0)
 BOOL TR_PrefsLoad(struct TRPrefs * p, STRPTR path) (a0,a1)
 BOOL TR_PrefsSave(struct TRPrefs * p, STRPTR path) (a0,a1)
 BOOL TR_PrefsRequester(struct Window * parent, struct TRPrefs * p) (a0,a1)
+struct Window * TR_InfoOpen(struct Window * parent, struct TRInfoStats * stats) (a0,a1)
+VOID TR_InfoClose(struct Window * infoWin) (a0)
+VOID TR_InfoUpdate(struct Window * infoWin, struct TRInfoStats * stats) (a0,a1)
+ULONG TR_InfoProcessMsg(struct Window * infoWin, struct IntuiMessage * imsg) (a0,a1)
 ==end

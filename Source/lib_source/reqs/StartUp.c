@@ -76,6 +76,10 @@ APTR FuncTab[] = {
 	(APTR)TR_PrefsLoad,
 	(APTR)TR_PrefsSave,
 	(APTR)TR_PrefsRequester,
+	(APTR)TR_InfoOpen,
+	(APTR)TR_InfoClose,
+	(APTR)TR_InfoUpdate,
+	(APTR)TR_InfoProcessMsg,
 	(APTR)((LONG)-1)
 };
 

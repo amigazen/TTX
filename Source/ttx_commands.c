@@ -24,6 +24,76 @@ static struct TTXFindOptions TTX_LastFindOpts = {
 	FALSE, FALSE, TRUE, FALSE, FALSE
 };
 
+/* Fill Info window stats from the engine buffer / view paint model. */
+static VOID
+TTX_InfoFillStats(struct Session *session, struct TRInfoStats *stats)
+{
+	struct TTTextBuffer *buf;
+	struct TTView *view;
+	ULONG i;
+	ULONG chars;
+
+	if (!stats)
+		return;
+	stats->arexxPortName = NULL;
+	stats->visibleLines = 0;
+	stats->foldedLines = 0;
+	stats->totalLines = 0;
+	stats->characters = 0;
+	stats->avgCharsPerLine = 0;
+	if (!session)
+		return;
+
+	stats->arexxPortName = session->arexxPortName;
+	buf = TT_SessionBuffer(session);
+	view = TTX_SessionView(session);
+	if (!buf)
+		return;
+
+	/*
+	 * Do not call PrepareEngineView here — that races with the text
+	 * paint/scroll path. Use the last prepared paint counts when present.
+	 */
+	stats->totalLines = buf->lineCount;
+	if (view)
+		stats->visibleLines = view->paint.visibleLineCount;
+	else
+		stats->visibleLines = buf->lineCount;
+	if (stats->totalLines > stats->visibleLines)
+		stats->foldedLines = stats->totalLines - stats->visibleLines;
+	else
+		stats->foldedLines = 0;
+
+	chars = 0;
+	if (buf->lines) {
+		for (i = 0; i < buf->lineCount; i++)
+			chars += buf->lines[i].length;
+	}
+	stats->characters = chars;
+	if (stats->totalLines > 0)
+		stats->avgCharsPerLine = chars / stats->totalLines;
+}
+
+VOID
+TTX_InfoCloseSession(struct Session *session)
+{
+	if (!session || !session->infoWindow)
+		return;
+	TTX_InfoClose(session->infoWindow);
+	session->infoWindow = NULL;
+}
+
+VOID
+TTX_InfoRefreshSession(struct Session *session)
+{
+	struct TRInfoStats stats;
+
+	if (!session || !session->infoWindow)
+		return;
+	TTX_InfoFillStats(session, &stats);
+	TTX_InfoUpdate(session->infoWindow, &stats);
+}
+
 /*
  * Menu handlers sometimes allocate args (bookmark numbers). Those must be
  * FreeVec'd. Constant string literals ("10000", "Toggle", â¦) must never be â
@@ -543,6 +613,7 @@ TTX_DispatchCommand(struct TTXApplication *app, struct Session *session, STRPTR 
             if (TT_SessionBuffer(session) && session->window)
             {
                 CalculateMaxScroll(session, session->window);
+                ScrollToCursor(session, session->window);
                 UpdateScrollBars(session);
                 if (!session->displayLock) {
                     RenderText(session->window, session);
@@ -1070,10 +1141,14 @@ BOOL TTX_HandleMenuPick(struct TTXApplication *app, struct Session *session, ULO
     }
     
     if (command) {
-        Printf("[MENU] TTX_HandleMenuPick: command='%s' (dfn=%ld)\n",
-            command, (LONG)fromDFN);
+        Printf("[MENU] TTX_HandleMenuPick: command='%s' args=%lu (dfn=%ld)\n",
+            command, argCount, (LONG)fromDFN);
+        if (argCount > 0 && args[0])
+            Printf("[MENU] TTX_HandleMenuPick: arg0='%s'\n", args[0]);
         result = TTX_HandleCommand(app, session, command, args, argCount);
         TTX_MenuFreeHeapArgs();
+    } else {
+        Printf("[MENU] TTX_HandleMenuPick: FAIL (null command)\n");
     }
     
     return result;
@@ -1754,13 +1829,22 @@ BOOL TTX_Cmd_OpenFile(struct TTXApplication *app, struct Session *session, STRPT
     TTX_UpdateSessionWindowTitle(session);
     TTX_SessionInitCurrentDir(session, session->document->state.fileName);
     
-    /* Reset cursor to top and redraw the full document */
+    /* Reset cursor to top; force props + full client paint (not line-only). */
     if (TT_SessionBuffer(session)) {
         TTX_SessionView(session)->cursorX = 0;
         TTX_SessionView(session)->cursorY = 0;
+        TTX_SessionView(session)->scrollX = 0;
+        TTX_SessionView(session)->scrollY = 0;
     }
     session->render.needsFullRedraw = TRUE;
-    TTX_InputRefreshSession(session);
+    if (session->window && session->window != INVALID_RESOURCE &&
+        TT_SessionBuffer(session)) {
+        CalculateMaxScroll(session, session->window);
+        UpdateScrollBars(session);
+        TTX_RequestRedraw(session);
+    } else {
+        TTX_InputRefreshSession(session);
+    }
     
     if (TT_SessionBuffer(session)) {
         ULONG line0len = 0;
@@ -2611,12 +2695,15 @@ BOOL TTX_Cmd_ActivateWindow(struct TTXApplication *app, struct Session *session,
 
 BOOL TTX_Cmd_CloseRequester(struct TTXApplication *app, struct Session *session, STRPTR *args, ULONG argCount)
 {
-	(void)app;
-	(void)session;
 	(void)args;
 	(void)argCount;
-	/* No persistent requester object yet. */
-	Printf("[CMD] TTX_Cmd_CloseRequester: no-op SUCCESS\n");
+	if (!app || !session)
+		return FALSE;
+	if (session->infoWindow) {
+		TTX_InfoCloseSession(session);
+		TTX_RebuildSignalMask(app);
+	}
+	Printf("[CMD] TTX_Cmd_CloseRequester: SUCCESS\n");
 	return TRUE;
 }
 
@@ -2879,7 +2966,35 @@ BOOL TTX_Cmd_OpenRequester(struct TTXApplication *app, struct Session *session, 
 		return TTX_Cmd_FindChange(app, session, fcArgs, 2);
 	}
 	if (Stricmp(which, "Info") == 0) {
-		return TTX_Cmd_GetFileInfo(app, session, NULL, 0);
+		struct TRInfoStats stats;
+
+		if (!session || !win)
+			return FALSE;
+		/* Info LVOs need ttxreqs rev>=2 (rebuild Libs/ttxreqs.library). */
+		if (!TTXReqsBase || TTXReqsBase->lib_Revision < 2) {
+			Printf("[CMD] TTX_Cmd_OpenRequester: Info FAIL "
+				"(ttxreqs rev %lu; need rebuild Libs/ttxreqs.library)\n",
+				TTXReqsBase ? (ULONG)TTXReqsBase->lib_Revision : 0UL);
+			return FALSE;
+		}
+		if (win && win != INVALID_RESOURCE)
+			TTX_PrepareEngineView(session, win);
+		TTX_InfoFillStats(session, &stats);
+		if (session->infoWindow) {
+			WindowToFront(session->infoWindow);
+			ActivateWindow(session->infoWindow);
+			TTX_InfoUpdate(session->infoWindow, &stats);
+			Printf("[CMD] TTX_Cmd_OpenRequester: Info already open\n");
+			return TRUE;
+		}
+		session->infoWindow = TTX_InfoOpen(win, &stats);
+		if (!session->infoWindow) {
+			Printf("[CMD] TTX_Cmd_OpenRequester: Info FAIL (open)\n");
+			return FALSE;
+		}
+		TTX_RebuildSignalMask(app);
+		Printf("[CMD] TTX_Cmd_OpenRequester: Info SUCCESS\n");
+		return TRUE;
 	}
 	if (Stricmp(which, "Prefs") == 0) {
 		struct TTXPrefs edit;

@@ -33,26 +33,48 @@ TTX_IntuiDecodeMenuItem(struct MenuItem *item, ULONG *outMenu, ULONG *outItem)
 	*outItem = 0;
 
 	userData = (ULONG)GTMENUITEM_USERDATA(item);
+	if (userData == 0)
+		return FALSE;
+
+	/* Builtin Open... sentinel — not a packed index. */
 	if (userData == TTX_MENU_UD_FLAG) {
 		*outMenu = 0;
 		*outItem = 0;
 		return TRUE;
 	}
-	if (userData != 0 && userData < 256UL) {
-		*outMenu = 0;
-		*outItem = userData;
-		return TRUE;
-	}
-	if (userData != 0) {
-		*outMenu = (userData >> 8) & 0xFF;
-		*outItem = userData & 0xFF;
-		return TRUE;
-	}
 
-	return FALSE;
+	/*
+	 * DFN menus store a DFNMenuEntry* in UserData (heap pointer). Those must
+	 * NOT be decoded as (menu<<8)|item — that produced garbage like menu=198.
+	 * Packed builtin userdata fits in 16 bits.
+	 */
+	if (userData >= 0x10000UL)
+		return FALSE;
+
+	*outMenu = (userData >> 8) & 0xFF;
+	*outItem = userData & 0xFF;
+	return TRUE;
 }
 
 /****************************************************************************/
+
+/*
+ * True menu pick codes are never the lone IEQUALIFIER_RELVERIFY bit (0x8000).
+ * MENUNULL is 0xFFFF.
+ */
+static BOOL
+TTX_IntuiIsPlausibleMenuPick(ULONG pick)
+{
+	if (pick == 0 || pick == (ULONG)MENUNULL || pick == 0xFFFFUL)
+		return FALSE;
+	if (pick == 0x8000UL)
+		return FALSE;
+	if (MENUNUM(pick) > 15)
+		return FALSE;
+	if (ITEMNUM(pick) > 63)
+		return FALSE;
+	return TRUE;
+}
 
 static BOOL
 TTX_IntuiHandleMenuPick(struct TTXApplication *app, struct Session *session,
@@ -68,23 +90,29 @@ TTX_IntuiHandleMenuPick(struct TTXApplication *app, struct Session *session,
 		return FALSE;
 
 	/*
-	 * New Look menus: Code is often 0; the pick index is in Qualifier
-	 * (e.g. 0xF820). Never call ItemAddress(strip, 0) — that is wrong.
+	 * Prefer Code (standard MENUPICK). Some builds deliver key ASCII in
+	 * Qualifier with Code==0; do not treat Qualifier as a pick unless it
+	 * looks like a real menu number — bare 0x8000 is IEQUALIFIER_RELVERIFY.
 	 */
 	menuCode = (ULONG)(UWORD)imsg->Code;
-	if (menuCode == 0)
-		menuCode = (ULONG)imsg->Qualifier;
+	if (!TTX_IntuiIsPlausibleMenuPick(menuCode)) {
+		ULONG q;
 
-	Printf("[INTUI] MENUPICK code=%04x qual=%04x -> pick=%04lx\n",
-		(unsigned int)imsg->Code, (unsigned int)imsg->Qualifier,
+		q = (ULONG)(UWORD)imsg->Qualifier;
+		if (TTX_IntuiIsPlausibleMenuPick(q))
+			menuCode = q;
+	}
+
+	Printf("[INTUI] MENUPICK code=%04lx qual=%04lx -> pick=%04lx\n",
+		(ULONG)(UWORD)imsg->Code, (ULONG)(UWORD)imsg->Qualifier,
 		menuCode);
 
-	if (menuCode == MENUNULL || menuCode == 0xFFFF) {
+	if (!TTX_IntuiIsPlausibleMenuPick(menuCode)) {
 		TTX_ResetMenuStrip(session);
 		return TRUE;
 	}
 
-	while (menuCode != MENUNULL && menuCode != 0xFFFF) {
+	while (TTX_IntuiIsPlausibleMenuPick(menuCode)) {
 		item = ItemAddress(session->window->MenuStrip, (UWORD)menuCode);
 		if (!item)
 			break;
@@ -335,10 +363,20 @@ TTX_IntuiHandleMessage(struct TTXApplication *app, struct Session *portSession,
 
 	case IDCMP_GADGETUP:
 		gadgetID = (ULONG)imsg->Code;
-		if (gadgetID == 0)
-			gadgetID = (ULONG)imsg->Qualifier;
 		if (gadgetID == 0 && imsg->IAddress)
 			GetAttr(GA_ID, (Object *)imsg->IAddress, &gadgetID);
+		/*
+		 * Qualifier 0x8000 is IEQUALIFIER_RELVERIFY, not a gadget id.
+		 * Prefer IAddress GA_ID above; only fall back to Qualifier when it
+		 * looks like a real GID.
+		 */
+		if (gadgetID == 0) {
+			ULONG q;
+
+			q = (ULONG)(UWORD)imsg->Qualifier;
+			if (q != 0 && q != 0x8000UL)
+				gadgetID = q;
+		}
 		if (TTX_BoopsiHandleScrollGadgetUp(session, gadgetID)) {
 			TTX_IntuiRefreshSession(session);
 			ActivateWindow(session->window);
@@ -350,8 +388,15 @@ TTX_IntuiHandleMessage(struct TTXApplication *app, struct Session *portSession,
 		if (session->scroll.suppressIcmp)
 			break;
 		gadgetID = (ULONG)imsg->Code;
-		if (gadgetID == 0)
-			gadgetID = (ULONG)imsg->Qualifier;
+		if (gadgetID == 0 && imsg->IAddress)
+			GetAttr(GA_ID, (Object *)imsg->IAddress, &gadgetID);
+		if (gadgetID == 0) {
+			ULONG q;
+
+			q = (ULONG)(UWORD)imsg->Qualifier;
+			if (q != 0 && q != 0x8000UL)
+				gadgetID = q;
+		}
 		if (TTX_BoopsiHandleIdcmpUpdate(session, gadgetID))
 			TTX_IntuiRedrawText(session);
 		result = TRUE;
@@ -514,6 +559,8 @@ TTX_IntuiRebuildSignalMask(struct TTXApplication *app)
 		if (session->window && session->window != INVALID_RESOURCE &&
 		    session->window->UserPort)
 			app->sigmask |= (1UL << session->window->UserPort->mp_SigBit);
+		if (session->infoWindow && session->infoWindow->UserPort)
+			app->sigmask |= (1UL << session->infoWindow->UserPort->mp_SigBit);
 		session = session->next;
 	}
 }
